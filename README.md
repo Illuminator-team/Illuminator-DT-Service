@@ -1,5 +1,7 @@
 # RDP Tutorial
 
+Trying to integrate an API through traeffik for RDP with the Illuminator.
+
 ## About
 
 This repository provides the source code for a step-by-step tutorial for the [Rapid Deployment Platform](https://ait-rdp.github.io/).
