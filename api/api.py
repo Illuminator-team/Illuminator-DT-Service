@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 app = FastAPI()
@@ -9,7 +9,7 @@ def root():
 
 @app.get("/wfs")
 def get_lamp_feature():
-    feature = {
+    return {
         "type": "FeatureCollection",
         "features": [
             {
@@ -25,4 +25,13 @@ def get_lamp_feature():
             }
         ]
     }
-    return JSONResponse(content=feature)
+
+@app.middleware("http")
+async def catch_all_404(request: Request, call_next):
+    response = await call_next(request)
+    if response.status_code == 404:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "FastAPI received the request, but no route matched."}
+        )
+    return response
