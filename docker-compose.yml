@@ -187,6 +187,19 @@ services:
       - "traefik.http.routers.geoserver.tls=true"
       - "traefik.http.routers.geoserver.service=service-geoserver"
       - "traefik.http.services.service-geoserver.loadbalancer.server.port=8080"
+  
+  ## --------------------------------------------------
+  ## Pushes layer to  GeoServer through the same network.
+  ## --------------------------------------------------
+  layer-publisher:
+    build: ./layer-publisher
+    depends_on:
+      - geo
+    networks:
+      - default
+    volumes:
+      - ./geo:/opt/geoserver/data_dir
+
 
 volumes:
   redis-data:
