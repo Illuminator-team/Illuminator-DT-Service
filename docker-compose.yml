@@ -168,6 +168,26 @@ services:
     depends_on:
       - reverse-proxy
 
+  ## --------------------------------------------------
+  ## Setup GeoServer API through the reverse proxy.
+  ## Accessible at: http://localhost/geoserver and https://localhost/geoserver
+  ## --------------------------------------------------
+  geo:
+    image: kartoza/geoserver:latest
+    environment:
+      - GEOSERVER_ADMIN_USER=admin # TODO: replace later
+      - GEOSERVER_ADMIN_PASSWORD=geoserver # TODO: replace later
+    volumes:
+      - ./geo:/opt/geoserver/data_dir  # optional: persistent config/data
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.geoserver.rule=Host(`localhost`) && PathPrefix(`/geoserver`)"
+      - "traefik.http.routers.geoserver.entrypoints=web,websecure"
+      - "traefik.http.routers.geoserver.tls=true"
+      - "traefik.http.routers.geoserver.service=service-geoserver"
+      - "traefik.http.services.service-geoserver.loadbalancer.server.port=8080"
+
 volumes:
   redis-data:
   timescale-data:
