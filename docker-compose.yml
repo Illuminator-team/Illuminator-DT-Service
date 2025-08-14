@@ -24,6 +24,19 @@ services:
       - redis
     restart: unless-stopped
 
+  # ## ----------------------------------------------------------
+  # ## Use PostGIS for spatial data storage and processing.
+  # ## ----------------------------------------------------------
+  # spatial-db:
+  #   image: postgis/postgis:15-3.4  # or any version you prefer
+  #   environment:
+  #     POSTGRES_USER: postgres     #TODO: Change these
+  #     POSTGRES_PASSWORD: postgres #TODO: Change these
+  #     POSTGRES_DB: spatial_data
+  #   volumes:
+  #     - spatial-data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
   ## ----------------------------------------------------------
   ## Use TimescaleDB for permanent storage of time series data.
   ## ----------------------------------------------------------
@@ -187,7 +200,18 @@ services:
       - "traefik.http.routers.geoserver.tls=true"
       - "traefik.http.routers.geoserver.service=service-geoserver"
       - "traefik.http.services.service-geoserver.loadbalancer.server.port=8080"
-  
+  ## --------------------------------------------------
+  ## Publishes GeoJSON files to GeoServer.
+  ## --------------------------------------------------
+  geojson-loader:
+    image: curlimages/curl
+    depends_on:
+      - geo
+    entrypoint: ["sh", "-c"]
+    command: ["/scripts/publish-geojson.sh"]
+    volumes:
+      - ./scripts:/scripts
+
   ## --------------------------------------------------
   ## Pushes layer to  GeoServer through the same network.
   ## --------------------------------------------------

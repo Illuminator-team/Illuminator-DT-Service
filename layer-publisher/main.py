@@ -1,68 +1,57 @@
-import requests
-import json
-import time
+import os, json, time, requests, sys
 
-GEOSERVER_URL = "http://geo:8080/geoserver"
-REST = f"{GEOSERVER_URL}/rest"
+# GeoServer config
+REST = "http://geo:8080/geoserver/rest" # REST API endpoint, we don't use localhost because we are accessing it from the internal container network
 AUTH = ("admin", "geoserver")
+WS = "rdp"
+STORE = "generation_data"
+NAME = "solar_panel_data"
+FNAME = f"{NAME}.json"
+DATA_DIR = "/opt/geoserver/data_dir/data"  # Mounted volume from host
 
-WORKSPACE = "rdp"
-DATASTORE = "sensor_data"
-LAYER_NAME = "solar_panel_data"
-FILENAME = "solar_panel_data.json"
+# Logging helper that flushes immediately
+def log(*args):
+    print("Args Printer Says:", *args)
+    sys.stdout.flush()
 
-def wait_for_geoserver():
-    print("Waiting for GeoServer to become available...")
-    for i in range(30):
-        try:
-            r = requests.get(f"{REST}/about/version", auth=AUTH)
-            if r.ok:
-                print("GeoServer is ready!")
-                return
-            else:
-                print(f"Still waiting... Status: {r.status_code}")
-        except Exception as e:
-            print(f"⚠️  Attempt {i+1}: GeoServer not reachable ({e})")
-        time.sleep(1)
-    raise RuntimeError("GeoServer did not become ready after 30 seconds.")
+def ensure_workspace():
+    log(f"Creating workspace '{WS}'...")
+    r = requests.post(f"{REST}/workspaces",
+                      auth=AUTH, headers={"Content-Type": "text/xml"},
+                      data=f"<workspace><name>{WS}</name></workspace>")
+    log(f"Workspace status: {r.status_code}")
 
-def ensure_workspace_and_datastore():
-    print("🔧 Ensuring workspace and datastore exist...")
-    r = requests.post(
-        f"{REST}/workspaces",
-        auth=AUTH,
-        headers={"Content-Type": "text/xml"},
-        data=f"<workspace><name>{WORKSPACE}</name></workspace>"
-    )
-    if r.status_code not in (200, 201):
-        print(f"Workspace creation: {r.status_code} {r.text}")
-
+def ensure_store():
+    log(f"Creating GeoJSON store '{STORE}'...")
     ds_xml = f"""
     <dataStore>
-      <name>{DATASTORE}</name>
+      <name>{STORE}</name>
       <connectionParameters>
-        <entry key="url">file:data/{FILENAME}</entry>
+        <entry key="file">file:data/{FNAME}</entry>
+        <entry key="namespace">{WS}</entry>
       </connectionParameters>
-    </dataStore>
-    """
-    r = requests.post(
-        f"{REST}/workspaces/{WORKSPACE}/datastores",
-        auth=AUTH,
-        headers={"Content-Type": "text/xml"},
-        data=ds_xml
-    )
-    if r.status_code not in (200, 201):
-        print(f"Datastore creation: {r.status_code} {r.text}")
+    </dataStore>"""
+    r = requests.post(f"{REST}/workspaces/{WS}/datastores",
+                      auth=AUTH, headers={"Content-Type": "text/xml"}, data=ds_xml)
+    log(f"Store status: {r.status_code}")
+    log(r.text)
 
-import os
+def ensure_layer():
+    log(f"Creating layer '{NAME}'...")
+    ft_xml = f"""
+    <featureType>
+      <name>{NAME}</name>
+      <nativeName>{NAME}</nativeName>
+      <srs>EPSG:4326</srs>
+    </featureType>"""
+    r = requests.post(f"{REST}/workspaces/{WS}/datastores/{STORE}/featuretypes",
+                      auth=AUTH, headers={"Content-Type": "text/xml"}, data=ft_xml)
+    log(f"Layer status: {r.status_code}")
+    log(r.text)
 
-def update_layer(value: int):
-    local_dir = "/opt/geoserver/data_dir/data"  # this is inside the mounted volume
-    os.makedirs(local_dir, exist_ok=True)
-
-    local_path = os.path.join(local_dir, FILENAME)
-
-    # Construct the GeoJSON
+def write_geojson(value: int):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    path = os.path.join(DATA_DIR, FNAME)
     geojson = {
         "type": "FeatureCollection",
         "features": [{
@@ -76,44 +65,42 @@ def update_layer(value: int):
             }
         }]
     }
-
-    with open(local_path, "w") as f:
+    with open(path, "w") as f:
         json.dump(geojson, f)
+    log(f"✔ Wrote GeoJSON: {path} with value {value}")
 
-    print(f"GeoJSON file written to {local_path}")
+def reload_geoserver():
+    log("Reloading GeoServer catalog...")
+    r = requests.post(f"{REST}/reload", auth=AUTH)
+    log(f"Reload status: {r.status_code}")
 
-    # Instruct GeoServer to (re)read and publish
-    upload_url = (
-        f"{REST}/workspaces/{WORKSPACE}/datastores/{DATASTORE}/external.geojson?configure=all"
-    )
+def wait_for_geoserver(timeout=60):
+    log("--------- Waiting for GeoServer to be ready...")
+    for i in range(timeout):
+        try:
+            r = requests.get(f"{REST}/about/version", auth=AUTH)
+            if r.ok:
+                log("GeoServer is ready!")
+                return
+            else:
+                log(f"Still waiting... Status: {r.status_code}")
+        except Exception as e:
+            log(f">>>>>>>>> Attempt {i + 1}: {e}")
+        time.sleep(1)
+    raise RuntimeError("XXXXXXXXXXX GeoServer did not become ready in time.")
 
-    external_path = f"file:data/{FILENAME}"  # relative to GeoServer's data_dir
-    
-    r = requests.put(
-        upload_url,
-        auth=AUTH,
-        headers={"Content-Type": "text/plain"},
-        data=external_path
-    )
-
-    print(os.listdir(local_dir))
-
-
-    if r.status_code in (200, 201):
-        print(f"[{value}] GeoServer layer updated.")
-    else:
-        print(f"Upload failed ({r.status_code}): {r.text}")
-
-
-# ------------------ MAIN LOOP ------------------
-value = 12345
-
+# ---------- one-time init ----------
 wait_for_geoserver()
-update_layer(value)
-ensure_workspace_and_datastore()
+write_geojson(12345)
+ensure_workspace()
+ensure_store()
+ensure_layer()
+reload_geoserver()
 
+# ---------- continuous updates ----------
+value = 12346
 while True:
-    update_layer(value)
+    write_geojson(value)
+    reload_geoserver()
     value += 1
     time.sleep(10)
-
