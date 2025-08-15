@@ -1,0 +1,41 @@
+<featureType>
+  <id>FeatureTypeInfoImpl--7dc9c0e8:198a8de0e32:-7fff</id>
+  <name>solar_panel_layer</name>
+  <nativeName>solar_panel_layer</nativeName>
+  <namespace>
+    <id>NamespaceInfoImpl--78a0c63c:197a1e71ba6:-7fff</id>
+  </namespace>
+  <title>solar_panel_layer</title>
+  <keywords>
+    <string>features</string>
+    <string>solar_panel_layer</string>
+  </keywords>
+  <srs>EPSG:4326</srs>
+  <nativeBoundingBox>
+    <minx>4.373394941750751</minx>
+    <maxx>4.373594941750751</maxx>
+    <miny>52.00208976157107</miny>
+    <maxy>52.00228976157108</maxy>
+    <crs>EPSG:4326</crs>
+  </nativeBoundingBox>
+  <latLonBoundingBox>
+    <minx>4.373394941750751</minx>
+    <maxx>4.373594941750751</maxx>
+    <miny>52.00208976157107</miny>
+    <maxy>52.00228976157108</maxy>
+    <crs>EPSG:4326</crs>
+  </latLonBoundingBox>
+  <projectionPolicy>FORCE_DECLARED</projectionPolicy>
+  <enabled>true</enabled>
+  <store class="dataStore">
+    <id>DataStoreInfoImpl--7dc9c0e8:198a8de0e32:-8000</id>
+  </store>
+  <serviceConfiguration>false</serviceConfiguration>
+  <maxFeatures>0</maxFeatures>
+  <numDecimals>0</numDecimals>
+  <padWithZeros>false</padWithZeros>
+  <forcedDecimal>false</forcedDecimal>
+  <overridingServiceSRS>false</overridingServiceSRS>
+  <skipNumberMatched>false</skipNumberMatched>
+  <circularArcPresent>false</circularArcPresent>
+</featureType>

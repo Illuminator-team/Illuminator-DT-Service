@@ -41,7 +41,7 @@ services:
   ## Use TimescaleDB for permanent storage of time series data.
   ## ----------------------------------------------------------
   timescale:
-    image: "timescale/timescaledb:latest-pg16"
+    image: "timescale/timescaledb-ha:pg14-latest" # Use this version for GIS support
     environment:
       POSTGRES_USER: ${POSTGRES_ADMIN_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
@@ -188,6 +188,7 @@ services:
   geo:
     image: kartoza/geoserver:latest
     environment:
+      - STABLE_EXTENSIONS=postgis-plugin
       - GEOSERVER_ADMIN_USER=admin # TODO: replace later
       - GEOSERVER_ADMIN_PASSWORD=geoserver # TODO: replace later
     volumes:

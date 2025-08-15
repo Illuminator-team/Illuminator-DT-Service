@@ -1,19 +1,57 @@
-import os, json, time, requests, sys
+# Updated main.py for PostGIS integration
+import os, time, requests, sys, psycopg2
 
 # GeoServer config
-REST = "http://geo:8080/geoserver/rest" # REST API endpoint, we don't use localhost because we are accessing it from the internal container network
+REST = "http://geo:8080/geoserver/rest"
 AUTH = ("admin", "geoserver")
 WS = "rdp"
-STORE = "generation_data"
-NAME = "solar_panel_data"
-FNAME = f"{NAME}.json"
-DATA_DIR = "/opt/geoserver/data_dir/data"  # Mounted volume from host
+STORE = "pv_generation_data"
+NAME = "solar_panel_layer"
+DB_CONN = {
+    "host": "timescale",
+    "port": 5432,
+    "dbname": "rdp_db",
+    "user": "postgres",
+    "password": "iGj88603I4bd"
+}
 
-# Logging helper that flushes immediately
+# Logging helper
+
 def log(*args):
     print("Args Printer Says:", *args)
     sys.stdout.flush()
 
+def write_to_postgis(value: int):
+    conn = psycopg2.connect(**DB_CONN)
+    cur = conn.cursor()
+
+    cur.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS solar_panel_layer (
+            id SERIAL PRIMARY KEY,
+            value INTEGER,
+            geom GEOMETRY(Point, 4326)
+        );
+    """)
+
+    # Insert once or update later
+    lon, lat = 4.3735, 52.0022
+
+    cur.execute("""
+        INSERT INTO solar_panel_layer (id, value, geom)
+        VALUES (1, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))
+        ON CONFLICT (id)
+        DO UPDATE SET value = EXCLUDED.value;
+    """, (value, lon, lat))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    log(f" Updated value {value} into PostGIS")
+
+
+# GeoServer setup
 def ensure_workspace():
     log(f"Creating workspace '{WS}'...")
     r = requests.post(f"{REST}/workspaces",
@@ -22,19 +60,27 @@ def ensure_workspace():
     log(f"Workspace status: {r.status_code}")
 
 def ensure_store():
-    log(f"Creating GeoJSON store '{STORE}'...")
+    log(f"Creating PostGIS store '{STORE}'...")
     ds_xml = f"""
     <dataStore>
       <name>{STORE}</name>
       <connectionParameters>
-        <entry key="file">file:data/{FNAME}</entry>
-        <entry key="namespace">{WS}</entry>
+        <entry key="host">{DB_CONN['host']}</entry>
+        <entry key="port">{DB_CONN['port']}</entry>
+        <entry key="database">{DB_CONN['dbname']}</entry>
+        <entry key="user">{DB_CONN['user']}</entry>
+        <entry key="passwd">{DB_CONN['password']}</entry>
+        <entry key="dbtype">postgis</entry>
+        <entry key="namespace">http://{WS}</entry>
       </connectionParameters>
     </dataStore>"""
+    
     r = requests.post(f"{REST}/workspaces/{WS}/datastores",
                       auth=AUTH, headers={"Content-Type": "text/xml"}, data=ds_xml)
     log(f"Store status: {r.status_code}")
     log(r.text)
+
+
 
 def ensure_layer():
     log(f"Creating layer '{NAME}'...")
@@ -49,32 +95,12 @@ def ensure_layer():
     log(f"Layer status: {r.status_code}")
     log(r.text)
 
-def write_geojson(value: int):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    path = os.path.join(DATA_DIR, FNAME)
-    geojson = {
-        "type": "FeatureCollection",
-        "features": [{
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [4.373494941750751, 52.002189761571074]
-            },
-            "properties": {
-                "value": value
-            }
-        }]
-    }
-    with open(path, "w") as f:
-        json.dump(geojson, f)
-    log(f"✔ Wrote GeoJSON: {path} with value {value}")
-
 def reload_geoserver():
     log("Reloading GeoServer catalog...")
     r = requests.post(f"{REST}/reload", auth=AUTH)
     log(f"Reload status: {r.status_code}")
 
-def wait_for_geoserver(timeout=60):
+def wait_for_geoserver(timeout=100):
     log("--------- Waiting for GeoServer to be ready...")
     for i in range(timeout):
         try:
@@ -91,16 +117,16 @@ def wait_for_geoserver(timeout=60):
 
 # ---------- one-time init ----------
 wait_for_geoserver()
-write_geojson(12345)
 ensure_workspace()
 ensure_store()
+write_to_postgis(12345)
 ensure_layer()
 reload_geoserver()
 
 # ---------- continuous updates ----------
 value = 12346
 while True:
-    write_geojson(value)
+    write_to_postgis(value)
     reload_geoserver()
     value += 1
     time.sleep(10)

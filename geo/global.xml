@@ -60,12 +60,11 @@
     <queueType>UNBOUNDED</queueType>
     <imageIOCacheThreshold>10240</imageIOCacheThreshold>
   </coverageAccess>
-  <updateSequence>14497</updateSequence>
+  <updateSequence>20334</updateSequence>
   <featureTypeCacheSize>0</featureTypeCacheSize>
   <globalServices>true</globalServices>
   <xmlPostRequestLogBufferSize>1024</xmlPostRequestLogBufferSize>
   <xmlExternalEntitiesEnabled>false</xmlExternalEntitiesEnabled>
-  <trailingSlashMatch>true</trailingSlashMatch>
   <webUIMode>DEFAULT</webUIMode>
   <allowStoredQueriesPerWorkspace>true</allowStoredQueriesPerWorkspace>
 </global>
