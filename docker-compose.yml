@@ -24,19 +24,6 @@ services:
       - redis
     restart: unless-stopped
 
-  # ## ----------------------------------------------------------
-  # ## Use PostGIS for spatial data storage and processing.
-  # ## ----------------------------------------------------------
-  # spatial-db:
-  #   image: postgis/postgis:15-3.4  # or any version you prefer
-  #   environment:
-  #     POSTGRES_USER: postgres     #TODO: Change these
-  #     POSTGRES_PASSWORD: postgres #TODO: Change these
-  #     POSTGRES_DB: spatial_data
-  #   volumes:
-  #     - spatial-data:/var/lib/postgresql/data
-  #   restart: unless-stopped
-
   ## ----------------------------------------------------------
   ## Use TimescaleDB for permanent storage of time series data.
   ## ----------------------------------------------------------
@@ -85,6 +72,9 @@ services:
       db-scheme:
         condition: service_completed_successfully
     restart: unless-stopped
+    ## Expose ports only for debugging.
+    # ports:
+    #  - "5432:5432"
 
   ## ----------------------------------------------------------
   ## Use grafana for visualization of data in the timescale DB.
@@ -164,22 +154,22 @@ services:
       - "--api.insecure=true"  # enable Traefik dashboard
       - "--api.dashboard=true" # explicitly enable dashboard (safe to add)
 
-  ## --------------------------------------------------
-  ## Expose the WFS API through the reverse proxy.
-  ## Accessible at: http://localhost/wfs and https://localhost/wfs
-  ## --------------------------------------------------
-  wfs-api:
-    build: ./api
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.wfs.rule=HostRegexp(`localhost`) && (Path(`/wfs`) || PathPrefix(`/wfs/`))"
-      - "traefik.http.routers.wfs.entrypoints=web,websecure"
-      - "traefik.http.routers.wfs.tls=true"
-      - "traefik.http.routers.wfs.service=service-wfs"
-      - "traefik.http.services.service-wfs.loadbalancer.server.port=8000"
+  # ## -------------------------------------------------- 
+  # ## Expose the WFS API through the reverse proxy. This container is for static publishing a static WFS file.
+  # ## Accessible at: http://localhost/wfs and https://localhost/wfs
+  # ## --------------------------------------------------
+  # wfs-api:
+  #   build: ./api
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.wfs.rule=HostRegexp(`localhost`) && (Path(`/wfs`) || PathPrefix(`/wfs/`))"
+  #     - "traefik.http.routers.wfs.entrypoints=web,websecure"
+  #     - "traefik.http.routers.wfs.tls=true"
+  #     - "traefik.http.routers.wfs.service=service-wfs"
+  #     - "traefik.http.services.service-wfs.loadbalancer.server.port=8000"
 
-    depends_on:
-      - reverse-proxy
+  #   depends_on:
+  #     - reverse-proxy
 
   ## --------------------------------------------------
   ## Setup GeoServer API through the reverse proxy.
@@ -201,6 +191,7 @@ services:
       - "traefik.http.routers.geoserver.tls=true"
       - "traefik.http.routers.geoserver.service=service-geoserver"
       - "traefik.http.services.service-geoserver.loadbalancer.server.port=8080"
+  
   ## --------------------------------------------------
   ## Publishes GeoJSON files to GeoServer.
   ## --------------------------------------------------

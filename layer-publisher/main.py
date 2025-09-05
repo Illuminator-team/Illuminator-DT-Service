@@ -7,6 +7,8 @@ AUTH = ("admin", "geoserver")
 WS = "rdp"
 STORE = "pv_generation_data"
 NAME = "solar_panel_layer"
+
+# DB config
 DB_CONN = {
     "host": "timescale",
     "port": 5432,
