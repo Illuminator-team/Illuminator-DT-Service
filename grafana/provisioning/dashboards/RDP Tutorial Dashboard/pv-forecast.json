@@ -110,7 +110,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT obs_time AS \"time\", value AS \"PV power output\" FROM public.forecasts WHERE dp_id = (SELECT id FROM data_points WHERE name = 'p_forecast' AND data_provider = 'PVSystemSim') AND FLOOR(EXTRACT(EPOCH FROM fc_time)) = EXTRACT(EPOCH FROM TIMESTAMP '$fc_time')",
+          "rawSql": "SELECT obs_time AS \"time\", value AS \"PV power output\" FROM public.forecasts WHERE dp_id = (SELECT id FROM data_points WHERE name = 'p_forecast' AND data_provider = 'Illuminator') AND FLOOR(EXTRACT(EPOCH FROM fc_time)) = EXTRACT(EPOCH FROM TIMESTAMP '$fc_time')",
           "refId": "A",
           "sql": {
             "columns": [

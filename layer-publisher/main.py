@@ -1,4 +1,4 @@
-# Updated main.py for PostGIS integration
+# Updated main.py for PostGIS integration using latest p_forecast
 import os, time, requests, sys, psycopg2
 
 # GeoServer config
@@ -18,12 +18,41 @@ DB_CONN = {
 }
 
 # Logging helper
-
 def log(*args):
     print("Args Printer Says:", *args)
     sys.stdout.flush()
 
+def get_latest_p_forecast():
+    """Fetch the latest p_forecast value from TimescaleDB for Illuminator"""
+    conn = psycopg2.connect(**DB_CONN)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT value
+        FROM public.forecasts
+        WHERE dp_id = (
+            SELECT id 
+            FROM data_points 
+            WHERE name = 'p_forecast' AND data_provider = 'Illuminator'
+        )
+        ORDER BY fc_time DESC
+        LIMIT 1;
+    """)
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if row:
+        log("Got the value!")
+        return row[0]
+    else:
+        log("No p_forecast data found!")
+        return None
+
 def write_to_postgis(value: int):
+    """Insert or update the latest forecast value into the PostGIS layer"""
+    if value is None:
+        log("Skipping PostGIS update: no value provided")
+        return
+
     conn = psycopg2.connect(**DB_CONN)
     cur = conn.cursor()
 
@@ -32,12 +61,12 @@ def write_to_postgis(value: int):
     cur.execute("""
         CREATE TABLE IF NOT EXISTS solar_panel_layer (
             id SERIAL PRIMARY KEY,
-            value INTEGER,
+            value FLOAT,
             geom GEOMETRY(Point, 4326)
         );
     """)
 
-    # Insert once or update later
+    # Fixed location of the solar panel
     lon, lat = 4.3735, 52.0022
 
     cur.execute("""
@@ -50,8 +79,7 @@ def write_to_postgis(value: int):
     conn.commit()
     cur.close()
     conn.close()
-    log(f" Updated value {value} into PostGIS")
-
+    log(f"Updated PostGIS with latest value: {value}")
 
 # GeoServer setup
 def ensure_workspace():
@@ -81,8 +109,6 @@ def ensure_store():
                       auth=AUTH, headers={"Content-Type": "text/xml"}, data=ds_xml)
     log(f"Store status: {r.status_code}")
     log(r.text)
-
-
 
 def ensure_layer():
     log(f"Creating layer '{NAME}'...")
@@ -115,20 +141,19 @@ def wait_for_geoserver(timeout=100):
         except Exception as e:
             log(f">>>>>>>>> Attempt {i + 1}: {e}")
         time.sleep(1)
-    raise RuntimeError("XXXXXXXXXXX GeoServer did not become ready in time.")
+    raise RuntimeError("GeoServer did not become ready in time.")
 
 # ---------- one-time init ----------
 wait_for_geoserver()
 ensure_workspace()
 ensure_store()
-write_to_postgis(12345)
+write_to_postgis(get_latest_p_forecast())
 ensure_layer()
 reload_geoserver()
 
 # ---------- continuous updates ----------
-value = 12346
 while True:
-    write_to_postgis(value)
+    latest_value = get_latest_p_forecast()
+    write_to_postgis(latest_value)
     reload_geoserver()
-    value += 1
     time.sleep(10)
