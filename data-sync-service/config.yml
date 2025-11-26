@@ -57,6 +57,33 @@ x-channels:
         obs_time: "ts_forecast"
         value: "value"
   ## ---------------------------------------------------------------------------
+  ## Template for forecasting data formats from Illuminator sim
+  ## ---------------------------------------------------------------------------
+  illuminator-forecast:
+    encoding: &illuminator-forecast-encoding
+      _default: "JSON"
+      forecast_time: "JSONDatetimeString"
+      ts_forecast: "JSONListWithDatetimeStrings"
+    steps: &illuminator-forecast-steps
+      - type: "SplitByKey"
+        always include: ["ts_forecast", "data_provider", "forecast_time", "location"]
+        destination key: "value"
+        source output key: "observation_type"
+      - type: "CachedSQLQuery"
+        cache keys: ["observation_type", "data_provider", "location"]
+        single value: True
+        query: "SELECT get_or_create_data_point_id(:observation_type, NULL, :location, :data_provider) AS dp_id;"
+      - type: "UnpackArrayValues"
+        unpack keys: ["ts_forecast", "value"]
+    data sink: &illuminator-forecast-sink
+      table: "forecasts"
+      update duplicate values: True
+      columns:
+        dp_id: "dp_id"
+        fc_time: "forecast_time"
+        obs_time: "ts_forecast"
+        value: "value"
+  ## ---------------------------------------------------------------------------
   ## Template for measurement data formats from api.energy-charts.info
   ## ---------------------------------------------------------------------------
   energy-charts:
@@ -105,6 +132,16 @@ channels:
     encoding: *pv-forecast-encoding
     steps: *pv-forecast-steps
     data sink: *pv-forecast-sink
+  ## ---------------------------------------------------------------------------
+  ## illuminator forecasting data
+  ## ---------------------------------------------------------------------------
+  illuminator.forecasts.WIEN-HOHE_WARTE:
+    trigger:
+      stream id: "illuminator.forecasts.WIEN-HOHE_WARTE"
+      trim length: 100
+    encoding: *illuminator-forecast-encoding
+    steps: *illuminator-forecast-steps
+    data sink: *illuminator-forecast-sink
   ## ---------------------------------------------------------------------------
   ## Frequency measurement data
   ## ---------------------------------------------------------------------------

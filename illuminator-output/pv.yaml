@@ -1,0 +1,69 @@
+scenario:
+  name: "Tutorial 1" # in mosaik so called world
+  start_time: '2012-06-01 00:00:00' # ISO 8601 start time of the simulation
+  #end_time: '2012-01-01 01:00:00' # duration in seconds 
+  end_time: '2012-06-01 23:45:00' # duration in seconds 
+  time_resolution: 3600 # time step in seconds (optional). Defaults to 15 minutes (900 s)
+
+models: 
+- name: CSV_pv
+  type: CSV
+  parameters:
+    file_path: '/app/output/solar_data_illuminator.csv'
+    delimiter: ','
+    date_format: 'YYYY-MM-DD HH:mm:ss'
+
+# - name: CSV_weather
+#   type: CSV
+#   parameters:
+#     file_path: 'illuminator-output/weather_data.csv' # path to the CSV file
+#     delimiter: ','
+#     date_format: "YYYY-MM-DDTHH:mm:ssZZ"
+
+- name: PV1
+  type: PV # models can reuse the same type
+  parameters:
+    m_area: 1.26  # m2
+    NOCT: 44  # Celcius
+    m_efficiency_stc: 0.198
+    G_NOCT: 800  # W/m2
+    P_STC: 250  # W
+    peak_power: 600  # W
+    m_tilt: 14  # degrees
+    m_az: 180  # degrees
+    cap: 500  # W
+    output_type: 'power'
+  inputs: 
+    G_Gh: null 
+    G_Dh: null
+    G_Bn: null
+    Ta: null
+    hs: null
+    FF: null
+    Az: null
+  outputs:
+    pv_gen:
+    g_aoi:
+
+
+connections:
+
+- from: CSV_pv.G_Gh # start model, pattern: model_name.output_name/input_name
+  to: PV1.G_Gh # end model
+- from: CSV_pv.G_Dh
+  to: PV1.G_Dh
+- from: CSV_pv.G_Bn
+  to: PV1.G_Bn
+- from: CSV_pv.Ta
+  to: PV1.Ta
+- from: CSV_pv.hs
+  to: PV1.hs
+- from: CSV_pv.FF
+  to: PV1.FF
+- from: CSV_pv.Az
+  to: PV1.Az
+
+monitor:
+  file: 'illuminator_output.csv'
+  items:
+    - PV1.pv_gen

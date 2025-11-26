@@ -129,6 +129,21 @@ services:
       - redis
     restart: unless-stopped
 
+  ## ------------------------------------------------------------------------------------
+  ## This micro-service uses the latest forecast data for running a illuminator simulation.
+  ## ------------------------------------------------------------------------------------
+  illuminator-service:
+    build: illuminator-service
+    volumes:
+      - ./illuminator-service/config.yml:/app/config.yml:ro
+      - ./illuminator-output:/app/output
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      - weather-data-service
+    restart: unless-stopped
+
+
   ## --------------------------------------------------
   ## Use a reverse proxy to secure this RDP deployment.
   ## --------------------------------------------------
@@ -215,6 +230,23 @@ services:
       - default
     volumes:
       - ./geo:/opt/geoserver/data_dir
+
+
+  ## ---------------------------------------------------------------------------------
+  ## For debugging: use Redis Insight browser to explore the content of redis streams.
+  ## ---------------------------------------------------------------------------------
+  redis-insight:
+    image: redis/redisinsight
+    restart: unless-stopped
+    environment:
+      - RI_REDIS_HOST0=redis
+      - RI_REDIS_PORT0=6379
+      - RI_REDIS_PASSWORD0=${REDIS_PASSWORD}
+      - RI_REDIS_ALIAS0=Tutorial Redis Database
+    ports:
+      - 5540:5540
+    depends_on:
+      - redis
 
 
 volumes:

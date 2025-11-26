@@ -1,0 +1,25 @@
+[project]
+name = "ill-sim"
+version = "0.1.0"
+description = "A (not so) simple illuminator simulator"
+authors = [
+    {name = "Jort Groen",email = "j.a.groen@tudelft.nl"}
+]
+readme = "README.md"
+requires-python = ">=3.9,<4.0"
+dependencies = [
+    "pvlib (>=0.12.0,<0.13.0)",
+    "redis (>=5.2.1,<6.0.0)",
+    "click (>=8.1.8,<9.0.0)",
+    "pyrdp-commons @ git+https://github.com/AIT-RDP/pyrdp-commons.git",
+    "illuminator",
+    "timezonefinder"
+]
+
+[tool.poetry]
+packages = [{include = "illuminator"}]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
