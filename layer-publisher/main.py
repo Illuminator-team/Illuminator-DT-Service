@@ -128,7 +128,7 @@ def reload_geoserver():
     r = requests.post(f"{REST}/reload", auth=AUTH)
     log(f"Reload status: {r.status_code}")
 
-def wait_for_geoserver(timeout=100):
+def wait_for_geoserver(timeout=500):
     log("--------- Waiting for GeoServer to be ready...")
     for i in range(timeout):
         try:
