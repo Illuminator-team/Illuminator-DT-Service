@@ -15,7 +15,7 @@ services:
   ## This micro-service retrieves weather forecasts.
   ## -----------------------------------------------
   weather-data-service:
-    image: ait1/rdp-data-crawler:latest-dev
+    build: weather-data-service
     volumes:
       - ./weather-data-service/config.yml:/etc/data_crawler/config.yml:ro
     environment:
@@ -36,6 +36,8 @@ services:
     volumes:
       - timescale-data:/var/lib/postgresql/data
     restart: unless-stopped
+    ports:
+      - 5432:5432  # only for debugging
 
   ## ------------------------------------------------------------------------
   ## This micro-service defines the database schema used by the timescale DB.
