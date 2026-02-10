@@ -1,0 +1,55 @@
+{
+  "attribution": "",
+  "bounds": [
+    3.091234,
+    50.46669,
+    7.54906,
+    54.683876
+  ],
+  "center": [
+    4.9461,
+    52.3666,
+    8
+  ],
+  "format": "pbf",
+  "minzoom": 6,
+  "maxzoom": 11,
+  "name": "bedrijventerrein",
+  "description": null,
+  "scheme": "xyz",
+  "tilejson": "2.1.0",
+  "tiles": [
+    "https://files.commondatafactory.nl/tiles/bedrijventerrein_20210330/{z}/{x}/{y}.pbf"
+  ],
+  "grids": [],
+  "data": [],
+  "version": "1.0.0",
+  "template": null,
+  "legend": null,
+  "vector_layers": [
+    {
+      "version": 2,
+      "extent": 4096,
+      "id": "functioneelgebied",
+      "name": "functioneelgebied",
+      "geometry_type": "polygon",
+      "minzoom": 6,
+      "maxzoom": 11,
+      "tiles": [
+        "https://files.commondatafactory.nl/tiles/bedrijventerrein_20210330/{z}/{x}/{y}.pbf"
+      ]
+    },
+    {
+      "version": 2,
+      "extent": 4096,
+      "id": "ibis_bedrijventerrein",
+      "name": "ibis_bedrijventerrein",
+      "geometry_type": "polygon",
+      "minzoom": 6,
+      "maxzoom": 11,
+      "tiles": [
+        "https://files.commondatafactory.nl/tiles/bedrijventerrein_20210330/{z}/{x}/{y}.pbf"
+      ]
+    }
+  ]
+}

@@ -1,5 +1,41 @@
 services:
 
+#  --------------------------------------- PLAYGROUND ---------------------------------------
+  policy-tool-frontend:
+      image: nginx:alpine
+      volumes:
+        # Mount HTML/JS/CSS code
+        - ./policy-tool-frontend:/usr/share/nginx/html/dashboard:ro
+        # Mount the shared volume so Nginx can serve the generated CSVs
+        - policy-tool-data:/usr/share/nginx/html/dashboard/processed
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.dashboard.rule=Host(`localhost`) && PathPrefix(`/dashboard`)"
+        - "traefik.http.routers.dashboard.entrypoints=web,websecure"
+        - "traefik.http.routers.dashboard.tls=true"
+        - "traefik.http.services.dashboard.loadbalancer.server.port=80"
+      restart: unless-stopped
+
+  policy-tool-backend:
+      build: ./policy-tool-backend
+      volumes:
+        - policy-tool-data:/app/data/processed
+      environment:
+        - REDIS_PASSWORD=${REDIS_PASSWORD}
+      labels:
+        - "traefik.enable=true"
+        # path to /policy-api is needed to out frontend to make calls to the backend
+        - "traefik.http.routers.policy-router.rule=Host(`localhost`) && PathPrefix(`/policy-api`)"
+        - "traefik.http.routers.policy-router.entrypoints=web,websecure"
+        - "traefik.http.routers.policy-router.tls=true"
+        # middleware needs to strip /policy-api so the Python code sees "/"
+        - "traefik.http.middlewares.policy-strip.stripprefix.prefixes=/policy-api"
+        - "traefik.http.routers.policy-router.middlewares=policy-strip"
+        - "traefik.http.services.policy-service.loadbalancer.server.port=8000"
+
+#  ------------------------------------END OF PLAYGROUND -------------------------------------
+
+
   ## -----------------------------------------------------------------
   ## Use Redis streams for data access of micro-services in real-time.
   ## -----------------------------------------------------------------
@@ -255,3 +291,5 @@ volumes:
   redis-data:
   timescale-data:
   grafana-data:
+  volumes:
+  policy-tool-data:

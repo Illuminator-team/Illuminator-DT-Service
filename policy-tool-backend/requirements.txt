@@ -1,0 +1,13 @@
+# From the original environment.yml
+pandas
+pyyaml
+pandera
+
+# Added for the FastAPI Backend
+fastapi
+uvicorn
+python-multipart
+requests
+
+# In case our simulation communicates with Timescale/Postgres
+psycopg2-binary
