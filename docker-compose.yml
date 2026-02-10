@@ -150,7 +150,7 @@ services:
   ## Use a reverse proxy to secure this RDP deployment.
   ## --------------------------------------------------
   reverse-proxy:
-    image: traefik:v3.4
+    image: traefik:v3.6
     ports:
       - "80:80"
       - "443:443"
@@ -203,7 +203,8 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.geoserver.rule=Host(`localhost`) && PathPrefix(`/geoserver`)"
+  #     - "traefik.http.routers.geoserver.rule=Host(`localhost`) && PathPrefix(`/geoserver`)"
+      - "traefik.http.routers.geoserver.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/geoserver`)"
       - "traefik.http.routers.geoserver.entrypoints=web,websecure"
       - "traefik.http.routers.geoserver.tls=true"
       - "traefik.http.routers.geoserver.service=service-geoserver"
