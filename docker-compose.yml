@@ -187,13 +187,18 @@ services:
   ## --------------------------------------------------
   reverse-proxy:
     image: traefik:v3.6
+    user: root
     ports:
       - "80:80"
       - "443:443"
       - "8080:8080"  # expose dashboard port
     volumes:
-      - ./certs:/etc/certs
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs/config.yml:/etc/traefik/dynamic_conf.yml:ro
+      - ${PATH_TO_CERT_FILE}:/etc/traefik/certs/reformers01.ewi.tudelft.nl.crt:ro
+      - ${PATH_TO_KEY_FILE}:/etc/traefik/certs/reformers01.ewi.tudelft.nl.key:ro
+
+  
     restart: on-failure
     command:
       - "--log.level=INFO"
@@ -203,7 +208,8 @@ services:
       - "--entryPoints.websecure.address=:443"
       - "--providers.docker.exposedByDefault=false"
       - "--providers.docker.watch=true"
-      - "--providers.file.directory=/etc/certs"
+      - "--providers.file.filename=/etc/traefik/dynamic_conf.yml"
+      - "--providers.docker=true"
       - "--api.insecure=true"  # enable Traefik dashboard
       - "--api.dashboard=true" # explicitly enable dashboard (safe to add)
 
