@@ -10,7 +10,7 @@ services:
         - policy-tool-data:/usr/share/nginx/html/dashboard/processed
       labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.dashboard.rule=Host(`localhost`) && PathPrefix(`/dashboard`)"
+        - "traefik.http.routers.dashboard.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/dashboard`)"
         - "traefik.http.routers.dashboard.entrypoints=web,websecure"
         - "traefik.http.routers.dashboard.tls=true"
         - "traefik.http.services.dashboard.loadbalancer.server.port=80"
@@ -25,7 +25,7 @@ services:
       labels:
         - "traefik.enable=true"
         # path to /policy-api is needed to out frontend to make calls to the backend
-        - "traefik.http.routers.policy-router.rule=Host(`localhost`) && PathPrefix(`/policy-api`)"
+        - "traefik.http.routers.policy-router.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/policy-api`)"
         - "traefik.http.routers.policy-router.entrypoints=web,websecure"
         - "traefik.http.routers.policy-router.tls=true"
         # middleware needs to strip /policy-api so the Python code sees "/"
@@ -135,7 +135,7 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=HostRegexp(`localhost`) && (Path(`/grafana`) || PathPrefix(`/grafana/`))"
+      - "traefik.http.routers.grafana.rule=HostRegexp(`reformers01.ewi.tudelft.nl`) && (Path(`/grafana`) || PathPrefix(`/grafana/`))"
       - "traefik.http.routers.grafana.service=service-grafana"
       - "traefik.http.services.service-grafana.loadbalancer.server.port=3000"
       - "traefik.http.routers.grafana.entrypoints=web,websecure"
@@ -186,7 +186,7 @@ services:
   ## Use a reverse proxy to secure this RDP deployment.
   ## --------------------------------------------------
   reverse-proxy:
-    image: traefik:v3.4
+    image: traefik:v3.6
     ports:
       - "80:80"
       - "443:443"
@@ -239,7 +239,7 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.geoserver.rule=Host(`localhost`) && PathPrefix(`/geoserver`)"
+      - "traefik.http.routers.geoserver.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/geoserver`)"
       - "traefik.http.routers.geoserver.entrypoints=web,websecure"
       - "traefik.http.routers.geoserver.tls=true"
       - "traefik.http.routers.geoserver.service=service-geoserver"
