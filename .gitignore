@@ -3,6 +3,18 @@
 
 # Docker Compose environment definition file
 .env
+.env.*
+!.env.example
+
+# GeoServer runtime secrets and mutable state
+/geo/security/geoserver.jceks
+/geo/security/masterpw/default/passwd
+/geo/security/usergroup/default/users.xml
+/geo/security/usergroup/default/users.xml.orig
+/geo/geoserver.log
+/geo/logs/*.log*
+/geo/gwc/diskquota_page_store_hsql/
+/geo/workspaces/**/datastore.xml
 
 # Build artifacts, caches, etc.
 *__pycache__
