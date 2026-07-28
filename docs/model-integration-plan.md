@@ -27,6 +27,7 @@ Decisions made so far:
 - Identifiers should be URI-style from the start, using `https://reformers01.ewi.tudelft.nl/id/` as the initial TU Delft base URI.
 - Model, layer, profile, scenario, and run metadata starts as lightweight JSON metadata records, not as full formal catalogue infrastructure.
 - Profile storage follows a maturity path: simple CSV/file outputs for standalone development first, shared Timescale/PostGIS storage for integrated RDP deployment next, and standards-facing observation APIs later.
+- All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - Data completeness, confidence, provenance, and freshness should be available for every layer, feature, profile, and scenario result where possible.
 
@@ -37,6 +38,7 @@ Geonovum/NLDT interpretation:
 - Use ISO 19115/19119 and DCAT-AP-NL concepts for dataset and service metadata, but do not require full catalogue publication in the first prototype.
 - Use observation/time-series language for profiles so the system can later align with SensorThings-style APIs.
 - Keep spatial features and observation/time-series data conceptually separate, even when the prototype stores them in simple files. This leaves room for SensorThings and OGC API Joins later without blocking the first working version.
+- Treat the policy-tool backend as the first pragmatic orchestration component. This fits the NLDT guardrails of loosely coupled, API-speaking, containerable components; OGC API Processes can be a later alignment target for standardized process execution, not an MVP requirement.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -51,10 +53,14 @@ The model core should be independent from RDP infrastructure. Input and output a
 
 Planned services:
 
-- `residential-load-map-service`: current policy-tool backend, generating PC6 residential demand and heat/electrification profiles.
-- `pv-map-service`: generates PV potential/generation layers and time series.
+- `policy-tool-backend`: frontend-facing scenario/orchestration API. It coordinates calls to model APIs and may keep the current residential load calculation internally during transition.
+- `consumption-model-service`: generates residential, commercial, and industrial demand layers and profiles. The current residential load logic should move here or be wrapped as this service over time.
+- `pv-map-service`: generates PV potential/generation layers and profiles.
+- `ev-charger-model-service`: generates public EV charger location layers and charging demand profiles.
 - `grid-map-service`: generates grid topology, asset, capacity, and headroom layers.
-- `scenario-interaction-service`: later service that consumes outputs from the independent models and computes interactions, for example PV impact on net demand or grid congestion.
+- `other-model-service`: placeholder for later independent model services that publish layers/profiles through the same contract.
+
+If orchestration grows beyond simple scenario coordination, it can later be split out of the policy-tool backend. For the next versions, keeping orchestration in the policy-tool backend gives the frontend one stable API to call.
 
 ## Standalone And RDP Modes
 
@@ -118,9 +124,9 @@ external source -> RDP crawler/ingestion -> Redis/Timescale/PostGIS -> model ser
 
 Temporary standalone exceptions are allowed for development, but any direct API call in a model should be isolated behind an input adapter so it can be replaced by an RDP data source later.
 
-## Common Model API
+## Model APIs And Orchestration
 
-Each model service should eventually expose a small common API surface:
+Each model service should expose a small common API surface so the policy-tool backend can call consumption, PV, EV, grid, and later models consistently:
 
 ```text
 GET  /
@@ -131,7 +137,20 @@ GET  /runs/{run_id}
 GET  /outputs/{output_id}
 ```
 
-The existing residential load service can keep `GET /simulate/{pc6}` during transition, but new code should move toward run IDs and output metadata records. That will make it easier for the frontend and future interaction services to consume multiple model outputs consistently.
+The existing residential load behavior can keep `GET /simulate/{pc6}` during transition, but new model APIs should move toward run IDs and output metadata records. That will make it easier for the policy-tool backend to consume multiple model outputs consistently.
+
+The policy-tool backend should expose the frontend-facing scenario API. MVP endpoints can stay simple, but the direction is:
+
+```text
+GET  /
+GET  /metadata
+GET  /models
+POST /scenarios
+GET  /scenarios/{scenario_id}
+GET  /scenarios/{scenario_id}/outputs
+```
+
+In the MVP, orchestration may be synchronous and direct: receive scenario settings, call the relevant model APIs, collect output metadata, and return links to layers and profiles. Later versions can add async jobs, retries, model registry lookup, authorization, and OGC API Processes-style execution once the basic workflow is stable.
 
 ## Layer Metadata Record
 
@@ -189,29 +208,30 @@ This record is deliberately smaller than DCAT-AP-NL or ISO 19115/19119 metadata.
 The frontend should evolve from hardcoded layer radio buttons into a layer registry:
 
 - load available model layers from static metadata records or model APIs;
-- group layers by model: residential load, PV, grid, scenarios;
+- group layers by model: consumption, PV, EV, grid, scenarios;
 - allow multiple overlays when they make sense;
-- request model runs through a common run API;
+- request scenario runs through the policy-tool backend, which then calls the relevant model APIs;
 - render output metadata records rather than assuming every model writes one specific CSV filename.
 
 This keeps the dashboard usable while avoiding a future pileup of model-specific JavaScript branches.
 
 ## Near-Term Steps
 
-1. Keep the current policy-tool backend name in code for now, but document it as the residential load map model.
+1. Keep the current policy-tool backend name in code for now, but document it as the frontend-facing scenario/orchestration API.
 2. Add a shared model output metadata record shape and generate it alongside the current CSV output.
-3. Introduce explicit standalone/RDP config switches in the residential load service.
+3. Introduce explicit standalone/RDP config switches in the current residential load code and its future consumption model service.
 4. Move direct external data calls in the residential model behind input adapters.
 5. Add a frontend layer registry that can read current static layers plus generated model metadata records.
-6. Start the PV map as an independent model service with standalone local inputs first.
-7. Start the grid map as an independent model service with standalone local inputs first.
-8. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
-9. Add a scenario interaction service only after at least two independent model outputs have stable metadata records.
+6. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
+7. Start the PV map as an independent model service with standalone local inputs first.
+8. Start the EV charger model as an independent model service with standalone local inputs first.
+9. Start the grid map as an independent model service with standalone local inputs first.
+10. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 
 ## Open Questions
 
 - What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
 - What is the canonical spatial unit for each model: PC6, building, grid node, feeder, transformer, or mixed?
 - Do model runs need persistence and history from the start, or only latest-result behavior during prototyping?
-- Should the frontend call model services directly, or should there be a thin model registry/orchestrator API?
+- When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which external sources belong in the RDP crawler immediately, and which can remain standalone-only while prototyping?
