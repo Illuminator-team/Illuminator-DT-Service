@@ -14,6 +14,29 @@ The current `policy-tool-backend` should be treated as the first model service: 
 - The frontend fetches the simulation endpoint, then reads the generated CSV from `/dashboard/processed`.
 - The current backend mixes model execution, local file ingestion, and some direct external data fetching. That is acceptable for the prototype, but should become more explicit as new models are added.
 
+## Epic 1 Decisions: Shared Data And Layer Contract
+
+The first implementation should be standards-aware but not standards-heavy. The priority is to keep a working end-to-end map and scenario flow, then upgrade the metadata and API surfaces toward the Geonovum/NLDT direction as the model contracts stabilize.
+
+Decisions made so far:
+
+- Scenario calculations use a 15-minute time step, expressed as `PT15M` in metadata.
+- Layers may keep their native spatial resolution. Consumption can use PC6 or CBS buurt areas, public EV chargers can use point locations, PV can use CBS buurt areas, and grid assets can use exact grid geometries where available.
+- Every map feature may have one or more profiles. In standards-aligned terms, a profile is a time series or observation collection linked to a geo-object.
+- GeoServer is the first publication target for spatial layers. The design should keep a path toward OGC API Features and OGC API Tiles later.
+- Identifiers should be URI-style from the start, using `https://reformers01.ewi.tudelft.nl/id/` as the initial TU Delft base URI.
+- Model, layer, profile, scenario, and run metadata starts as lightweight JSON metadata records, not as full formal catalogue infrastructure.
+- Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
+- Data completeness, confidence, provenance, and freshness should be available for every layer, feature, profile, and scenario result where possible.
+
+Geonovum/NLDT interpretation:
+
+- Use NEN 3610/MIM-style thinking for geo-object concepts and relationships.
+- Use OGC services for spatial publication. WMS/WFS are acceptable during the transition, while OGC API Features/Tiles are the intended modern direction.
+- Use ISO 19115/19119 and DCAT-AP-NL concepts for dataset and service metadata, but do not require full catalogue publication in the first prototype.
+- Use observation/time-series language for profiles so the system can later align with SensorThings-style APIs.
+- Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
+
 ## Target Shape
 
 Model services should follow this pattern:
@@ -81,31 +104,43 @@ GET  /runs/{run_id}
 GET  /outputs/{output_id}
 ```
 
-The existing residential load service can keep `GET /simulate/{pc6}` during transition, but new code should move toward run IDs and output manifests. That will make it easier for the frontend and future interaction services to consume multiple model outputs consistently.
+The existing residential load service can keep `GET /simulate/{pc6}` during transition, but new code should move toward run IDs and output metadata records. That will make it easier for the frontend and future interaction services to consume multiple model outputs consistently.
 
-## Layer Contract
+## Layer Metadata Record
 
-Each model output intended for the map should include a layer manifest:
+Each model output intended for the map should include a lightweight layer metadata record. This is the MVP form of metadata: simple enough for the frontend to consume now, but structured so it can later be mapped to formal catalogue and geo metadata standards.
 
 ```json
 {
-  "model_id": "residential-load-map",
-  "run_id": "local-dev-001",
-  "layer_id": "pc6_residential_load",
+  "id": "https://reformers01.ewi.tudelft.nl/id/layer/consumption/residential-pc6",
+  "local_id": "layer:consumption:residential-pc6",
   "title": "Residential Load by PC6",
+  "model": {
+    "id": "https://reformers01.ewi.tudelft.nl/id/model/residential-load-map",
+    "local_id": "model:residential-load-map"
+  },
+  "run": {
+    "id": "https://reformers01.ewi.tudelft.nl/id/run/local-dev-001",
+    "local_id": "run:local-dev-001"
+  },
+  "geoserver_layer": "rdp:residential_pc6",
+  "feature_id_property": "uri",
   "geometry_type": "polygon",
   "spatial_level": "pc6",
-  "time_mode": "static|timeseries",
-  "metrics": [
+  "time_series": [
     {
-      "name": "electrical_demand_net_kwh",
+      "id": "https://reformers01.ewi.tudelft.nl/id/time-series/pc6/1842EM/electricity-demand/base",
+      "local_id": "profile:pc6:1842EM:electricity-demand:base",
+      "observed_property": "electricity_demand",
       "unit": "kWh",
-      "description": "Net electricity demand after local PV generation"
+      "time_resolution": "PT15M"
     }
   ],
-  "source": {
-    "type": "file|postgis|geoserver|api",
-    "href": "/dashboard/processed/pc6_profile_1842EM.csv"
+  "data_quality": {
+    "completeness": 0.82,
+    "confidence": "medium",
+    "estimated_values": true,
+    "last_updated": "2026-07-28T00:00:00Z"
   }
 }
 ```
@@ -117,31 +152,34 @@ The exact schema can evolve, but every layer should identify:
 - available metrics and units;
 - time handling;
 - data source location;
+- data quality and provenance;
 - optional style hints for the frontend.
+
+This record is deliberately smaller than DCAT-AP-NL or ISO 19115/19119 metadata. Those standards should influence names, identifiers, provenance, quality, and service links, but the first implementation only needs the fields required to make the dashboard work and remain upgradeable.
 
 ## Frontend Direction
 
 The frontend should evolve from hardcoded layer radio buttons into a layer registry:
 
-- load available model layers from static manifests or model APIs;
+- load available model layers from static metadata records or model APIs;
 - group layers by model: residential load, PV, grid, scenarios;
 - allow multiple overlays when they make sense;
 - request model runs through a common run API;
-- render output manifests rather than assuming every model writes one specific CSV filename.
+- render output metadata records rather than assuming every model writes one specific CSV filename.
 
 This keeps the dashboard usable while avoiding a future pileup of model-specific JavaScript branches.
 
 ## Near-Term Steps
 
 1. Keep the current policy-tool backend name in code for now, but document it as the residential load map model.
-2. Add a shared model output manifest shape and generate it alongside the current CSV output.
+2. Add a shared model output metadata record shape and generate it alongside the current CSV output.
 3. Introduce explicit standalone/RDP config switches in the residential load service.
 4. Move direct external data calls in the residential model behind input adapters.
-5. Add a frontend layer registry that can read current static layers plus generated model manifests.
+5. Add a frontend layer registry that can read current static layers plus generated model metadata records.
 6. Start the PV map as an independent model service with standalone local inputs first.
 7. Start the grid map as an independent model service with standalone local inputs first.
 8. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
-9. Add a scenario interaction service only after at least two independent model outputs have stable manifests.
+9. Add a scenario interaction service only after at least two independent model outputs have stable metadata records.
 
 ## Open Questions
 
