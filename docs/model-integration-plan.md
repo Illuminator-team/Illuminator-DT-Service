@@ -32,6 +32,8 @@ Decisions made so far:
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
 - Scenario execution uses one JSON request to the policy-tool backend, with time settings, layer-native spatial selections, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
 - There is no single canonical scenario area yet. Spatial selections are layer-native feature references: CBS buurt, PC6, public EV charger, grid asset, transformer area, or later custom geometry, depending on the model/layer.
+- The grid model publishes grid assets/topology only. The congestion model owns a stored grid-assignment mapping that links each layer feature/profile to the closest Euclidean LV component and refreshes that mapping whenever source layers change.
+- Allocation rules for area features with multiple LV components, such as CBS buurten or PC6 areas, are deferred to the congestion model story.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - Data completeness, confidence, provenance, and freshness should be available for every layer, feature, profile, and scenario result where possible.
 
@@ -47,6 +49,7 @@ Geonovum/NLDT interpretation:
 - OGC API Processes supports synchronous and asynchronous execution patterns with job/status/result concepts. The MVP should borrow those concepts lightly without implementing the full standard yet.
 - Scenario request fields should use standards-friendly names and explicit units, identifiers, geometry references, and output links so they can later be expressed as JSON Schema/OpenAPI, catalogue metadata, or OGC API Processes execution inputs.
 - Prefer references to existing geo-objects over copying geometry into scenario requests. This aligns with NEN 3610/MIM-style geo-object identity, OGC API Features-style feature access, and later OGC API Joins for connecting tabular/profile data to geo-objects.
+- Store grid assignments as relationships between source geo-objects/profiles and grid geo-objects, with method, distance, confidence, provenance, and source versions. This keeps the mapping standards-friendly and auditable instead of hiding it inside model code.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -65,7 +68,8 @@ Planned services:
 - `consumption-model-service`: generates residential, commercial, and industrial demand layers and profiles. The current residential load logic should move here or be wrapped as this service over time.
 - `pv-map-service`: generates PV potential/generation layers and profiles.
 - `ev-charger-model-service`: generates public EV charger location layers and charging demand profiles.
-- `grid-map-service`: generates grid topology, asset, capacity, and headroom layers.
+- `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers. It should not own load/PV/EV-to-grid assignment logic.
+- `congestion-model-service`: consumes model profiles, grid layers, and the stored grid-assignment mapping to aggregate profiles and calculate congestion indicators.
 - `other-model-service`: placeholder for later independent model services that publish layers/profiles through the same contract.
 
 If orchestration grows beyond simple scenario coordination, it can later be split out of the policy-tool backend. For the next versions, keeping orchestration in the policy-tool backend gives the frontend one stable API to call.
@@ -265,6 +269,61 @@ Geonovum alignment guardrail:
 
 This gives the dashboard a quick working contract while keeping a clear path to the professional Geonovum/NLDT-style setup.
 
+## Grid Assignment Mapping
+
+The grid model should share the grid: topology, assets, geometry, voltage level, capacity, and other grid metadata. It should not decide how consumption, PV, EV, or other profiles connect to the grid.
+
+The congestion model should own a stored assignment mapping. That mapping links each relevant feature/profile from each layer to a grid component. The first working rule is closest Euclidean LV component.
+
+MVP mapping record:
+
+```json
+{
+  "id": "https://reformers01.ewi.tudelft.nl/id/grid-assignment/ev/evse-12345",
+  "source": {
+    "layer_id": "https://reformers01.ewi.tudelft.nl/id/layer/ev/public-chargers",
+    "feature_type": "public_charging_station",
+    "feature_id": "evse-12345",
+    "profile_id": "https://reformers01.ewi.tudelft.nl/id/time-series/ev/evse-12345/charging-demand/base"
+  },
+  "grid_target": {
+    "layer_id": "https://reformers01.ewi.tudelft.nl/id/layer/grid/lv-components",
+    "component_type": "lv_component",
+    "component_id": "lv-component-987"
+  },
+  "assignment": {
+    "method": "nearest_euclidean_lv_component",
+    "distance_m": 42.7,
+    "share": 1.0,
+    "confidence": "medium"
+  },
+  "provenance": {
+    "source_layer_version": "2026-07-28",
+    "grid_layer_version": "2026-07-28",
+    "updated_at": "2026-07-28T00:00:00Z"
+  }
+}
+```
+
+MVP behavior:
+
+- build or refresh the mapping when a source layer/profile layer changes;
+- build or refresh the mapping when the grid layer changes;
+- store the mapping outside the model outputs, preferably in PostGIS/Timescale once integrated, and as a simple file/table during standalone development;
+- let the congestion model consume the mapping to aggregate profiles onto LV components, LV/MV transformers, and later MV/HV transformers;
+- expose mapping completeness and confidence so the frontend can show where congestion results are based on strong or weak assignment evidence.
+
+Deferred story:
+
+For area features such as CBS buurten or PC6 areas, there may be multiple LV components inside the area. The exact allocation rule is not decided here. The congestion model story should decide whether to use nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule. Until then, any area assignment must clearly record the method and confidence.
+
+Geonovum alignment guardrail:
+
+- treat assignments as explicit relationships between geo-objects, not as hidden assumptions;
+- prefer persistent identifiers for both source features and grid assets;
+- record method, distance, versions, confidence, and provenance;
+- keep the structure compatible with later OGC API Joins-style linking between profile/scenario tables and geo-objects.
+
 ## Layer Metadata Record
 
 Each model output intended for the map should include a lightweight layer metadata record. This is the MVP form of metadata: simple enough for the frontend to consume now, but structured so it can later be mapped to formal catalogue and geo metadata standards.
@@ -340,12 +399,14 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 8. Start the PV map as an independent model service with standalone local inputs first.
 9. Start the EV charger model as an independent model service with standalone local inputs first.
 10. Start the grid map as an independent model service with standalone local inputs first.
-11. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
+11. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with refresh on layer updates.
+12. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 
 ## Open Questions
 
 - What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
+- For area features with multiple LV components, which congestion-model allocation rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
 - Once run persistence is added, how long should scenario history and output artifacts be retained?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
