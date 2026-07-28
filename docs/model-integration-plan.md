@@ -39,6 +39,8 @@ Decisions made so far:
 - `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
 - Layer versioning starts with timestamp metadata: `last_updated` on layers/outputs/mappings and `source_last_updated` for dependencies.
 - The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
+- Scenario result storage follows a hybrid maturity path: MVP writes result metadata and profile files, publishes map-visible result layers through GeoServer, and later moves the canonical result store to PostGIS/Timescale.
+- API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
 
 Geonovum/NLDT interpretation:
 
@@ -55,6 +57,7 @@ Geonovum/NLDT interpretation:
 - Store grid assignments as relationships between source geo-objects/profiles and grid geo-objects, with method, distance, confidence, provenance, and source versions. This keeps the mapping standards-friendly and auditable instead of hiding it inside model code.
 - Keep `datacompleetheid` as a lightweight front-end indicator, but preserve enough provenance, actuality, completeness, accuracy, and lineage metadata to map later to ISO 19115/19119 metadata quality elements, DCAT-AP-NL catalogue records, and NLDT trustworthiness expectations.
 - Treat timestamps and source dependency versions as lightweight actuality/provenance metadata. Later event triggers should complement catalogue metadata and service links rather than replace them.
+- Publish map-visible scenario result geometries through GeoServer/WMS/WFS first, while keeping the design ready for OGC API Features/Tiles and catalogue records through DCAT-AP-NL or OGC API Records later.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -399,6 +402,79 @@ Geonovum alignment guardrail:
 - later catalogue records can expose update frequency, modified timestamps, lineage, and service links through DCAT-AP-NL, ISO metadata, or OGC API Records;
 - incremental refresh should preserve stable geo-object identifiers so joins and derived mappings remain explainable.
 
+## Scenario Result Storage
+
+Scenario results are not one object. A result can include map layers, profiles, summary values, provenance, `datacompleetheid`, and links back to the model outputs and source layer versions that produced it.
+
+MVP storage path:
+
+- write one scenario result metadata JSON record per run;
+- write profile outputs as CSV or simple files where that keeps standalone development fast;
+- publish map-visible geometries through GeoServer, using GeoJSON/PostGIS as the practical bridge depending on what the service can write at that stage;
+- return output metadata and links from the policy-tool backend, rather than embedding all raw profile and map data in the API response;
+- include `run_id`, input summary, output links, `datacompleetheid`, `last_updated`, source dependency timestamps, and stale/current state.
+
+MVP result metadata shape:
+
+```json
+{
+  "run_id": "https://reformers01.ewi.tudelft.nl/id/run/scenario/local-dev-001",
+  "scenario_name": "High PV and EV adoption",
+  "status": "completed",
+  "last_updated": "2026-07-28T11:00:00Z",
+  "source_last_updated": {
+    "consumption": "2026-07-28T10:00:00Z",
+    "pv": "2026-07-28T10:15:00Z",
+    "ev": "2026-07-28T10:30:00Z",
+    "grid_assignment": "2026-07-28T10:45:00Z"
+  },
+  "outputs": {
+    "layers": [
+      {
+        "id": "https://reformers01.ewi.tudelft.nl/id/layer/scenario/congestion/local-dev-001",
+        "geoserver_layer": "rdp:scenario_congestion_local_dev_001"
+      }
+    ],
+    "profiles": [
+      {
+        "id": "https://reformers01.ewi.tudelft.nl/id/time-series/scenario/local-dev-001/transformer-load",
+        "href": "/dashboard/processed/scenario_local_dev_001_transformer_load.csv"
+      }
+    ],
+    "summary": {
+      "worst_transformer_id": "transformer-987",
+      "overload_hours": 3.25
+    }
+  },
+  "data_quality": {
+    "datacompleetheid": 2,
+    "datacompleetheid_label": "middel"
+  }
+}
+```
+
+Integrated RDP target:
+
+- store scenario metadata, summary outputs, and run records in Postgres;
+- store time-series outputs in Timescale;
+- store map geometries and derived spatial outputs in PostGIS;
+- publish map layers from PostGIS through GeoServer first, and later through OGC API Features/Tiles where useful;
+- keep file exports as optional downloads/debug artifacts, not as the canonical source of truth.
+
+Professional target:
+
+- API responses return links and metadata for result resources;
+- catalogue-style metadata can expose scenario outputs through DCAT-AP-NL, ISO metadata, or OGC API Records;
+- result records keep lineage from scenario inputs, model versions, source layer timestamps, grid assignments, and output artifacts;
+- stale/current/refreshing/failed state is visible to both API clients and the frontend.
+
+Geonovum alignment guardrail:
+
+- use GeoServer/WMS/WFS as the practical current geospatial publication path;
+- keep the path open to OGC API Features and OGC API Tiles for modern standards-based feature and tile access;
+- keep result metadata rich enough to become catalogue/search metadata later;
+- keep profiles separate from spatial features so time-series access can move toward SensorThings-style APIs if needed.
+
 ## Layer Metadata Record
 
 Each model output intended for the map should include a lightweight layer metadata record. This is the MVP form of metadata: simple enough for the frontend to consume now, but structured so it can later be mapped to formal catalogue and geo metadata standards.
@@ -476,14 +552,17 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 7. Add `last_updated` and source dependency timestamps to layers, outputs, mappings, and scenario results.
 8. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
 9. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
-10. Start the PV map as an independent model service with standalone local inputs first.
-11. Start the EV charger model as an independent model service with standalone local inputs first.
-12. Start the grid map as an independent model service with standalone local inputs first.
-13. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
-14. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
+10. Add scenario result metadata records and output links, with file/GeoServer outputs for MVP and PostGIS/Timescale as the integration target.
+11. Start the PV map as an independent model service with standalone local inputs first.
+12. Start the EV charger model as an independent model service with standalone local inputs first.
+13. Start the grid map as an independent model service with standalone local inputs first.
+14. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
+15. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 
 ## Open Questions
 
+- Which scenario outputs must be shown as GeoServer layers in the MVP, and which can remain metadata/profile links only?
+- What retention policy should apply to scenario result files once PostGIS/Timescale becomes the canonical store?
 - Which layer update jobs can report changed feature ids or bounding boxes, and which only report a changed timestamp?
 - What dependency graph does the congestion model need to refresh only affected mappings and scenario outputs?
 - What exact model/layer-specific rules determine `datacompleetheid` bins 0-3 for consumption, PV, EV, grid, mapping, and scenario results?
