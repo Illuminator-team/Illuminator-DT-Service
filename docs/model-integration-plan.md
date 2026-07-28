@@ -37,6 +37,8 @@ Decisions made so far:
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - A coarse quantitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four integer bins from 0 to 3.
 - `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
+- Layer versioning starts with timestamp metadata: `last_updated` on layers/outputs/mappings and `source_last_updated` for dependencies.
+- The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
 
 Geonovum/NLDT interpretation:
 
@@ -52,6 +54,7 @@ Geonovum/NLDT interpretation:
 - Prefer references to existing geo-objects over copying geometry into scenario requests. This aligns with NEN 3610/MIM-style geo-object identity, OGC API Features-style feature access, and later OGC API Joins for connecting tabular/profile data to geo-objects.
 - Store grid assignments as relationships between source geo-objects/profiles and grid geo-objects, with method, distance, confidence, provenance, and source versions. This keeps the mapping standards-friendly and auditable instead of hiding it inside model code.
 - Keep `datacompleetheid` as a lightweight front-end indicator, but preserve enough provenance, actuality, completeness, accuracy, and lineage metadata to map later to ISO 19115/19119 metadata quality elements, DCAT-AP-NL catalogue records, and NLDT trustworthiness expectations.
+- Treat timestamps and source dependency versions as lightweight actuality/provenance metadata. Later event triggers should complement catalogue metadata and service links rather than replace them.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -302,7 +305,9 @@ MVP mapping record:
   },
   "provenance": {
     "source_layer_version": "2026-07-28",
+    "source_layer_last_updated": "2026-07-28T10:30:00Z",
     "grid_layer_version": "2026-07-28",
+    "grid_layer_last_updated": "2026-07-27T16:00:00Z",
     "updated_at": "2026-07-28T00:00:00Z"
   }
 }
@@ -310,8 +315,8 @@ MVP mapping record:
 
 MVP behavior:
 
-- build or refresh the mapping when a source layer/profile layer changes;
-- build or refresh the mapping when the grid layer changes;
+- refresh affected mapping rows when a source layer/profile layer changes and changed feature ids are known;
+- refresh assignments affected by changed grid components when the grid layer changes;
 - store the mapping outside the model outputs, preferably in PostGIS/Timescale once integrated, and as a simple file/table during standalone development;
 - let the congestion model consume the mapping to aggregate profiles onto LV components, LV/MV transformers, and later MV/HV transformers;
 - expose mapping completeness and confidence so the frontend can show where congestion results are based on strong or weak assignment evidence.
@@ -352,6 +357,48 @@ Professional target:
 
 Later versions can add richer quality dimensions such as accuracy, actuality, lineage, validation status, and uncertainty. `datacompleetheid` should remain a simple front-end summary, while the underlying metadata can grow toward ISO metadata quality elements, DCAT-AP-NL records, and NLDT trustworthiness requirements.
 
+## Layer Versions And Update Triggers
+
+The first version should detect layer changes with timestamps. Every layer, output, and mapping should expose `last_updated`. Derived records should also keep the timestamps of the source layers they depend on.
+
+MVP metadata shape:
+
+```json
+{
+  "layer_id": "https://reformers01.ewi.tudelft.nl/id/layer/ev/public-chargers",
+  "last_updated": "2026-07-28T10:30:00Z",
+  "source_last_updated": {
+    "ev_public_chargers": "2026-07-28T10:30:00Z",
+    "grid_lv_components": "2026-07-27T16:00:00Z"
+  }
+}
+```
+
+MVP refresh behavior:
+
+- when a source layer timestamp changes, mark dependent mappings/results as potentially stale;
+- if the update contains changed feature ids, refresh only those mapping rows and any derived congestion results that depend on them;
+- if changed feature ids are not available, fall back to refreshing the affected layer/model mapping, not the entire system;
+- if the grid layer changes, refresh assignments for features near changed grid components where possible; only rebuild the full mapping when the change scope is unknown;
+- after refresh, update `last_updated`, source timestamps, provenance, and `datacompleetheid`.
+
+This keeps the first version practical while avoiding unnecessary full recomputation whenever a small layer update arrives.
+
+Professional target:
+
+- emit events such as `layer.updated`, `features.updated`, `mapping.stale`, `mapping.updated`, and `scenario.outputs.stale`;
+- include changed feature ids or bounding boxes in update events whenever possible;
+- maintain a dependency graph so the congestion model knows which mappings and scenario outputs depend on which layers/features;
+- add retries, audit logs, and eventually content hashes for reproducibility where needed;
+- expose update state to the frontend so users can see whether a layer/result is current, stale, refreshing, or failed.
+
+Geonovum alignment guardrail:
+
+- timestamps support basic actuality metadata;
+- dependency timestamps and event history support provenance and lineage;
+- later catalogue records can expose update frequency, modified timestamps, lineage, and service links through DCAT-AP-NL, ISO metadata, or OGC API Records;
+- incremental refresh should preserve stable geo-object identifiers so joins and derived mappings remain explainable.
+
 ## Layer Metadata Record
 
 Each model output intended for the map should include a lightweight layer metadata record. This is the MVP form of metadata: simple enough for the frontend to consume now, but structured so it can later be mapped to formal catalogue and geo metadata standards.
@@ -370,6 +417,8 @@ Each model output intended for the map should include a lightweight layer metada
     "local_id": "run:local-dev-001"
   },
   "geoserver_layer": "rdp:residential_pc6",
+  "version": "2026-07-28",
+  "last_updated": "2026-07-28T00:00:00Z",
   "feature_id_property": "uri",
   "geometry_type": "polygon",
   "spatial_level": "pc6",
@@ -386,8 +435,7 @@ Each model output intended for the map should include a lightweight layer metada
     "datacompleetheid": 3,
     "datacompleetheid_label": "hoog",
     "confidence": "medium",
-    "estimated_values": true,
-    "last_updated": "2026-07-28T00:00:00Z"
+    "estimated_values": true
   }
 }
 ```
@@ -399,6 +447,7 @@ The exact schema can evolve, but every layer should identify:
 - available metrics and units;
 - time handling;
 - data source location;
+- version, update timestamps, and source dependency timestamps;
 - `datacompleetheid`, data quality, and provenance;
 - optional style hints for the frontend.
 
@@ -424,16 +473,19 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 4. Move direct external data calls in the residential model behind input adapters.
 5. Add a frontend layer registry that can read current static layers plus generated model metadata records.
 6. Add `datacompleetheid` bins to layer/output/run metadata and show them in the frontend layer UI.
-7. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
-8. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
-9. Start the PV map as an independent model service with standalone local inputs first.
-10. Start the EV charger model as an independent model service with standalone local inputs first.
-11. Start the grid map as an independent model service with standalone local inputs first.
-12. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with refresh on layer updates.
-13. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
+7. Add `last_updated` and source dependency timestamps to layers, outputs, mappings, and scenario results.
+8. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
+9. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
+10. Start the PV map as an independent model service with standalone local inputs first.
+11. Start the EV charger model as an independent model service with standalone local inputs first.
+12. Start the grid map as an independent model service with standalone local inputs first.
+13. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
+14. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 
 ## Open Questions
 
+- Which layer update jobs can report changed feature ids or bounding boxes, and which only report a changed timestamp?
+- What dependency graph does the congestion model need to refresh only affected mappings and scenario outputs?
 - What exact model/layer-specific rules determine `datacompleetheid` bins 0-3 for consumption, PV, EV, grid, mapping, and scenario results?
 - What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
