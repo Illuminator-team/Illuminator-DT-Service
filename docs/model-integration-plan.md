@@ -30,7 +30,8 @@ Decisions made so far:
 - All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
 - The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. Legacy endpoints may remain during transition.
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
-- Scenario execution uses one JSON request to the policy-tool backend, with global area/time settings, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
+- Scenario execution uses one JSON request to the policy-tool backend, with time settings, layer-native spatial selections, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
+- There is no single canonical scenario area yet. Spatial selections are layer-native feature references: CBS buurt, PC6, public EV charger, grid asset, transformer area, or later custom geometry, depending on the model/layer.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - Data completeness, confidence, provenance, and freshness should be available for every layer, feature, profile, and scenario result where possible.
 
@@ -45,6 +46,7 @@ Geonovum/NLDT interpretation:
 - Document APIs with OpenAPI once the route shapes stabilize, matching the Dutch API Strategy direction. Geo-oriented APIs should stay compatible with the geospatial API strategy and OGC API Features direction where relevant.
 - OGC API Processes supports synchronous and asynchronous execution patterns with job/status/result concepts. The MVP should borrow those concepts lightly without implementing the full standard yet.
 - Scenario request fields should use standards-friendly names and explicit units, identifiers, geometry references, and output links so they can later be expressed as JSON Schema/OpenAPI, catalogue metadata, or OGC API Processes execution inputs.
+- Prefer references to existing geo-objects over copying geometry into scenario requests. This aligns with NEN 3610/MIM-style geo-object identity, OGC API Features-style feature access, and later OGC API Joins for connecting tabular/profile data to geo-objects.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -196,14 +198,26 @@ Maturity path:
 
 The policy-tool frontend should send one scenario JSON request to the policy-tool backend when a user presses calculate. The policy-tool backend then translates that scenario request into calls to the enabled model APIs.
 
+The spatial part should be flexible. Users are not always selecting a single area. Depending on the active layer, they might select a CBS buurt, a PC6 area, one public charging station, a grid cable, a transformer area, or later a custom drawn polygon.
+
 MVP request shape:
 
 ```json
 {
   "scenario_name": "High PV and EV adoption",
-  "area": {
-    "type": "cbs_buurt",
-    "ids": ["BU03610000"]
+  "spatial_selection": {
+    "items": [
+      {
+        "model": "consumption",
+        "feature_type": "cbs_buurt",
+        "ids": ["BU03610000"]
+      },
+      {
+        "model": "ev",
+        "feature_type": "public_charging_station",
+        "ids": ["evse-12345"]
+      }
+    ]
   },
   "time": {
     "start": "2026-01-01T00:00:00Z",
@@ -227,10 +241,18 @@ MVP request shape:
 Minimum fields:
 
 - `scenario_name`: human-readable name for the run.
-- `area`: the selected area or feature set, using stable identifiers where possible.
+- `spatial_selection`: one or more selected feature references, using stable identifiers where possible.
 - `time`: start, end, and resolution, with `PT15M` as the scenario time step for now.
 - `models`: one block per model, each with `enabled` and model-specific scenario parameters.
 - `outputs`: requested result types, such as map layers, profiles, data quality, and later reports.
+
+Spatial selection rules:
+
+- each layer/model defines which feature types it supports, such as `cbs_buurt`, `pc6`, `public_charging_station`, `grid_asset`, or `transformer_area`;
+- prefer selecting existing feature identifiers from GeoServer/PostGIS instead of sending copied geometries;
+- allow custom GeoJSON geometry later for drawn polygons or analysis areas, but treat that as an additional feature type with clear CRS and provenance;
+- keep model-specific interpretation inside the model service. For example, the EV model understands EV charger ids, while the consumption model understands PC6 or CBS buurt ids;
+- the policy-tool backend validates that the requested models can understand the selected feature types before it starts a run.
 
 Geonovum alignment guardrail:
 
@@ -238,7 +260,8 @@ Geonovum alignment guardrail:
 - make units, identifiers, spatial references, temporal resolution, and requested outputs explicit;
 - avoid frontend-only parameter names that cannot be understood by another client;
 - document the request with OpenAPI/JSON Schema once the fields stabilize;
-- keep the structure close enough to OGC API Processes `inputs` and `outputs` concepts that it can later be wrapped as a standards-facing process execution request.
+- keep the structure close enough to OGC API Processes `inputs` and `outputs` concepts that it can later be wrapped as a standards-facing process execution request;
+- keep feature references compatible with NEN 3610/MIM-style object identity, OGC API Features-style feature access, and later OGC API Joins where profiles or tabular scenario data need to connect to geo-objects.
 
 This gives the dashboard a quick working contract while keeping a clear path to the professional Geonovum/NLDT-style setup.
 
@@ -312,7 +335,7 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 3. Introduce explicit standalone/RDP config switches in the current residential load code and its future consumption model service.
 4. Move direct external data calls in the residential model behind input adapters.
 5. Add a frontend layer registry that can read current static layers plus generated model metadata records.
-6. Define the first scenario JSON request schema in the policy-tool backend and frontend.
+6. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
 7. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
 8. Start the PV map as an independent model service with standalone local inputs first.
 9. Start the EV charger model as an independent model service with standalone local inputs first.
@@ -322,7 +345,7 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 ## Open Questions
 
 - What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
-- What is the canonical spatial unit for each model: PC6, building, grid node, feeder, transformer, or mixed?
+- Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - Once run persistence is added, how long should scenario history and output artifacts be retained?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
