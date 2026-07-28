@@ -41,6 +41,8 @@ Decisions made so far:
 - The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
 - Scenario result storage follows a hybrid maturity path: MVP writes result metadata and profile files, publishes map-visible result layers through GeoServer, and later moves the canonical result store to PostGIS/Timescale.
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
+- The frontend uses a layer registry driven by layer metadata. The MVP can use a static `layers.json` or `GET /layers`; later versions should evolve toward catalogue-style discovery.
+- Layer registry records should include layer identity, group/model, GeoServer layer name, geometry type, selectable feature type, `datacompleetheid`, freshness/stale state, and available actions such as profile or scenario run.
 
 Geonovum/NLDT interpretation:
 
@@ -58,6 +60,7 @@ Geonovum/NLDT interpretation:
 - Keep `datacompleetheid` as a lightweight front-end indicator, but preserve enough provenance, actuality, completeness, accuracy, and lineage metadata to map later to ISO 19115/19119 metadata quality elements, DCAT-AP-NL catalogue records, and NLDT trustworthiness expectations.
 - Treat timestamps and source dependency versions as lightweight actuality/provenance metadata. Later event triggers should complement catalogue metadata and service links rather than replace them.
 - Publish map-visible scenario result geometries through GeoServer/WMS/WFS first, while keeping the design ready for OGC API Features/Tiles and catalogue records through DCAT-AP-NL or OGC API Records later.
+- Treat the frontend registry as the MVP discovery layer. It should use the same identifiers and metadata fields that can later be exposed through OGC API Records, DCAT-AP-NL catalogue entries, or OGC API Features/Tiles service metadata.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -531,13 +534,52 @@ This record is deliberately smaller than DCAT-AP-NL or ISO 19115/19119 metadata.
 
 ## Frontend Direction
 
-The frontend should evolve from hardcoded layer radio buttons into a layer registry:
+The frontend should evolve from hardcoded layer radio buttons into a layer registry. In the MVP, that registry can be a static JSON file or `GET /layers` response. The important change is that the frontend reads layer metadata and builds the layer UI from that metadata.
 
-- load available model layers from static metadata records or model APIs;
+MVP registry record:
+
+```json
+{
+  "id": "https://reformers01.ewi.tudelft.nl/id/layer/consumption/residential-pc6",
+  "local_id": "layer:consumption:residential-pc6",
+  "title": "Residential Load by PC6",
+  "group": "consumption",
+  "model_id": "https://reformers01.ewi.tudelft.nl/id/model/consumption",
+  "geoserver_layer": "rdp:residential_pc6",
+  "geometry_type": "polygon",
+  "selectable_feature_type": "pc6",
+  "style": {
+    "legend": "residential_load",
+    "default_visible": true
+  },
+  "actions": {
+    "show_profile": true,
+    "scenario_input": true
+  },
+  "data_quality": {
+    "datacompleetheid": 3,
+    "datacompleetheid_label": "hoog"
+  },
+  "last_updated": "2026-07-28T10:00:00Z",
+  "state": "current"
+}
+```
+
+MVP behavior:
+
+- load available layers from static metadata records or `GET /layers` on the policy-tool backend;
 - group layers by model: consumption, PV, EV, grid, scenarios;
 - allow multiple overlays when they make sense;
-- request scenario runs through the policy-tool backend, which then calls the relevant model APIs;
+- show `datacompleetheid`, freshness, and stale/current/refreshing/failed state per layer/result;
+- use registry metadata to decide whether a feature can show a profile, be selected for a scenario, or display a scenario output;
+- request scenario runs through the policy-tool backend when a registry action says a layer/feature can be used as scenario input;
 - render output metadata records rather than assuming every model writes one specific CSV filename.
+
+Maturity path:
+
+- MVP: static `layers.json` or simple `GET /layers` JSON from the policy-tool backend;
+- Next: merge static layers, model outputs, and scenario result layers into one registry response;
+- Professional target: catalogue-style discovery through OGC API Records/DCAT-AP-NL-style metadata, with geospatial access through GeoServer now and OGC API Features/Tiles later.
 
 This keeps the dashboard usable while avoiding a future pileup of model-specific JavaScript branches.
 
@@ -547,7 +589,7 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 2. Add a shared model output metadata record shape and generate it alongside the current CSV output.
 3. Introduce explicit standalone/RDP config switches in the current residential load code and its future consumption model service.
 4. Move direct external data calls in the residential model behind input adapters.
-5. Add a frontend layer registry that can read current static layers plus generated model metadata records.
+5. Add a frontend layer registry backed by static `layers.json` or `GET /layers`, then use it to render available layers and scenario outputs.
 6. Add `datacompleetheid` bins to layer/output/run metadata and show them in the frontend layer UI.
 7. Add `last_updated` and source dependency timestamps to layers, outputs, mappings, and scenario results.
 8. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
@@ -560,7 +602,8 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 15. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 
 ## Open Questions
-
+- Should the first layer registry be served as static `layers.json`, from `GET /layers` in the policy-tool backend, or both?
+- Which registry fields are mandatory for the first frontend UI: title, group, GeoServer layer, geometry type, selectable feature type, `datacompleetheid`, freshness, actions, style, or legend?
 - Which scenario outputs must be shown as GeoServer layers in the MVP, and which can remain metadata/profile links only?
 - What retention policy should apply to scenario result files once PostGIS/Timescale becomes the canonical store?
 - Which layer update jobs can report changed feature ids or bounding boxes, and which only report a changed timestamp?
