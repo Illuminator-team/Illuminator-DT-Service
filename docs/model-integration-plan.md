@@ -28,6 +28,7 @@ Decisions made so far:
 - Model, layer, profile, scenario, and run metadata starts as lightweight JSON metadata records, not as full formal catalogue infrastructure.
 - Profile storage follows a maturity path: simple CSV/file outputs for standalone development first, shared Timescale/PostGIS storage for integrated RDP deployment next, and standards-facing observation APIs later.
 - All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
+- The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. Legacy endpoints may remain during transition.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - Data completeness, confidence, provenance, and freshness should be available for every layer, feature, profile, and scenario result where possible.
 
@@ -39,6 +40,7 @@ Geonovum/NLDT interpretation:
 - Use observation/time-series language for profiles so the system can later align with SensorThings-style APIs.
 - Keep spatial features and observation/time-series data conceptually separate, even when the prototype stores them in simple files. This leaves room for SensorThings and OGC API Joins later without blocking the first working version.
 - Treat the policy-tool backend as the first pragmatic orchestration component. This fits the NLDT guardrails of loosely coupled, API-speaking, containerable components; OGC API Processes can be a later alignment target for standardized process execution, not an MVP requirement.
+- Document APIs with OpenAPI once the route shapes stabilize, matching the Dutch API Strategy direction. Geo-oriented APIs should stay compatible with the geospatial API strategy and OGC API Features direction where relevant.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -137,7 +139,22 @@ GET  /runs/{run_id}
 GET  /outputs/{output_id}
 ```
 
+Endpoint meanings:
+
+- `GET /`: lightweight health and service identity response.
+- `GET /metadata`: model metadata, including model id, version, owner, spatial coverage, temporal resolution, inputs, outputs, assumptions, and data quality fields.
+- `GET /layers`: map layer metadata for outputs that can be shown in GeoServer or a future OGC API layer endpoint.
+- `POST /runs`: starts a model run from scenario inputs. It may execute synchronously in the MVP, but should still return a `run_id` and output metadata when practical.
+- `GET /runs/{run_id}`: returns run status, parameters, timestamps, and links to outputs.
+- `GET /outputs/{output_id}`: returns output metadata plus links to layer resources, profile files, database records, or service endpoints.
+
 The existing residential load behavior can keep `GET /simulate/{pc6}` during transition, but new model APIs should move toward run IDs and output metadata records. That will make it easier for the policy-tool backend to consume multiple model outputs consistently.
+
+Maturity path:
+
+- MVP: simple FastAPI/HTTP JSON routes, permissive internal schemas, synchronous runs allowed, and optional generated CSV/profile files.
+- Next: shared request/response schemas across models, explicit error responses, stable run/output ids, and generated OpenAPI specs.
+- Professional target: API Design Rules/OpenAPI documentation, geospatial alignment where applicable, and OGC API Processes-style execution for standardized process invocation when it starts paying for itself.
 
 The policy-tool backend should expose the frontend-facing scenario API. MVP endpoints can stay simple, but the direction is:
 
