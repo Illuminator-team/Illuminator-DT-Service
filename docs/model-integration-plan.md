@@ -29,6 +29,7 @@ Decisions made so far:
 - Profile storage follows a maturity path: simple CSV/file outputs for standalone development first, shared Timescale/PostGIS storage for integrated RDP deployment next, and standards-facing observation APIs later.
 - All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
 - The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. Legacy endpoints may remain during transition.
+- Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - Data completeness, confidence, provenance, and freshness should be available for every layer, feature, profile, and scenario result where possible.
 
@@ -41,6 +42,7 @@ Geonovum/NLDT interpretation:
 - Keep spatial features and observation/time-series data conceptually separate, even when the prototype stores them in simple files. This leaves room for SensorThings and OGC API Joins later without blocking the first working version.
 - Treat the policy-tool backend as the first pragmatic orchestration component. This fits the NLDT guardrails of loosely coupled, API-speaking, containerable components; OGC API Processes can be a later alignment target for standardized process execution, not an MVP requirement.
 - Document APIs with OpenAPI once the route shapes stabilize, matching the Dutch API Strategy direction. Geo-oriented APIs should stay compatible with the geospatial API strategy and OGC API Features direction where relevant.
+- OGC API Processes supports synchronous and asynchronous execution patterns with job/status/result concepts. The MVP should borrow those concepts lightly without implementing the full standard yet.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -168,6 +170,25 @@ GET  /scenarios/{scenario_id}/outputs
 ```
 
 In the MVP, orchestration may be synchronous and direct: receive scenario settings, call the relevant model APIs, collect output metadata, and return links to layers and profiles. Later versions can add async jobs, retries, model registry lookup, authorization, and OGC API Processes-style execution once the basic workflow is stable.
+
+## Run Lifecycle
+
+The first version should execute model and scenario runs synchronously when the calculation is quick enough for an HTTP request. The response should still be shaped like a persisted run so the frontend and orchestrator do not need a redesign later.
+
+Minimum run fields:
+
+- `run_id`: stable identifier for the calculation.
+- `status`: at least `accepted`, `running`, `completed`, or `failed`, even if MVP runs usually jump straight to `completed` or `failed`.
+- `created_at`, `started_at`, and `finished_at`: timestamps for debugging, provenance, and later history views.
+- `inputs`: the scenario/model parameters used for the run, or a pointer to them.
+- `outputs`: links to layer metadata, profile files, database records, or API outputs.
+- `data_quality`: completeness/confidence/provenance summary for the run result.
+
+Maturity path:
+
+- MVP: calculate immediately, return `run_id`, status, outputs, and metadata in the same response.
+- Next: persist run records so `GET /runs/{run_id}` can return previous results and failures.
+- Professional target: support asynchronous jobs, cancellation, progress/status polling, result retrieval, and OGC API Processes-style execution where it improves interoperability.
 
 ## Layer Metadata Record
 
