@@ -30,6 +30,7 @@ Decisions made so far:
 - All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
 - The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. Legacy endpoints may remain during transition.
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
+- Scenario execution uses one JSON request to the policy-tool backend, with global area/time settings, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - Data completeness, confidence, provenance, and freshness should be available for every layer, feature, profile, and scenario result where possible.
 
@@ -43,6 +44,7 @@ Geonovum/NLDT interpretation:
 - Treat the policy-tool backend as the first pragmatic orchestration component. This fits the NLDT guardrails of loosely coupled, API-speaking, containerable components; OGC API Processes can be a later alignment target for standardized process execution, not an MVP requirement.
 - Document APIs with OpenAPI once the route shapes stabilize, matching the Dutch API Strategy direction. Geo-oriented APIs should stay compatible with the geospatial API strategy and OGC API Features direction where relevant.
 - OGC API Processes supports synchronous and asynchronous execution patterns with job/status/result concepts. The MVP should borrow those concepts lightly without implementing the full standard yet.
+- Scenario request fields should use standards-friendly names and explicit units, identifiers, geometry references, and output links so they can later be expressed as JSON Schema/OpenAPI, catalogue metadata, or OGC API Processes execution inputs.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -190,6 +192,56 @@ Maturity path:
 - Next: persist run records so `GET /runs/{run_id}` can return previous results and failures.
 - Professional target: support asynchronous jobs, cancellation, progress/status polling, result retrieval, and OGC API Processes-style execution where it improves interoperability.
 
+## Scenario Input Contract
+
+The policy-tool frontend should send one scenario JSON request to the policy-tool backend when a user presses calculate. The policy-tool backend then translates that scenario request into calls to the enabled model APIs.
+
+MVP request shape:
+
+```json
+{
+  "scenario_name": "High PV and EV adoption",
+  "area": {
+    "type": "cbs_buurt",
+    "ids": ["BU03610000"]
+  },
+  "time": {
+    "start": "2026-01-01T00:00:00Z",
+    "end": "2026-01-02T00:00:00Z",
+    "resolution": "PT15M"
+  },
+  "models": {
+    "consumption": { "enabled": true },
+    "pv": { "enabled": true },
+    "ev": { "enabled": true },
+    "grid": { "enabled": true }
+  },
+  "outputs": {
+    "layers": true,
+    "profiles": true,
+    "data_quality": true
+  }
+}
+```
+
+Minimum fields:
+
+- `scenario_name`: human-readable name for the run.
+- `area`: the selected area or feature set, using stable identifiers where possible.
+- `time`: start, end, and resolution, with `PT15M` as the scenario time step for now.
+- `models`: one block per model, each with `enabled` and model-specific scenario parameters.
+- `outputs`: requested result types, such as map layers, profiles, data quality, and later reports.
+
+Geonovum alignment guardrail:
+
+- keep the request as plain JSON for the first working version;
+- make units, identifiers, spatial references, temporal resolution, and requested outputs explicit;
+- avoid frontend-only parameter names that cannot be understood by another client;
+- document the request with OpenAPI/JSON Schema once the fields stabilize;
+- keep the structure close enough to OGC API Processes `inputs` and `outputs` concepts that it can later be wrapped as a standards-facing process execution request.
+
+This gives the dashboard a quick working contract while keeping a clear path to the professional Geonovum/NLDT-style setup.
+
 ## Layer Metadata Record
 
 Each model output intended for the map should include a lightweight layer metadata record. This is the MVP form of metadata: simple enough for the frontend to consume now, but structured so it can later be mapped to formal catalogue and geo metadata standards.
@@ -260,16 +312,18 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 3. Introduce explicit standalone/RDP config switches in the current residential load code and its future consumption model service.
 4. Move direct external data calls in the residential model behind input adapters.
 5. Add a frontend layer registry that can read current static layers plus generated model metadata records.
-6. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
-7. Start the PV map as an independent model service with standalone local inputs first.
-8. Start the EV charger model as an independent model service with standalone local inputs first.
-9. Start the grid map as an independent model service with standalone local inputs first.
-10. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
+6. Define the first scenario JSON request schema in the policy-tool backend and frontend.
+7. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
+8. Start the PV map as an independent model service with standalone local inputs first.
+9. Start the EV charger model as an independent model service with standalone local inputs first.
+10. Start the grid map as an independent model service with standalone local inputs first.
+11. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 
 ## Open Questions
 
 - What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
 - What is the canonical spatial unit for each model: PC6, building, grid node, feeder, transformer, or mixed?
-- Do model runs need persistence and history from the start, or only latest-result behavior during prototyping?
+- Once run persistence is added, how long should scenario history and output artifacts be retained?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
+- Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
 - Which external sources belong in the RDP crawler immediately, and which can remain standalone-only while prototyping?
