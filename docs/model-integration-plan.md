@@ -35,7 +35,8 @@ Decisions made so far:
 - The grid model publishes grid assets/topology only. The congestion model owns a stored grid-assignment mapping that links each layer feature/profile to the closest Euclidean LV component and refreshes that mapping whenever source layers change.
 - Allocation rules for area features with multiple LV components, such as CBS buurten or PC6 areas, are deferred to the congestion model story.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
-- Data completeness, confidence, provenance, and freshness should be available for every layer, feature, profile, and scenario result where possible.
+- A coarse quantitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four integer bins from 0 to 3.
+- `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
 
 Geonovum/NLDT interpretation:
 
@@ -50,6 +51,7 @@ Geonovum/NLDT interpretation:
 - Scenario request fields should use standards-friendly names and explicit units, identifiers, geometry references, and output links so they can later be expressed as JSON Schema/OpenAPI, catalogue metadata, or OGC API Processes execution inputs.
 - Prefer references to existing geo-objects over copying geometry into scenario requests. This aligns with NEN 3610/MIM-style geo-object identity, OGC API Features-style feature access, and later OGC API Joins for connecting tabular/profile data to geo-objects.
 - Store grid assignments as relationships between source geo-objects/profiles and grid geo-objects, with method, distance, confidence, provenance, and source versions. This keeps the mapping standards-friendly and auditable instead of hiding it inside model code.
+- Keep `datacompleetheid` as a lightweight front-end indicator, but preserve enough provenance, actuality, completeness, accuracy, and lineage metadata to map later to ISO 19115/19119 metadata quality elements, DCAT-AP-NL catalogue records, and NLDT trustworthiness expectations.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -295,7 +297,8 @@ MVP mapping record:
     "method": "nearest_euclidean_lv_component",
     "distance_m": 42.7,
     "share": 1.0,
-    "confidence": "medium"
+    "confidence": "medium",
+    "datacompleetheid": 2
   },
   "provenance": {
     "source_layer_version": "2026-07-28",
@@ -323,6 +326,31 @@ Geonovum alignment guardrail:
 - prefer persistent identifiers for both source features and grid assets;
 - record method, distance, versions, confidence, and provenance;
 - keep the structure compatible with later OGC API Joins-style linking between profile/scenario tables and geo-objects.
+
+## Datacompleetheid
+
+`datacompleetheid` is the first user-facing data quality measure. It should be coarse, quantitative, and easy to display on the map. It answers: how complete is the data behind this layer, mapping, profile, or scenario result?
+
+MVP bins:
+
+| Value | Label | Meaning | Typical UI |
+| --- | --- | --- | --- |
+| `0` | `onbekend` | Completeness is unknown or cannot be assessed yet. | grey |
+| `1` | `laag` | Important source data is missing; result is mainly indicative. | red |
+| `2` | `middel` | Enough data exists for exploration, but visible gaps or coarse assumptions remain. | amber |
+| `3` | `hoog` | Most expected data is present for the selected purpose and resolution. | green |
+
+Rules for the first version:
+
+- every layer metadata record should include `datacompleetheid` when possible;
+- grid-assignment mappings should include `datacompleetheid` so users can see whether profile-to-grid coupling is strong or approximate;
+- scenario results should expose an overall `datacompleetheid`, using the most conservative contributing score by default;
+- keep the bin calculation simple and documented per model or layer;
+- if a score is manually assigned during prototyping, record that in provenance so it is not mistaken for an automated quality calculation.
+
+Professional target:
+
+Later versions can add richer quality dimensions such as accuracy, actuality, lineage, validation status, and uncertainty. `datacompleetheid` should remain a simple front-end summary, while the underlying metadata can grow toward ISO metadata quality elements, DCAT-AP-NL records, and NLDT trustworthiness requirements.
 
 ## Layer Metadata Record
 
@@ -355,7 +383,8 @@ Each model output intended for the map should include a lightweight layer metada
     }
   ],
   "data_quality": {
-    "completeness": 0.82,
+    "datacompleetheid": 3,
+    "datacompleetheid_label": "hoog",
     "confidence": "medium",
     "estimated_values": true,
     "last_updated": "2026-07-28T00:00:00Z"
@@ -370,7 +399,7 @@ The exact schema can evolve, but every layer should identify:
 - available metrics and units;
 - time handling;
 - data source location;
-- data quality and provenance;
+- `datacompleetheid`, data quality, and provenance;
 - optional style hints for the frontend.
 
 This record is deliberately smaller than DCAT-AP-NL or ISO 19115/19119 metadata. Those standards should influence names, identifiers, provenance, quality, and service links, but the first implementation only needs the fields required to make the dashboard work and remain upgradeable.
@@ -394,16 +423,18 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 3. Introduce explicit standalone/RDP config switches in the current residential load code and its future consumption model service.
 4. Move direct external data calls in the residential model behind input adapters.
 5. Add a frontend layer registry that can read current static layers plus generated model metadata records.
-6. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
-7. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
-8. Start the PV map as an independent model service with standalone local inputs first.
-9. Start the EV charger model as an independent model service with standalone local inputs first.
-10. Start the grid map as an independent model service with standalone local inputs first.
-11. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with refresh on layer updates.
-12. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
+6. Add `datacompleetheid` bins to layer/output/run metadata and show them in the frontend layer UI.
+7. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
+8. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
+9. Start the PV map as an independent model service with standalone local inputs first.
+10. Start the EV charger model as an independent model service with standalone local inputs first.
+11. Start the grid map as an independent model service with standalone local inputs first.
+12. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with refresh on layer updates.
+13. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 
 ## Open Questions
 
+- What exact model/layer-specific rules determine `datacompleetheid` bins 0-3 for consumption, PV, EV, grid, mapping, and scenario results?
 - What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - For area features with multiple LV components, which congestion-model allocation rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
