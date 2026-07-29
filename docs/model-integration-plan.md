@@ -49,6 +49,9 @@ Decisions made so far:
 - External data/API fetching moves toward shared crawler/data services for integrated RDP, while standalone model development may keep isolated input adapters and caches.
 - GeoServer publishing should use a shared layer-publishing path instead of every model implementing its own publishing logic.
 - The main frontend should call the policy-tool backend; direct model API calls remain useful for standalone development and testing.
+- Implementation order is phase-based: first make every model visible as GeoServer layers, then connect model outputs to transformer profiles, then add scenario UI controls, then harden into the professional standards-aligned setup.
+- Development uses a long-lived `dev` integration branch. Feature/fix branches should open PRs into `dev`; `main` and the actual server receive releases only after a separate release decision.
+- Everything should keep functioning at all times. After the first GeoServer-layer phase, PRs into `dev` should run tests/smoke checks that protect dashboard, API, GeoServer layer, and layer-registry behavior.
 
 Geonovum/NLDT interpretation:
 
@@ -68,6 +71,7 @@ Geonovum/NLDT interpretation:
 - Publish map-visible scenario result geometries through GeoServer/WMS/WFS first, while keeping the design ready for OGC API Features/Tiles and catalogue records through DCAT-AP-NL or OGC API Records later.
 - Treat the frontend registry as the MVP discovery layer. It should use the same identifiers and metadata fields that can later be exposed through OGC API Records, DCAT-AP-NL catalogue entries, or OGC API Features/Tiles service metadata.
 - Keep ownership aligned with NLDT building blocks: Data & Sensors for crawler/ingestion, Rekenmodellen for model containers, Visualisatie for the frontend, and Fundament for catalogue/IAM/metadata concerns. Components should remain loosely coupled and API-speaking.
+- Keep the delivery workflow close to the Geonovum OGC API Testbed pattern: separate stable and sandbox/integration flows, use GitHub PR/workflow checks, and redeploy/test only affected services where possible.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -626,27 +630,64 @@ Maturity path:
 
 This keeps the dashboard usable while avoiding a future pileup of model-specific JavaScript branches.
 
+## Implementation Order And Branch Strategy
+
+The implementation should prioritize visible, working map layers before deeper model coupling. The system should stay functional at every step, with PR checks becoming stricter as soon as the first layer milestone is reached.
+
+Implementation phases:
+
+1. GeoServer-visible model layers: make each model publish its first useful output as a GeoServer-visible layer, similar to the current policy-tool example. This includes consumption, PV, EV, grid, and later other model layers. At this stage, models may still be simple and standalone.
+2. Transformer profile coupling: connect consumption, PV, EV, grid, and other outputs through the congestion model so profiles can be aggregated at LV/MV transformers and later MV/HV transformers.
+3. Scenario UI: add sliders, buttons, scenario requests, run metadata, and scenario result layers/profiles on top of the working model/layer foundation.
+4. Professional setup: harden the architecture toward PostGIS/Timescale canonical stores, event-based triggers, richer tests, OpenAPI documentation, catalogue-style metadata, and OGC API/Geonovum-aligned publication where useful.
+
+Branching policy:
+
+- use a long-lived `dev` branch as the integration branch for active development;
+- create feature/fix branches from `dev` and open PRs back into `dev`; do not develop directly on `main`;
+- only merge/release from `dev` to `main` after an explicit release decision;
+- deployment to the actual server is a separate decision and may happen after phase 1, after phase 2, or later;
+- use `dev` for full integration tests before anything is shipped to `main` or the live server;
+- keep branch names informative, such as `feature/...` or `fix/...`.
+
+PR/testing guardrail:
+
+After phase 1 starts landing, PRs into `dev` should include automated checks that prove the existing app still works. The first useful checks are:
+
+- Docker Compose configuration validation;
+- policy-tool backend health/API smoke tests;
+- frontend/dashboard smoke test;
+- GeoServer reachability and expected layer publication checks;
+- layer registry schema/metadata validation;
+- basic `datacompleetheid`, `last_updated`, and output-link validation.
+
+Geonovum alignment guardrail:
+
+This is consistent with NLDT guardrails: work from use cases, avoid pre-optimization, keep components containerable and API-speaking, and use the best reliable setup available today. It also mirrors the Geonovum OGC API Testbed idea of stable versus sandbox/integration environments and GitHub workflow based maintenance.
+
 ## Near-Term Steps
 
-1. Inventory current policy-tool backend code into orchestration, consumption-model, congestion-model, data-ingestion, and layer-publishing responsibilities.
-2. Keep the current policy-tool backend name in code for now, but treat it as the frontend-facing scenario/orchestration API.
-3. Add a shared model output metadata record shape and generate it alongside the current CSV output.
-4. Introduce explicit standalone/RDP config switches in the current residential load code and its future consumption model service.
-5. Move direct external data calls in the residential model behind input adapters.
-6. Add a frontend layer registry backed by static `layers.json` or `GET /layers`, then use it to render available layers and scenario outputs.
-7. Add `datacompleetheid` bins to layer/output/run metadata and show them in the frontend layer UI.
-8. Add `last_updated` and source dependency timestamps to layers, outputs, mappings, and scenario results.
-9. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
-10. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
-11. Extract or wrap current policy-tool backend congestion calculation into `congestion-model-service`.
-12. Add scenario result metadata records and output links, with file/GeoServer outputs for MVP and PostGIS/Timescale as the integration target.
-13. Start the PV map as an independent model service with standalone local inputs first.
-14. Start the EV charger model as an independent model service with standalone local inputs first.
-15. Start the grid map as an independent model service with standalone local inputs first.
-16. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
-17. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
-
+1. Create or confirm the long-lived `dev` branch from the cleaned deployed base once the cleanup base is agreed.
+2. Start phase 1 by publishing the current consumption/policy-tool layer path as the reference GeoServer layer pattern.
+3. Add first GeoServer-visible layers for PV, EV chargers, and grid, even if their first outputs are simple standalone datasets.
+4. Add a frontend layer registry backed by static `layers.json` or `GET /layers`, then use it to render available layers and scenario outputs.
+5. Add `datacompleetheid`, `last_updated`, and basic metadata to those layer records.
+6. Add PR checks for `dev` that validate Docker Compose config, dashboard/API reachability, GeoServer layers, and layer registry metadata.
+7. Inventory current policy-tool backend code into orchestration, consumption-model, congestion-model, data-ingestion, and layer-publishing responsibilities.
+8. Keep the current policy-tool backend name in code for now, but treat it as the frontend-facing scenario/orchestration API.
+9. Start phase 2 by extracting or wrapping current policy-tool backend congestion calculation into `congestion-model-service`.
+10. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
+11. Add transformer-level profile aggregation outputs and metadata links.
+12. Start phase 3 by adding scenario sliders/buttons and `POST /scenarios` flow once phase 2 outputs are stable enough.
+13. Add scenario result metadata records and output links, with file/GeoServer outputs for MVP and PostGIS/Timescale as the integration target.
+14. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
+15. Start phase 4 hardening only after the working map/model/scenario flow is stable in `dev`.
 ## Open Questions
+
+- What exact branch/commit should be used to create the long-lived `dev` branch?
+- Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
+- Which smoke tests are mandatory before a PR can merge into `dev` after phase 1?
+- Which model layer should be implemented first after the existing consumption/policy-tool layer: PV, EV, grid, or another layer?
 
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
