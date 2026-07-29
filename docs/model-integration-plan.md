@@ -68,6 +68,7 @@ Decisions made so far:
 - Everything should keep functioning at all times. Once phase 1 starts, every model-layer PR into `dev` should run tests/smoke checks that protect dashboard, API, GeoServer layer, and layer-registry behavior before the next model is added.
 - Anything merged into `dev` should be fully working in the integration setup. For model-layer PRs, this means full end-to-end checks across model manifest, model API, output artifact, GeoServer publication, layer registry, and dashboard visibility, not metadata-only checks.
 - The first PV full end-to-end smoke test should use CBS buurt `BU03610302` / `Overdie-Oost` as the stable fixture area. The test should assert that this feature exists and that `pv_capacity_kwp` is present and greater than zero, unless the PV model repo later documents a better fixture with equivalent stability.
+- The PV integration smoke test should not assert an exact `pv_capacity_kwp` value for `BU03610302`; it should assert that the value is present, numeric, and greater than zero, because model-estimated values may change as source data and model logic improve.
 
 Geonovum/NLDT interpretation:
 
@@ -706,6 +707,7 @@ Fixture area: CBS buurt `BU03610302` / `Overdie-Oost`.
 
 - Docker Compose configuration validation for the integrated stack;
 - model API checks: `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`, using `BU03610302` / `Overdie-Oost` where a spatial fixture is needed;
+- fixture value check: API output or WFS `GetFeature` for `BU03610302` returns `pv_capacity_kwp` as a numeric value greater than zero, without asserting an exact model-estimated value;
 - policy-tool backend health/API smoke tests, including layer-registry/orchestration compatibility where the PV layer is exposed through the policy-tool path;
 - frontend/dashboard smoke test: dashboard loads, PV layer is available in the layer UI or registry-driven equivalent, toggling/activating the layer produces no frontend errors;
 - GeoServer publication checks: WMS `GetCapabilities` includes the PV layer, WMS `GetMap` returns a non-empty image for or around `BU03610302`, and WFS `DescribeFeatureType` exposes expected fields including `pv_capacity_kwp`;
@@ -740,12 +742,11 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 - What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
-- Should the PV E2E smoke test assert an exact expected `pv_capacity_kwp` value for `BU03610302`, or only assert that the value is present, numeric, and greater than zero?
+- Should the first layer registry be served as static `layers.json`, from `GET /layers` in the policy-tool backend, or both?
 
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
-- Should the first layer registry be served as static `layers.json`, from `GET /layers` in the policy-tool backend, or both?
 - Which registry fields are mandatory for the first frontend UI: title, group, GeoServer layer, geometry type, selectable feature type, `datacompleetheid`, freshness, actions, style, or legend?
 - Which scenario outputs must be shown as GeoServer layers in the MVP, and which can remain metadata/profile links only?
 - What retention policy should apply to scenario result files once PostGIS/Timescale becomes the canonical store?
