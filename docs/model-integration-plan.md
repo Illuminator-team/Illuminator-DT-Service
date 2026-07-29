@@ -29,6 +29,7 @@ Decisions made so far:
 - GeoServer is the first publication target for spatial layers. The design should keep a path toward OGC API Features and OGC API Tiles later.
 - Identifiers should be URI-style from the start, using `https://reformers01.ewi.tudelft.nl/id/` as the initial TU Delft base URI.
 - Model, layer, profile, scenario, and run metadata starts as lightweight JSON metadata records, not as full formal catalogue infrastructure.
+- Source dataset names, source versions, and detailed PV `lineage_summary` text can be finalized from the model repo once the PV model/API is finished; the architecture decision now is to reserve and validate those metadata fields, not guess their final values early.
 - Profile storage follows a maturity path: simple CSV/file outputs for standalone development first, shared Timescale/PostGIS storage for integrated RDP deployment next, and standards-facing observation APIs later.
 - All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
 - The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. Legacy endpoints may remain during transition.
@@ -41,6 +42,7 @@ Decisions made so far:
 - A coarse quantitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four integer bins from 0 to 3.
 - `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
 - Layer versioning starts with timestamp metadata: `last_updated` on layers/outputs/mappings and `source_last_updated` for dependencies.
+- Model metadata should be kept current by making the model repo the source of truth: model-owned metadata manifests feed `GET /metadata`, `GET /layers`, run records, and output records, while CI checks prevent required metadata from drifting when model code or source-data configuration changes.
 - The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
 - Scenario result storage follows a hybrid maturity path: MVP writes result metadata and profile files, publishes map-visible result layers through GeoServer, and later moves the canonical result store to PostGIS/Timescale.
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
@@ -74,6 +76,7 @@ Geonovum/NLDT interpretation:
 - Store grid assignments as relationships between source geo-objects/profiles and grid geo-objects, with method, distance, confidence, provenance, and source versions. This keeps the mapping standards-friendly and auditable instead of hiding it inside model code.
 - Keep `datacompleetheid` as a lightweight front-end indicator, but preserve enough provenance, actuality, completeness, accuracy, and lineage metadata to map later to ISO 19115/19119 metadata quality elements, DCAT-AP-NL catalogue records, and NLDT trustworthiness expectations.
 - Treat timestamps and source dependency versions as lightweight actuality/provenance metadata. Later event triggers should complement catalogue metadata and service links rather than replace them.
+- Keep metadata close to the source data/model code and generate as much of it as possible from model manifests, source-data configuration, run records, and API responses. This follows the Geonovum metadata direction of avoiding scattered manual metadata while preserving links between data, APIs, models, and concepts.
 - Publish map-visible scenario result geometries through GeoServer/WMS/WFS first, while keeping the design ready for OGC API Features/Tiles and catalogue records through DCAT-AP-NL or OGC API Records later.
 - Treat the frontend registry as the MVP discovery layer. It should use the same identifiers and metadata fields that can later be exposed through OGC API Records, DCAT-AP-NL catalogue entries, or OGC API Features/Tiles service metadata.
 - Keep ownership aligned with NLDT building blocks: Data & Sensors for crawler/ingestion, Rekenmodellen for model containers, Visualisatie for the frontend, and Fundament for catalogue/IAM/metadata concerns. Components should remain loosely coupled and API-speaking.
@@ -420,22 +423,36 @@ Later versions can add richer quality dimensions such as accuracy, actuality, li
 
 The first version should detect layer changes with timestamps. Every layer, output, and mapping should expose `last_updated`. Derived records should also keep the timestamps of the source layers they depend on.
 
+Metadata maintenance rule:
+
+- each model repo owns a versioned metadata manifest, for example `model-metadata.json` plus layer/output schema records, stored next to the model code and source-data configuration;
+- `GET /metadata`, `GET /layers`, run records, and output records are generated from that manifest plus runtime fields such as git commit, container image digest, timestamps, source versions, and output ids;
+- the policy-tool backend and frontend consume model API metadata instead of maintaining separate hand-copied layer descriptions;
+- every run/output stores a metadata snapshot so old scenario results remain explainable after the model changes.
+
 MVP metadata shape:
 
 ```json
 {
-  "layer_id": "https://reformers01.ewi.tudelft.nl/id/layer/ev/public-chargers",
+  "layer_id": "https://reformers01.ewi.tudelft.nl/id/layer/pv/capacity",
+  "metadata_schema_version": "0.1.0",
+  "model_id": "pv-capacity-model",
+  "model_version": "0.1.0",
+  "model_git_sha": "<filled by build/runtime>",
+  "capacity_method": "model_estimated",
+  "source_names": ["<filled from model metadata>"],
   "last_updated": "2026-07-28T10:30:00Z",
   "source_last_updated": {
-    "ev_public_chargers": "2026-07-28T10:30:00Z",
-    "grid_lv_components": "2026-07-27T16:00:00Z"
-  }
+    "<source_dataset_id>": "2026-07-28T10:30:00Z"
+  },
+  "lineage_summary": "<short human-readable summary from the model repo>"
 }
 ```
 
 MVP refresh behavior:
 
 - when a source layer timestamp changes, mark dependent mappings/results as potentially stale;
+- when model code, model metadata, or source-data configuration changes, expose the new `model_version`/git hash and refresh or republish affected layer outputs;
 - if the update contains changed feature ids, refresh only those mapping rows and any derived congestion results that depend on them;
 - if changed feature ids are not available, fall back to refreshing the affected layer/model mapping, not the entire system;
 - if the grid layer changes, refresh assignments for features near changed grid components where possible; only rebuild the full mapping when the change scope is unknown;
@@ -448,7 +465,7 @@ Professional target:
 - emit events such as `layer.updated`, `features.updated`, `mapping.stale`, `mapping.updated`, and `scenario.outputs.stale`;
 - include changed feature ids or bounding boxes in update events whenever possible;
 - maintain a dependency graph so the congestion model knows which mappings and scenario outputs depend on which layers/features;
-- add retries, audit logs, and eventually content hashes for reproducibility where needed;
+- add retries, audit logs, automated metadata validators, and eventually content hashes for reproducibility where needed;
 - expose update state to the frontend so users can see whether a layer/result is current, stale, refreshing, or failed.
 
 Geonovum alignment guardrail:
@@ -665,7 +682,8 @@ After phase 1 starts landing, every model-layer PR into `dev` should include aut
 - frontend/dashboard smoke test;
 - GeoServer reachability and expected layer publication checks;
 - layer registry schema/metadata validation;
-- basic `datacompleetheid`, `last_updated`, and output-link validation.
+- model-owned metadata manifest/API consistency checks;
+- basic `datacompleetheid`, `last_updated`, source provenance, model version, and output-link validation.
 
 Geonovum alignment guardrail:
 
@@ -695,7 +713,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
 - Which smoke tests are mandatory before each model-layer PR can merge into `dev`?
-- Which open source datasets feed the first `pv_capacity_kwp` estimate, and what short `lineage_summary` should explain how measurement-based inputs are combined?
+- Which metadata manifest format should model repos use first: separate `model-metadata.json` plus layer records, or one combined `model-manifest.json`?
 
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
