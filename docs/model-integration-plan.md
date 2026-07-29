@@ -38,8 +38,9 @@ Decisions made so far:
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
 - Scenario execution uses one JSON request to the policy-tool backend, with time settings, layer-native spatial selections, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
 - There is no single canonical scenario area yet. Spatial selections are layer-native feature references: CBS buurt, PC6, public EV charger, grid asset, transformer area, or later custom geometry, depending on the model/layer.
-- The grid model publishes grid assets/topology only. The congestion model owns a stored grid-assignment mapping that links each layer feature/profile to the closest Euclidean LV component and refreshes that mapping whenever source layers change.
-- Allocation rules for area features with multiple LV components, such as CBS buurten or PC6 areas, are deferred to the congestion model story.
+- The grid model owns the spatial matching calculation that links each layer feature/profile to an appropriate grid component. The first working rule is closest Euclidean LV component.
+- The congestion model consumes grid-assignment records for profile aggregation and congestion calculations; it does not implement the spatial matching algorithm.
+- Allocation rules for area features with multiple LV components, such as CBS buurten or PC6 areas, are deferred to the grid-assignment story and should be agreed with the congestion-model requirements.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - A coarse quantitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four integer bins from 0 to 3.
 - `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
@@ -121,7 +122,7 @@ Planned services:
 - `consumption-model-service`: generates residential, commercial, and industrial demand layers and profiles. The current residential-load logic should move here or be wrapped as this service over time.
 - `pv-map-service`: first publishes model-estimated PV capacity at CBS buurt resolution using `pv_capacity_kwp`; future versions can add PV potential, production profiles, and scenario-derived generation layers.
 - `ev-charger-model-service`: generates public EV charger location layers and charging demand profiles.
-- `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers. It should not own load/PV/EV-to-grid assignment logic.
+- `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers and owns the API/logic for matching external areas or points to grid components.
 - `congestion-model-service`: consumes model profiles, grid layers, and the stored grid-assignment mapping to aggregate profiles and calculate congestion indicators. Current congestion-related calculation in the policy-tool backend should move here in a follow-up story.
 - `other-model-service`: placeholder for later independent model services that publish layers/profiles through the same contract.
 
@@ -139,8 +140,8 @@ Ownership boundaries:
 | `consumption-model-service` | Residential, commercial, and industrial consumption calculations and profiles | Frontend orchestration or grid congestion logic |
 | `pv-map-service` | Model-estimated PV capacity first, later PV potential/production calculations, layers, and profiles | Scenario orchestration or grid congestion logic |
 | `ev-charger-model-service` | EV charger layer/profile logic | Scenario orchestration or grid congestion logic |
-| `grid-map-service` | Grid topology/assets/capacity/headroom publication | Load/PV/EV-to-grid assignment or congestion calculations |
-| `congestion-model-service` | Grid assignment consumption, profile aggregation, transformer/headroom/congestion indicators | Publishing the raw grid as source data or owning unrelated model logic |
+| `grid-map-service` | Grid topology/assets/capacity/headroom publication and spatial matching of external features to grid components | Consumption/PV/EV calculations or congestion calculations |
+| `congestion-model-service` | Grid assignment consumption, profile aggregation, transformer/headroom/congestion indicators | Publishing the raw grid, implementing spatial matching, or owning unrelated model logic |
 | RDP crawler/data services | Shared external API ingestion, cached source data, reusable Postgres/PostGIS/Timescale inputs | Model-specific scenario calculations |
 | Layer publisher | Shared path to GeoServer/layer publication | Domain model calculations |
 | Frontend | Map UI, layer registry rendering, scenario controls | Direct orchestration across all model containers in the main app |
@@ -440,9 +441,9 @@ This gives the dashboard a quick working contract while keeping a clear path to 
 
 ## Grid Assignment Mapping
 
-The grid model should share the grid: topology, assets, geometry, voltage level, capacity, and other grid metadata. It should not decide how consumption, PV, EV, or other profiles connect to the grid.
+The grid model should share the grid: topology, assets, geometry, voltage level, capacity, and other grid metadata. Because it owns the authoritative grid geometries and knows which components are valid connection targets, it should also own the spatial matching calculation for consumption, PV, EV, and other source features.
 
-The congestion model should own a stored assignment mapping. That mapping links each relevant feature/profile from each layer to a grid component. The first working rule is closest Euclidean LV component.
+The grid model should accept a stable source-feature reference and geometry, calculate the match, and return an explicit grid-assignment record. The first working rule is closest Euclidean LV component. The congestion model consumes these records to aggregate profiles and calculate congestion; it should not duplicate the matching logic.
 
 MVP mapping record:
 
@@ -479,15 +480,19 @@ MVP mapping record:
 
 MVP behavior:
 
+- expose grid matching through the grid model API so it also works during standalone development;
+- calculate matches only against grid component types that the grid model declares valid for the requested assignment;
 - refresh affected mapping rows when a source layer/profile layer changes and changed feature ids are known;
 - refresh assignments affected by changed grid components when the grid layer changes;
-- store the mapping outside the model outputs, preferably in PostGIS/Timescale once integrated, and as a simple file/table during standalone development;
+- store the mapping outside model output layers, preferably in PostGIS once integrated, and as a simple file/table during standalone development;
 - let the congestion model consume the mapping to aggregate profiles onto LV components, LV/MV transformers, and later MV/HV transformers;
 - expose mapping completeness and confidence so the frontend can show where congestion results are based on strong or weak assignment evidence.
 
+Still to decide: whether the grid model owns the persistent assignment table and refresh scheduling, or whether a shared integration component stores and refreshes records produced by the grid model. In both options, the matching algorithm remains owned by the grid model and the congestion model remains a consumer.
+
 Deferred story:
 
-For area features such as CBS buurten or PC6 areas, there may be multiple LV components inside the area. The exact allocation rule is not decided here. The congestion model story should decide whether to use nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule. Until then, any area assignment must clearly record the method and confidence.
+For area features such as CBS buurten or PC6 areas, there may be multiple LV components inside the area. The exact allocation rule is not decided here. The grid-assignment story should decide whether to use nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule, based on what the congestion model needs. Until then, any area assignment must clearly record the method and confidence.
 
 Geonovum alignment guardrail:
 
@@ -954,7 +959,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 8. Inventory current policy-tool backend code into orchestration, consumption-model, congestion-model, data-ingestion, and layer-publishing responsibilities, but do this as preparation for the later split rather than before the PV layer.
 9. Keep the current policy-tool backend name in code for now, and let it remain the combined model/orchestration component until PV is working as the first new model layer.
 10. Start phase 2 by extracting or wrapping current policy-tool backend congestion calculation into `congestion-model-service`.
-11. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
+11. Add the first grid-model matching API and grid-assignment records using closest Euclidean LV component, with incremental refresh on layer updates and consumption by the congestion model.
 12. Add transformer-level profile aggregation outputs and metadata links.
 13. Start phase 3 by adding scenario sliders/buttons and `POST /scenarios` flow once phase 2 outputs are stable enough.
 14. When phase 3 starts, decide which scenario outputs need GeoServer-visible result layers and which remain database-backed metadata/profile outputs with optional downloads; use PostGIS/Timescale as the canonical store from the first scenario implementation.
@@ -971,8 +976,9 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - What retention policy should apply to database-resident scenario runs/results and their optional export files?
 - Which required model-run, stable-feature, provenance, or quality fields, if any, cannot be represented by the complete existing RDP `data_points`/`forecasts` contract and API metadata?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
-- For area features with multiple LV components, which congestion-model allocation rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
+- For area features with multiple LV components, which grid-assignment rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
 - Once run persistence is added, how long should scenario history and output artifacts be retained?
+- Should the grid model also own the persistent grid-assignment table and refresh scheduling, or should a shared integration component persist and refresh assignment records calculated by the grid model?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
 - Which external sources belong in the RDP crawler immediately, and which can remain standalone-only while prototyping?
