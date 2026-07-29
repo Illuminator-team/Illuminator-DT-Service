@@ -50,8 +50,9 @@ Decisions made so far:
 - GeoServer publication details such as workspace, final layer name, WMS/WFS URLs, style, and legend may be provisional when publication wiring is not finished yet, but the manifest must state the intended values, owner, and whether the layer is `ready_for_publication` or already `published`.
 - Default GeoServer styling is acceptable for the first PV PR. A custom SLD style and polished legend are not required before merge, but the manifest should expose style metadata such as `style_status: default_geoserver` so the dashboard can later replace it with a proper PV capacity style.
 - The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
-- Scenario result storage follows a hybrid maturity path: MVP writes result metadata and profile files, publishes map-visible result layers through GeoServer, and later moves the canonical result store to PostGIS/Timescale.
+- When scenario outputs are introduced later, scenario result storage follows a hybrid maturity path: write result metadata and profile files first, publish GeoServer-visible result layers only for outputs explicitly chosen for map display, and later move the canonical result store to PostGIS/Timescale.
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
+- Phase 1 does not include scenario result layers. Scenario output publication is deferred until scenario/congestion functionality exists; at that point, decide per output whether it should become a GeoServer-visible layer or remain a metadata/profile/download output.
 - The frontend uses a layer registry driven by layer metadata. The MVP uses `GET /layers` on the policy-tool backend as the canonical dashboard contract, with static `layers.json` only as a fallback or seed; later versions should evolve toward catalogue-style discovery.
 - Layer registry records have a mandatory MVP field set: stable ids, title/description, group/model/version, metadata URL, GeoServer publication details, geometry type, selectable feature type, CRS, metrics/units, style status, actions, `datacompleetheid`, freshness state, and lightweight provenance.
 - Model containers should own domain calculations and expose APIs. The policy-tool backend should own frontend-facing orchestration, not long-term model logic.
@@ -86,7 +87,7 @@ Geonovum/NLDT interpretation:
 - Keep `datacompleetheid` as a lightweight front-end indicator, but preserve enough provenance, actuality, completeness, accuracy, and lineage metadata to map later to ISO 19115/19119 metadata quality elements, DCAT-AP-NL catalogue records, and NLDT trustworthiness expectations.
 - Treat timestamps and source dependency versions as lightweight actuality/provenance metadata. Later event triggers should complement catalogue metadata and service links rather than replace them.
 - Keep metadata close to the source data/model code and generate as much of it as possible from model manifests, source-data configuration, run records, and API responses. This follows the Geonovum metadata direction of avoiding scattered manual metadata while preserving links between data, APIs, models, and concepts.
-- Publish map-visible scenario result geometries through GeoServer/WMS/WFS first, while keeping the design ready for OGC API Features/Tiles and catalogue records through DCAT-AP-NL or OGC API Records later.
+- When scenario outputs become map-visible in a later phase, publish those result geometries through GeoServer/WMS/WFS first, while keeping the design ready for OGC API Features/Tiles and catalogue records through DCAT-AP-NL or OGC API Records later. Phase 1 should not invent scenario result layers before there are real scenario outputs to publish.
 - Treat the frontend registry as the MVP discovery layer. It should use the same identifiers and metadata fields that can later be exposed through OGC API Records, DCAT-AP-NL catalogue entries, or OGC API Features/Tiles service metadata. The mandatory MVP fields deliberately mirror Geonovum metadata basics: persistent identifiers, titles, summaries, dates, responsible model/source context, CRS, protocol/service links, and enough quality/provenance information for users to judge whether a layer is fit for purpose.
 - Keep ownership aligned with NLDT building blocks: Data & Sensors for crawler/ingestion, Rekenmodellen for model containers, Visualisatie for the frontend, and Fundament for catalogue/IAM/metadata concerns. Components should remain loosely coupled and API-speaking.
 - Keep the delivery workflow close to the Geonovum OGC API Testbed pattern: separate stable and sandbox/integration flows, use GitHub PR/workflow checks, and redeploy/test only affected services where possible.
@@ -709,7 +710,7 @@ MVP behavior:
 - group layers by model: consumption, PV, EV, grid, scenarios;
 - allow multiple overlays when they make sense;
 - show `datacompleetheid`, freshness, and stale/current/refreshing/failed state per layer/result;
-- use registry metadata to decide whether a feature can show a profile, be selected for a scenario, or display a scenario output;
+- use registry metadata to decide whether a feature can show a profile, be selected for a scenario, and later display a scenario output;
 - request scenario runs through the policy-tool backend when a registry action says a layer/feature can be used as scenario input;
 - render output metadata records rather than assuming every model writes one specific CSV filename;
 - validate the mandatory registry fields for every layer returned by `GET /layers`.
@@ -717,7 +718,7 @@ MVP behavior:
 Maturity path:
 
 - MVP: `GET /layers` JSON from the policy-tool backend, optionally seeded by static `layers.json`;
-- Next: merge static layers, model outputs, and scenario result layers into one registry response;
+- Next: merge static layers and model outputs into one registry response; later add scenario result layers when scenario functionality exists;
 - Professional target: catalogue-style discovery through OGC API Records/DCAT-AP-NL-style metadata, with geospatial access through GeoServer now and OGC API Features/Tiles later.
 
 This keeps the dashboard usable while avoiding a future pileup of model-specific JavaScript branches.
@@ -728,7 +729,7 @@ The implementation should prioritize visible, working map layers before deeper m
 
 Implementation phases:
 
-1. GeoServer-visible model layers: make each model publish its first useful output as a GeoServer-visible layer, similar to the current policy-tool example. This phase should be delivered model by model: integrate one model layer, verify that the existing dashboard, API, and GeoServer setup still work, then move to the next model. This includes consumption, PV, EV, grid, and later other model layers. At this stage, models may still be simple and standalone.
+1. GeoServer-visible model layers: make each model publish its first useful output as a GeoServer-visible layer, similar to the current policy-tool example. This phase should be delivered model by model: integrate one model layer, verify that the existing dashboard, API, and GeoServer setup still work, then move to the next model. This includes consumption, PV, EV, grid, and later other model layers. At this stage, models may still be simple and standalone, and scenario result layers are out of scope.
 2. Transformer profile coupling: connect consumption, PV, EV, grid, and other outputs through the congestion model so profiles can be aggregated at LV/MV transformers and later MV/HV transformers.
 3. Scenario UI: add sliders, buttons, scenario requests, run metadata, and scenario result layers/profiles on top of the working model/layer foundation.
 4. Professional setup: harden the architecture toward PostGIS/Timescale canonical stores, event-based triggers, richer tests, OpenAPI documentation, catalogue-style metadata, and OGC API/Geonovum-aligned publication where useful.
@@ -770,7 +771,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 2. Start phase 1 by treating the current combined policy-tool backend as the reference GeoServer-visible model: consumption plus congestion in one working service.
 3. Add the first new GeoServer-visible model layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with full end-to-end smoke tests proving the integrated stack still works.
 4. Repeat the model-layer PR pattern for EV chargers, grid, and later other layers, even if their first outputs are simple standalone datasets.
-5. Add a frontend layer registry backed by `GET /layers` on the policy-tool backend, optionally seeded by static `layers.json`, then use it to render available layers and scenario outputs.
+5. Add a frontend layer registry backed by `GET /layers` on the policy-tool backend, optionally seeded by static `layers.json`, then use it to render available model layers first and scenario outputs later.
 6. Add mandatory registry fields, including `datacompleetheid`, `last_updated`, `source_last_updated`, CRS, metrics/units, GeoServer service links, style status, actions, and lightweight provenance.
 7. Add PR checks for `dev` that validate Docker Compose config, model API, policy-tool backend, dashboard reachability/layer toggle, GeoServer WMS/WFS publication, layer registry metadata, manifest consistency, provenance, and output links.
 8. Inventory current policy-tool backend code into orchestration, consumption-model, congestion-model, data-ingestion, and layer-publishing responsibilities, but do this as preparation for the later split rather than before the PV layer.
@@ -779,7 +780,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 11. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
 12. Add transformer-level profile aggregation outputs and metadata links.
 13. Start phase 3 by adding scenario sliders/buttons and `POST /scenarios` flow once phase 2 outputs are stable enough.
-14. Add scenario result metadata records and output links, with file/GeoServer outputs for MVP and PostGIS/Timescale as the integration target.
+14. When phase 3 starts, decide which scenario outputs need GeoServer-visible result layers and which can remain metadata/profile/download outputs; then add result metadata records and output links, with PostGIS/Timescale as the later canonical store.
 15. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 16. Start phase 4 hardening only after the working map/model/scenario flow is stable in `dev`.
 
@@ -790,7 +791,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
-- Which scenario outputs must be shown as GeoServer layers in the MVP, and which can remain metadata/profile links only?
 - What retention policy should apply to scenario result files once PostGIS/Timescale becomes the canonical store?
 - Which layer update jobs can report changed feature ids or bounding boxes, and which only report a changed timestamp?
 - What dependency graph does the congestion model need to refresh only affected mappings and scenario outputs?
