@@ -66,6 +66,7 @@ Decisions made so far:
 - After the current combined consumption/congestion layer path is used as the reference pattern, PV is the first new model layer to integrate in phase 1.
 - Development uses a long-lived `dev` integration branch. Feature/fix branches should open PRs into `dev`; `main` and the actual server receive releases only after a separate release decision.
 - Everything should keep functioning at all times. Once phase 1 starts, every model-layer PR into `dev` should run tests/smoke checks that protect dashboard, API, GeoServer layer, and layer-registry behavior before the next model is added.
+- Anything merged into `dev` should be fully working in the integration setup. For model-layer PRs, this means full end-to-end checks across model manifest, model API, output artifact, GeoServer publication, layer registry, and dashboard visibility, not metadata-only checks.
 
 Geonovum/NLDT interpretation:
 
@@ -696,15 +697,18 @@ Branching policy:
 
 PR/testing guardrail:
 
-After phase 1 starts landing, every model-layer PR into `dev` should include automated checks that prove the existing app still works before adding the next model. The first useful checks are:
+After phase 1 starts landing, every model-layer PR into `dev` should include automated checks that prove the existing app still works and that the new model layer is fully usable before adding the next model. The required path is full end-to-end, not API-only or GeoServer-only.
 
-- Docker Compose configuration validation;
-- policy-tool backend health/API smoke tests;
-- frontend/dashboard smoke test;
-- GeoServer reachability and expected layer publication checks;
-- layer registry schema/metadata validation;
-- model-owned metadata manifest/API consistency checks;
-- basic `datacompleetheid`, `last_updated`, source provenance, model version, and output-link validation.
+For the first PV model-layer PR, this means:
+
+- Docker Compose configuration validation for the integrated stack;
+- model API checks: `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`;
+- policy-tool backend health/API smoke tests, including layer-registry/orchestration compatibility where the PV layer is exposed through the policy-tool path;
+- frontend/dashboard smoke test: dashboard loads, PV layer is available in the layer UI or registry-driven equivalent, toggling/activating the layer produces no frontend errors;
+- GeoServer publication checks: WMS `GetCapabilities` includes the PV layer, WMS `GetMap` returns a non-empty image, and WFS `DescribeFeatureType` exposes expected fields including `pv_capacity_kwp`;
+- layer registry schema/metadata validation, including `layer_id`, model/group, geometry type, selectable feature type, CRS, GeoServer layer fields, style status, freshness, and actions;
+- model-owned `model-manifest.json`/API consistency checks;
+- `datacompleetheid`, `last_updated`, source provenance, model version/git hash, CRS, output artifact, and output-link validation.
 
 Geonovum alignment guardrail:
 
@@ -714,11 +718,11 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 1. Create or confirm the long-lived `dev` branch from the cleaned deployed base once the cleanup base is agreed.
 2. Start phase 1 by treating the current combined policy-tool backend as the reference GeoServer-visible model: consumption plus congestion in one working service.
-3. Add the first new GeoServer-visible model layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with smoke tests proving the existing stack still works.
+3. Add the first new GeoServer-visible model layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with full end-to-end smoke tests proving the integrated stack still works.
 4. Repeat the model-layer PR pattern for EV chargers, grid, and later other layers, even if their first outputs are simple standalone datasets.
 5. Add a frontend layer registry backed by static `layers.json` or `GET /layers`, then use it to render available layers and scenario outputs.
 6. Add `datacompleetheid`, `last_updated`, and basic metadata to those layer records.
-7. Add PR checks for `dev` that validate Docker Compose config, dashboard/API reachability, GeoServer layers, and layer registry metadata.
+7. Add PR checks for `dev` that validate Docker Compose config, model API, policy-tool backend, dashboard reachability/layer toggle, GeoServer WMS/WFS publication, layer registry metadata, manifest consistency, provenance, and output links.
 8. Inventory current policy-tool backend code into orchestration, consumption-model, congestion-model, data-ingestion, and layer-publishing responsibilities, but do this as preparation for the later split rather than before the PV layer.
 9. Keep the current policy-tool backend name in code for now, and let it remain the combined model/orchestration component until PV is working as the first new model layer.
 10. Start phase 2 by extracting or wrapping current policy-tool backend congestion calculation into `congestion-model-service`.
@@ -733,8 +737,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 - What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
-- Which smoke tests are mandatory before each model-layer PR can merge into `dev`?
-- Which smoke test proves the first PV layer is visible enough: GeoServer GetCapabilities/GetMap, WFS DescribeFeatureType, dashboard layer toggle, or a combination?
+- Which exact test fixture/area should the first PV full end-to-end smoke test use, for example a known CBS buurt with non-empty `pv_capacity_kwp`?
 
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
