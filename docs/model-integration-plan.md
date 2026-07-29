@@ -52,6 +52,9 @@ Decisions made so far:
 - GeoServer publication details such as workspace, final layer name, WMS/WFS URLs, style, and legend may be provisional when publication wiring is not finished yet, but the manifest must state the intended values, owner, and whether the layer is `ready_for_publication` or already `published`.
 - Default GeoServer styling is acceptable for the first PV PR. A custom SLD style and polished legend are not required before merge, but the manifest should expose style metadata such as `style_status: default_geoserver` so the dashboard can later replace it with a proper PV capacity style.
 - The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
+- A generic dependency knowledge graph is a possible far-future professional target, not a phase-1 or phase-2 requirement. The first congestion implementation should use ordinary, congestion-owned assignment/dependency tables keyed by stable feature and grid-object identifiers.
+- A future data space and a future knowledge graph are related but separate concerns: the data space governs trusted sharing between independent parties, while the knowledge graph gives objects, concepts, and relationships machine-readable meaning. Adopt either only when a concrete interoperability use case justifies it.
+- Preserve that upgrade path now through persistent web identifiers, explicit typed relationships, versioned provenance, metadata manifests, and standards-friendly APIs; do not require RDF, a triple store, a data-space connector, or semantic reasoning for the first working integrations.
 - When scenario outputs are introduced later, scenario result storage follows a hybrid maturity path: write result metadata and profile files first, publish GeoServer-visible result layers only for outputs explicitly chosen for map display, and later move the canonical result store to PostGIS/Timescale.
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
 - Phase 1 does not include scenario result layers. Scenario output publication is deferred until scenario/congestion functionality exists; at that point, decide per output whether it should become a GeoServer-visible layer or remain a metadata/profile/download output.
@@ -534,7 +537,8 @@ Professional target:
 
 - emit events such as `layer.updated`, `features.updated`, `mapping.stale`, `mapping.updated`, and `scenario.outputs.stale`;
 - include changed feature ids, feature id field names, change manifests, or bounding boxes in update events whenever possible;
-- maintain a dependency graph so the congestion model knows which mappings and scenario outputs depend on which layers/features;
+- maintain explicit congestion-owned dependency records so the model knows which mappings and scenario outputs depend on which layers/features;
+- promote those records to a generic knowledge graph only if cross-model semantic queries, reasoning, or links to external ecosystems make that additional complexity worthwhile;
 - add retries, audit logs, automated metadata validators, and eventually content hashes for reproducibility where needed;
 - expose update state to the frontend so users can see whether a layer/result is current, stale, refreshing, or failed.
 
@@ -544,6 +548,36 @@ Geonovum alignment guardrail:
 - dependency timestamps and event history support provenance and lineage;
 - later catalogue records can expose update frequency, modified timestamps, lineage, and service links through DCAT-AP-NL, ISO metadata, or OGC API Records;
 - incremental refresh should preserve stable geo-object identifiers so joins and derived mappings remain explainable; the shared diff checker is a practical implementation bridge until event-based update triggers are available.
+
+## Future Data Space And Knowledge Graph Path
+
+In easy terms: the working system can keep its data in normal databases and exchange it through normal APIs. If the project later needs to share governed data with other universities, network operators, municipalities, or European ecosystems, a data space can add agreements, identity, access control, catalogues, usage policies, and trusted connectors. If the project later needs machines to understand and traverse relationships such as "this PV estimate belongs to this buurt, feeds these LV assets, and contributes to this transformer result," a knowledge graph can represent those links explicitly.
+
+These are separate upgrades:
+
+- a data space addresses who may discover, access, and use which data under which conditions;
+- a knowledge graph addresses what objects and concepts mean and how they are related;
+- a deployment may eventually use both, but one does not require the other.
+
+Staged path:
+
+1. Working integrations: use stable feature ids, the existing URI-style identifiers, model manifests, OpenAPI-friendly APIs, GeoServer layers, and ordinary Postgres/PostGIS tables.
+2. Explicit dependencies: let the congestion model store assignment and derivation records with source and target ids, relationship type, method, versions, timestamps, and provenance. Query these tables to determine what must be refreshed.
+3. Semantic pilot, only when useful: map selected domain concepts and relationships to NEN 3610 Linked Data and established vocabularies. RDF/RDFS can express data and relationships, SKOS can define shared concepts, SHACL can validate graph records, OWL can support reasoning where needed, and PROV-O can represent lineage.
+4. Data-space pilot, only for a concrete multi-party sharing case: publish discoverable data products and policies through a catalogue, add participant identity and access/usage controls, and test a standards-based data connector such as one using the Dataspace Protocol.
+
+Adoption gates:
+
+- do not introduce a triple store until relational dependency queries have become limiting or a semantic interoperability use case is approved;
+- do not introduce data-space infrastructure until there is at least one external provider/consumer relationship that needs governed or sovereign sharing beyond ordinary authenticated APIs;
+- run either upgrade as a bounded pilot before making it part of the critical RDP runtime;
+- keep GeoServer, model APIs, and the dashboard working while semantic or data-space interfaces are added alongside them.
+
+Geonovum alignment guardrail:
+
+- NEN 3610 Linked Data provides the future bridge from geo-information models to linked data, with persistent identifiers and W3C vocabularies for semantics, validation, and provenance;
+- Geonovum's data-space exploration treats APIs, metadata/self-descriptions, catalogues, provenance, identity, access/usage control, governance, and connectors as distinct building blocks rather than one product that must be installed at once;
+- this staged approach follows the wider Geonovum data-ecosystem direction: start from a concrete societal use case, reuse standards and shared building blocks, and grow federation only as participants and trust requirements demand it.
 
 ## Scenario Result Storage
 
@@ -837,7 +871,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
 - What retention policy should apply to scenario result files once PostGIS/Timescale becomes the canonical store?
-- What dependency graph does the congestion model need to refresh only affected mappings and scenario outputs?
 - What exact model/layer-specific rules determine `datacompleetheid` bins 0-3 for consumption, PV, EV, grid, mapping, and scenario results?
 - What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
