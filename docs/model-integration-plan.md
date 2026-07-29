@@ -38,7 +38,8 @@ Decisions made so far:
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
 - Scenario execution uses one JSON request to the policy-tool backend, with time settings, layer-native spatial selections, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
 - There is no single canonical scenario area yet. Spatial selections are layer-native feature references: CBS buurt, PC6, public EV charger, grid asset, transformer area, or later custom geometry, depending on the model/layer.
-- The grid model owns the spatial matching calculation that links each layer feature/profile to an appropriate grid component. The first working rule is closest Euclidean LV component.
+- The grid model owns the spatial matching calculation and persistent assignment records that link each layer feature/profile to an appropriate grid component. Integrated records live in a grid-owned table in the existing RDP PostGIS database. The first working rule is closest Euclidean LV component.
+- In the MVP, the shared layer publisher calls the grid model's assignment-refresh API after successfully publishing a changed source layer. Later this direct call should become a Redis layer-update event without changing assignment ownership.
 - The congestion model consumes grid-assignment records for profile aggregation and congestion calculations; it does not implement the spatial matching algorithm.
 - Allocation rules for area features with multiple LV components, such as CBS buurten or PC6 areas, are deferred to the grid-assignment story and should be agreed with the congestion-model requirements.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
@@ -122,7 +123,7 @@ Planned services:
 - `consumption-model-service`: generates residential, commercial, and industrial demand layers and profiles. The current residential-load logic should move here or be wrapped as this service over time.
 - `pv-map-service`: first publishes model-estimated PV capacity at CBS buurt resolution using `pv_capacity_kwp`; future versions can add PV potential, production profiles, and scenario-derived generation layers.
 - `ev-charger-model-service`: generates public EV charger location layers and charging demand profiles.
-- `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers and owns the API/logic for matching external areas or points to grid components.
+- `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers and owns the API, logic, and persistent records for matching external areas or points to grid components.
 - `congestion-model-service`: consumes model profiles, grid layers, and the stored grid-assignment mapping to aggregate profiles and calculate congestion indicators. Current congestion-related calculation in the policy-tool backend should move here in a follow-up story.
 - `other-model-service`: placeholder for later independent model services that publish layers/profiles through the same contract.
 
@@ -140,7 +141,7 @@ Ownership boundaries:
 | `consumption-model-service` | Residential, commercial, and industrial consumption calculations and profiles | Frontend orchestration or grid congestion logic |
 | `pv-map-service` | Model-estimated PV capacity first, later PV potential/production calculations, layers, and profiles | Scenario orchestration or grid congestion logic |
 | `ev-charger-model-service` | EV charger layer/profile logic | Scenario orchestration or grid congestion logic |
-| `grid-map-service` | Grid topology/assets/capacity/headroom publication and spatial matching of external features to grid components | Consumption/PV/EV calculations or congestion calculations |
+| `grid-map-service` | Grid topology/assets/capacity/headroom publication plus spatial matching and grid-assignment records in the existing RDP PostGIS database | Consumption/PV/EV calculations or congestion calculations |
 | `congestion-model-service` | Grid assignment consumption, profile aggregation, transformer/headroom/congestion indicators | Publishing the raw grid, implementing spatial matching, or owning unrelated model logic |
 | RDP crawler/data services | Shared external API ingestion, cached source data, reusable Postgres/PostGIS/Timescale inputs | Model-specific scenario calculations |
 | Layer publisher | Shared path to GeoServer/layer publication | Domain model calculations |
@@ -269,6 +270,7 @@ Shared layer-publisher responsibilities:
 - load or upsert features into the configured PostGIS table, preferably through a staging/transaction step so users never see a half-updated layer;
 - ensure the configured GeoServer workspace, PostGIS datastore, feature type/layer, and default style exist;
 - report `ready_for_publication`, `published`, or failed status and expose the resulting WMS/WFS links to the policy-tool layer registry;
+- after a successful layer update, call the grid model's assignment-refresh API with the layer id, version, changed feature ids, and a resolvable feature-collection link;
 - be idempotent so rerunning the same output version does not create duplicate tables, layers, or features;
 - use restricted PostGIS-writer and GeoServer-publisher credentials held only by the publishing component.
 
@@ -482,13 +484,19 @@ MVP behavior:
 
 - expose grid matching through the grid model API so it also works during standalone development;
 - calculate matches only against grid component types that the grid model declares valid for the requested assignment;
+- let the grid model own a persistent `grid_assignments` table in the existing RDP PostGIS database, using a restricted service role;
+- after successful source-layer publication, let the shared layer publisher call `POST /assignments/refresh` on the grid model;
+- identify the source layer, source version, changed feature ids, and a resolvable API/WFS collection link in the refresh request rather than copying a complete layer into the request;
 - refresh affected mapping rows when a source layer/profile layer changes and changed feature ids are known;
+- request a full-layer refresh only for initial backfill or when a reliable change set cannot be produced;
 - refresh assignments affected by changed grid components when the grid layer changes;
-- store the mapping outside model output layers, preferably in PostGIS once integrated, and as a simple file/table during standalone development;
+- keep the refresh endpoint manually callable for standalone development and operational recovery;
+- do not make the policy-tool backend the routine refresh caller; it may expose stale/missing assignment status when orchestrating a scenario;
 - let the congestion model consume the mapping to aggregate profiles onto LV components, LV/MV transformers, and later MV/HV transformers;
 - expose mapping completeness and confidence so the frontend can show where congestion results are based on strong or weak assignment evidence.
+- if assignment refresh fails, keep the published source layer available but mark its assignments stale or failed instead of silently using them as current.
 
-Still to decide: whether the grid model owns the persistent assignment table and refresh scheduling, or whether a shared integration component stores and refreshes records produced by the grid model. In both options, the matching algorithm remains owned by the grid model and the congestion model remains a consumer.
+Later path: replace the publisher's direct refresh call with a versioned `layer.updated` event on an RDP Redis stream. The grid model subscribes to that event and performs the same targeted refresh, so the direct MVP flow can evolve without changing the assignment contract.
 
 Deferred story:
 
@@ -978,7 +986,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - For area features with multiple LV components, which grid-assignment rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
 - Once run persistence is added, how long should scenario history and output artifacts be retained?
-- Should the grid model also own the persistent grid-assignment table and refresh scheduling, or should a shared integration component persist and refresh assignment records calculated by the grid model?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
 - Which external sources belong in the RDP crawler immediately, and which can remain standalone-only while prototyping?
