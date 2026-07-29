@@ -42,6 +42,8 @@ Decisions made so far:
 - A coarse quantitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four integer bins from 0 to 3.
 - `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
 - Layer versioning starts with timestamp metadata: `last_updated` on layers/outputs/mappings and `source_last_updated` for dependencies.
+- Layer change detection should use a shared lightweight diff checker in the crawler/ingestion/layer-publishing path. Models may report their own changed feature ids when available, but the shared diff checker is the fallback that compares previous and current published layer versions by stable feature id and feature hash.
+- Phase 1 only requires stable feature ids, layer version/update metadata, and room for optional change manifests; incremental congestion recalculation consumes these manifests later and is not required for the first PV layer PR.
 - Model metadata should be kept current by making the model repo the source of truth: model-owned metadata manifests feed `GET /metadata`, `GET /layers`, run records, and output records, while CI checks prevent required metadata from drifting when model code or source-data configuration changes.
 - The MVP manifest format is one combined `model-manifest.json` per model repo. It can be split into separate model, layer, source, and output records later if the manifest becomes too large or if catalogue publication needs a different structure.
 - The first PV PR should use a rich manifest, not a minimal placeholder. Required sections should already cover model identity/versioning, ownership/contact, model purpose, spatial and temporal scope, inputs/source provenance, output layers, attribute schema, units, CRS, GeoServer publication metadata, `datacompleetheid` rules, update/freshness metadata, API links, and run/output snapshot behavior.
@@ -86,6 +88,7 @@ Geonovum/NLDT interpretation:
 - Store grid assignments as relationships between source geo-objects/profiles and grid geo-objects, with method, distance, confidence, provenance, and source versions. This keeps the mapping standards-friendly and auditable instead of hiding it inside model code.
 - Keep `datacompleetheid` as a lightweight front-end indicator, but preserve enough provenance, actuality, completeness, accuracy, and lineage metadata to map later to ISO 19115/19119 metadata quality elements, DCAT-AP-NL catalogue records, and NLDT trustworthiness expectations.
 - Treat timestamps and source dependency versions as lightweight actuality/provenance metadata. Later event triggers should complement catalogue metadata and service links rather than replace them.
+- Treat change manifests as implementation-level provenance and update-scope metadata. They should preserve stable feature identifiers so they can later map cleanly to OGC API Features collections, catalogue metadata, and auditable lineage records.
 - Keep metadata close to the source data/model code and generate as much of it as possible from model manifests, source-data configuration, run records, and API responses. This follows the Geonovum metadata direction of avoiding scattered manual metadata while preserving links between data, APIs, models, and concepts.
 - When scenario outputs become map-visible in a later phase, publish those result geometries through GeoServer/WMS/WFS first, while keeping the design ready for OGC API Features/Tiles and catalogue records through DCAT-AP-NL or OGC API Records later. Phase 1 should not invent scenario result layers before there are real scenario outputs to publish.
 - Treat the frontend registry as the MVP discovery layer. It should use the same identifiers and metadata fields that can later be exposed through OGC API Records, DCAT-AP-NL catalogue entries, or OGC API Features/Tiles service metadata. The mandatory MVP fields deliberately mirror Geonovum metadata basics: persistent identifiers, titles, summaries, dates, responsible model/source context, CRS, protocol/service links, and enough quality/provenance information for users to judge whether a layer is fit for purpose.
@@ -431,7 +434,7 @@ Later versions can add richer quality dimensions such as accuracy, actuality, li
 
 ## Layer Versions And Update Triggers
 
-The first version should detect layer changes with timestamps. Every layer, output, and mapping should expose `last_updated`. Derived records should also keep the timestamps of the source layers they depend on.
+The first version should detect layer changes with timestamps. Every layer, output, and mapping should expose `last_updated`. Derived records should also keep the timestamps of the source layers they depend on. Every published layer should have a stable feature id field so later diffing, joins, and mapping refreshes can identify changed objects.
 
 Metadata maintenance rule:
 
@@ -443,6 +446,41 @@ Metadata maintenance rule:
 - CRS and GeoServer-readiness are not optional for geospatial outputs: the first PV layer must state the output CRS and produce a publishable artifact, even if the final GeoServer service URLs remain provisional.
 - default GeoServer styling is acceptable for the first PV layer; custom SLD and legend metadata can be added once the layer is visible and the dashboard styling need is clear.
 
+Change detection decision:
+
+In easy terms: after a model publishes a new layer version, the publishing path should compare it with the previous version and write a small "what changed?" manifest. If the model already knows which features changed, it can provide that list directly. If it does not, the shared diff checker compares stable feature ids and hashes of relevant geometry/attribute values.
+
+Ownership:
+
+- model services own stable feature ids and domain output values;
+- the crawler/ingestion/layer-publishing path owns generic diffing between previous and current published layer versions;
+- the policy-tool backend exposes change metadata through layer/output metadata where useful;
+- the congestion model consumes change manifests later, when incremental mapping/profile refresh is implemented.
+
+Step-1 scope:
+
+- require stable feature ids per layer, such as `cbs_buurt_code`, PC6, EV charger id, or grid asset id;
+- record `layer_version`, `last_updated`, and `source_last_updated`;
+- allow `change_manifest_url` to be absent until the diff checker exists;
+- do not block the first PV layer PR on incremental congestion recalculation.
+
+Example change manifest:
+
+```json
+{
+  "layer_id": "layer:pv:capacity-cbs-buurt",
+  "previous_version": "2026-07-28T10:00:00Z",
+  "current_version": "2026-07-29T10:00:00Z",
+  "change_detection_method": "feature_hash_diff",
+  "feature_id_field": "cbs_buurt_code",
+  "added_feature_ids": [],
+  "updated_feature_ids": ["BU03610302"],
+  "removed_feature_ids": [],
+  "changed_bbox": [109000, 515000, 111000, 517000],
+  "changed_count": 1
+}
+```
+
 MVP metadata shape:
 
 ```json
@@ -452,6 +490,8 @@ MVP metadata shape:
   "model_id": "pv-capacity-model",
   "model_version": "0.1.0",
   "model_git_sha": "<filled by build/runtime>",
+  "layer_version": "2026-07-28T10:30:00Z",
+  "feature_id_field": "<required stable feature id field>",
   "capacity_method": "model_estimated",
   "output_crs": "<required concrete CRS>",
   "publication_status": "ready_for_publication",
@@ -461,6 +501,10 @@ MVP metadata shape:
     "<source_dataset_id>": "2026-07-28T10:30:00Z"
   },
   "lineage_summary": "<short human-readable summary from the model repo>",
+  "change_detection": {
+    "change_manifest_url": "<optional until diff checker exists>",
+    "change_detection_method": "timestamp_only|model_reported|feature_hash_diff"
+  },
   "geoserver": {
     "workspace": "<provisional_or_concrete>",
     "layer_name": "<provisional_or_concrete>",
@@ -477,8 +521,9 @@ MVP metadata shape:
 MVP refresh behavior:
 
 - when a source layer timestamp changes, mark dependent mappings/results as potentially stale;
+- when a new layer version is published, run the shared diff checker if the model did not provide its own changed feature ids;
 - when model code, model metadata, or source-data configuration changes, expose the new `model_version`/git hash and refresh or republish affected layer outputs;
-- if the update contains changed feature ids, refresh only those mapping rows and any derived congestion results that depend on them;
+- if the update contains changed feature ids from the model or the shared diff checker, refresh only those mapping rows and any derived congestion results that depend on them;
 - if changed feature ids are not available, fall back to refreshing the affected layer/model mapping, not the entire system;
 - if the grid layer changes, refresh assignments for features near changed grid components where possible; only rebuild the full mapping when the change scope is unknown;
 - after refresh, update `last_updated`, source timestamps, provenance, and `datacompleetheid`.
@@ -488,7 +533,7 @@ This keeps the first version practical while avoiding unnecessary full recomputa
 Professional target:
 
 - emit events such as `layer.updated`, `features.updated`, `mapping.stale`, `mapping.updated`, and `scenario.outputs.stale`;
-- include changed feature ids or bounding boxes in update events whenever possible;
+- include changed feature ids, feature id field names, change manifests, or bounding boxes in update events whenever possible;
 - maintain a dependency graph so the congestion model knows which mappings and scenario outputs depend on which layers/features;
 - add retries, audit logs, automated metadata validators, and eventually content hashes for reproducibility where needed;
 - expose update state to the frontend so users can see whether a layer/result is current, stale, refreshing, or failed.
@@ -498,7 +543,7 @@ Geonovum alignment guardrail:
 - timestamps support basic actuality metadata;
 - dependency timestamps and event history support provenance and lineage;
 - later catalogue records can expose update frequency, modified timestamps, lineage, and service links through DCAT-AP-NL, ISO metadata, or OGC API Records;
-- incremental refresh should preserve stable geo-object identifiers so joins and derived mappings remain explainable.
+- incremental refresh should preserve stable geo-object identifiers so joins and derived mappings remain explainable; the shared diff checker is a practical implementation bridge until event-based update triggers are available.
 
 ## Scenario Result Storage
 
@@ -792,7 +837,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
 - What retention policy should apply to scenario result files once PostGIS/Timescale becomes the canonical store?
-- Which layer update jobs can report changed feature ids or bounding boxes, and which only report a changed timestamp?
 - What dependency graph does the congestion model need to refresh only affected mappings and scenario outputs?
 - What exact model/layer-specific rules determine `datacompleetheid` bins 0-3 for consumption, PV, EV, grid, mapping, and scenario results?
 - What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
