@@ -41,6 +41,7 @@ Decisions made so far:
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - A coarse quantitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four integer bins from 0 to 3.
 - `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
+- The producing model owns its model-specific `datacompleetheid` calculation and thresholds. For the PV capacity layer, the PV model agent defines, documents, tests, and versions the rule in the PV model repo; the integration layer validates and displays the result without recalculating it.
 - Layer versioning starts with timestamp metadata: `last_updated` on layers/outputs/mappings and `source_last_updated` for dependencies.
 - Layer change detection should use a shared lightweight diff checker in the crawler/ingestion/layer-publishing path. Models may report their own changed feature ids when available, but the shared diff checker is the fallback that compares previous and current published layer versions by stable feature id and feature hash.
 - Phase 1 only requires stable feature ids, layer version/update metadata, and room for optional change manifests; incremental congestion recalculation consumes these manifests later and is not required for the first PV layer PR.
@@ -426,6 +427,10 @@ MVP bins:
 Rules for the first version:
 
 - every layer metadata record should include `datacompleetheid` when possible;
+- the model or service that produces an output owns the score calculation, thresholds, supporting evidence, and changes to that method;
+- the shared integration contract requires a score from 0 to 3, its label, and a short method/explanation reference; method version, calculation timestamp, and evidence summary should be included when available;
+- the model repo documents and tests its rule in `model-manifest.json` and exposes the resulting metadata through its API;
+- integration CI validates the field shape, allowed values, and manifest/API consistency, but does not attempt to judge or reproduce the domain calculation;
 - grid-assignment mappings should include `datacompleetheid` so users can see whether profile-to-grid coupling is strong or approximate;
 - scenario results should expose an overall `datacompleetheid`, using the most conservative contributing score by default;
 - keep the bin calculation simple and documented per model or layer;
@@ -434,6 +439,12 @@ Rules for the first version:
 Professional target:
 
 Later versions can add richer quality dimensions such as accuracy, actuality, lineage, validation status, and uncertainty. `datacompleetheid` should remain a simple front-end summary, while the underlying metadata can grow toward ISO metadata quality elements, DCAT-AP-NL records, and NLDT trustworthiness requirements.
+
+Geonovum alignment guardrail:
+
+- create and maintain quality metadata as close as possible to the producing data/model process;
+- keep responsibility for the content with the data/model provider while allowing shared infrastructure to validate the metadata contract;
+- keep `datacompleetheid` clearly identified as a project-specific summary metric, with method and provenance, because ISO 19157 and DQV support richer and separately defined quality dimensions and metrics.
 
 ## Layer Versions And Update Triggers
 
@@ -871,7 +882,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
 - What retention policy should apply to scenario result files once PostGIS/Timescale becomes the canonical store?
-- What exact model/layer-specific rules determine `datacompleetheid` bins 0-3 for consumption, PV, EV, grid, mapping, and scenario results?
 - What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - For area features with multiple LV components, which congestion-model allocation rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
