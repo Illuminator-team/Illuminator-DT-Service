@@ -46,6 +46,8 @@ Decisions made so far:
 - The MVP manifest format is one combined `model-manifest.json` per model repo. It can be split into separate model, layer, source, and output records later if the manifest becomes too large or if catalogue publication needs a different structure.
 - The first PV PR should use a rich manifest, not a minimal placeholder. Required sections should already cover model identity/versioning, ownership/contact, model purpose, spatial and temporal scope, inputs/source provenance, output layers, attribute schema, units, CRS, GeoServer publication metadata, `datacompleetheid` rules, update/freshness metadata, API links, and run/output snapshot behavior.
 - Rich manifest fields are allowed to evolve. Fields whose final values depend on the finished model repo may be marked as `provisional`, `unknown`, or `to_be_confirmed`, but the field and its owner must exist from the first PV PR.
+- For the first PV PR, the geospatial output artifact must have a concrete CRS and be GeoServer-ready. Concrete fields include output format/path or table, CRS, geometry type, required attributes, and publication status.
+- GeoServer publication details such as workspace, final layer name, WMS/WFS URLs, style, and legend may be provisional when publication wiring is not finished yet, but the manifest must state the intended values, owner, and whether the layer is `ready_for_publication` or already `published`.
 - The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
 - Scenario result storage follows a hybrid maturity path: MVP writes result metadata and profile files, publishes map-visible result layers through GeoServer, and later moves the canonical result store to PostGIS/Timescale.
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
@@ -433,6 +435,7 @@ Metadata maintenance rule:
 - the policy-tool backend and frontend consume model API metadata instead of maintaining separate hand-copied layer descriptions;
 - every run/output stores a metadata snapshot so old scenario results remain explainable after the model changes.
 - the first PV manifest is intentionally rich: it must include the categories needed for discovery, publication, provenance, data quality, and API integration, even when some individual values are provisional during model development.
+- CRS and GeoServer-readiness are not optional for geospatial outputs: the first PV layer must state the output CRS and produce a publishable artifact, even if the final GeoServer service URLs remain provisional.
 
 MVP metadata shape:
 
@@ -444,12 +447,21 @@ MVP metadata shape:
   "model_version": "0.1.0",
   "model_git_sha": "<filled by build/runtime>",
   "capacity_method": "model_estimated",
+  "output_crs": "<required concrete CRS>",
+  "publication_status": "ready_for_publication",
   "source_names": ["<filled from model metadata>"],
   "last_updated": "2026-07-28T10:30:00Z",
   "source_last_updated": {
     "<source_dataset_id>": "2026-07-28T10:30:00Z"
   },
-  "lineage_summary": "<short human-readable summary from the model repo>"
+  "lineage_summary": "<short human-readable summary from the model repo>",
+  "geoserver": {
+    "workspace": "<provisional_or_concrete>",
+    "layer_name": "<provisional_or_concrete>",
+    "wms_url": "<optional until published>",
+    "wfs_url": "<optional until published>",
+    "publication_owner": "<team/person>"
+  }
 }
 ```
 
@@ -717,7 +729,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
 - Which smoke tests are mandatory before each model-layer PR can merge into `dev`?
-- Which rich manifest fields may be marked provisional in the first PV PR, and which must be concrete before merging into `dev`?
+- Should the first PV PR include a basic GeoServer/SLD style and legend metadata, or is default styling acceptable until the layer is visible in the dashboard?
 
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
