@@ -4,7 +4,7 @@
 
 This document sketches how the current policy-tool stack can grow into a set of independent RDP model services that feed shared frontend layers and can later interact through scenario models.
 
-The current `policy-tool-backend` should be treated as the first model service: a residential load map. The next expected model services are a PV map and a grid map. Each model should be able to run standalone during development, while still having a clear path into the RDP deployment.
+The current `policy-tool-backend` contains early model behavior and scenario logic, including residential load behavior and congestion-related calculation. The target architecture treats it as the frontend-facing orchestration API, while model calculations move into independent services that can also run standalone during development.
 
 ## Current Starting Point
 
@@ -12,7 +12,7 @@ The current `policy-tool-backend` should be treated as the first model service: 
 - `policy-tool-backend` serves the API at `/policy-api`.
 - The backend currently exposes `GET /simulate/{pc6}` and writes `pc6_profile_<PC6>.csv` into a shared processed-data volume.
 - The frontend fetches the simulation endpoint, then reads the generated CSV from `/dashboard/processed`.
-- The current backend mixes model execution, local file ingestion, and some direct external data fetching. That is acceptable for the prototype, but should become more explicit as new models are added.
+- The current backend mixes orchestration, model execution, local file ingestion, congestion-related calculation, and some direct external data fetching. That is acceptable for the prototype, but should be split into explicit ownership boundaries as new models are added.
 
 ## Epic 1 Decisions: Shared Data And Layer Contract
 
@@ -43,6 +43,12 @@ Decisions made so far:
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
 - The frontend uses a layer registry driven by layer metadata. The MVP can use a static `layers.json` or `GET /layers`; later versions should evolve toward catalogue-style discovery.
 - Layer registry records should include layer identity, group/model, GeoServer layer name, geometry type, selectable feature type, `datacompleetheid`, freshness/stale state, and available actions such as profile or scenario run.
+- Model containers should own domain calculations and expose APIs. The policy-tool backend should own frontend-facing orchestration, not long-term model logic.
+- Current residential-load behavior can stay in the policy-tool backend during transition, but should move into or be wrapped as `consumption-model-service` over time.
+- Current congestion-related calculation in the policy-tool backend needs a follow-up split into `congestion-model-service`, which owns profile aggregation, grid assignment consumption, and congestion indicators.
+- External data/API fetching moves toward shared crawler/data services for integrated RDP, while standalone model development may keep isolated input adapters and caches.
+- GeoServer publishing should use a shared layer-publishing path instead of every model implementing its own publishing logic.
+- The main frontend should call the policy-tool backend; direct model API calls remain useful for standalone development and testing.
 
 Geonovum/NLDT interpretation:
 
@@ -61,6 +67,7 @@ Geonovum/NLDT interpretation:
 - Treat timestamps and source dependency versions as lightweight actuality/provenance metadata. Later event triggers should complement catalogue metadata and service links rather than replace them.
 - Publish map-visible scenario result geometries through GeoServer/WMS/WFS first, while keeping the design ready for OGC API Features/Tiles and catalogue records through DCAT-AP-NL or OGC API Records later.
 - Treat the frontend registry as the MVP discovery layer. It should use the same identifiers and metadata fields that can later be exposed through OGC API Records, DCAT-AP-NL catalogue entries, or OGC API Features/Tiles service metadata.
+- Keep ownership aligned with NLDT building blocks: Data & Sensors for crawler/ingestion, Rekenmodellen for model containers, Visualisatie for the frontend, and Fundament for catalogue/IAM/metadata concerns. Components should remain loosely coupled and API-speaking.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
 
 ## Target Shape
@@ -75,15 +82,49 @@ The model core should be independent from RDP infrastructure. Input and output a
 
 Planned services:
 
-- `policy-tool-backend`: frontend-facing scenario/orchestration API. It coordinates calls to model APIs and may keep the current residential load calculation internally during transition.
-- `consumption-model-service`: generates residential, commercial, and industrial demand layers and profiles. The current residential load logic should move here or be wrapped as this service over time.
+- `policy-tool-backend`: frontend-facing scenario/orchestration API. It coordinates calls to model APIs and may temporarily keep current residential-load and congestion-related logic during migration.
+- `consumption-model-service`: generates residential, commercial, and industrial demand layers and profiles. The current residential-load logic should move here or be wrapped as this service over time.
 - `pv-map-service`: generates PV potential/generation layers and profiles.
 - `ev-charger-model-service`: generates public EV charger location layers and charging demand profiles.
 - `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers. It should not own load/PV/EV-to-grid assignment logic.
-- `congestion-model-service`: consumes model profiles, grid layers, and the stored grid-assignment mapping to aggregate profiles and calculate congestion indicators.
+- `congestion-model-service`: consumes model profiles, grid layers, and the stored grid-assignment mapping to aggregate profiles and calculate congestion indicators. Current congestion-related calculation in the policy-tool backend should move here in a follow-up story.
 - `other-model-service`: placeholder for later independent model services that publish layers/profiles through the same contract.
 
 If orchestration grows beyond simple scenario coordination, it can later be split out of the policy-tool backend. For the next versions, keeping orchestration in the policy-tool backend gives the frontend one stable API to call.
+
+## Model Ownership And Boundaries
+
+The system should stay split by responsibility so new models do not turn the policy-tool backend into one large mixed service.
+
+Ownership boundaries:
+
+| Component | Owns | Should not own long term |
+| --- | --- | --- |
+| `policy-tool-backend` | Frontend-facing API, scenario orchestration, model calls, result links, auth/routing glue where needed | Domain calculations for consumption, PV, EV, grid, or congestion |
+| `consumption-model-service` | Residential, commercial, and industrial consumption calculations and profiles | Frontend orchestration or grid congestion logic |
+| `pv-map-service` | PV potential/production calculations, layers, and profiles | Scenario orchestration or grid congestion logic |
+| `ev-charger-model-service` | EV charger layer/profile logic | Scenario orchestration or grid congestion logic |
+| `grid-map-service` | Grid topology/assets/capacity/headroom publication | Load/PV/EV-to-grid assignment or congestion calculations |
+| `congestion-model-service` | Grid assignment consumption, profile aggregation, transformer/headroom/congestion indicators | Publishing the raw grid as source data or owning unrelated model logic |
+| RDP crawler/data services | Shared external API ingestion, cached source data, reusable Postgres/PostGIS/Timescale inputs | Model-specific scenario calculations |
+| Layer publisher | Shared path to GeoServer/layer publication | Domain model calculations |
+| Frontend | Map UI, layer registry rendering, scenario controls | Direct orchestration across all model containers in the main app |
+
+Migration note:
+
+The current policy-tool backend may keep existing calculations while the MVP is being stabilized. Follow-up work should identify which current code belongs to orchestration, which belongs to `consumption-model-service`, and which belongs to `congestion-model-service`. The congestion split is especially important because congestion calculation is currently present in the policy-tool backend but belongs in the congestion model target boundary.
+
+MVP behavior:
+
+- keep the policy-tool backend as the single API the frontend calls;
+- keep standalone model APIs callable directly for development and debugging;
+- isolate any direct external data fetches behind input adapters;
+- produce model outputs and metadata from model services, then publish map layers through the shared layer-publishing path;
+- avoid adding new domain calculations to the policy-tool backend unless they are explicitly temporary migration code.
+
+Geonovum alignment guardrail:
+
+This mirrors the NLDT building-block split: Data & Sensors, Rekenmodellen, Visualisatie, and Fundament. The MVP can stay pragmatic, but each component should remain containerable, developer-friendly, loosely coupled, and reachable through APIs.
 
 ## Standalone And RDP Modes
 
@@ -146,6 +187,8 @@ external source -> RDP crawler/ingestion -> Redis/Timescale/PostGIS -> model ser
 ```
 
 Temporary standalone exceptions are allowed for development, but any direct API call in a model should be isolated behind an input adapter so it can be replaced by an RDP data source later.
+
+Similarly, GeoServer publication should move through a shared layer-publishing path rather than being reimplemented inside every model service.
 
 ## Model APIs And Orchestration
 
@@ -585,23 +628,29 @@ This keeps the dashboard usable while avoiding a future pileup of model-specific
 
 ## Near-Term Steps
 
-1. Keep the current policy-tool backend name in code for now, but document it as the frontend-facing scenario/orchestration API.
-2. Add a shared model output metadata record shape and generate it alongside the current CSV output.
-3. Introduce explicit standalone/RDP config switches in the current residential load code and its future consumption model service.
-4. Move direct external data calls in the residential model behind input adapters.
-5. Add a frontend layer registry backed by static `layers.json` or `GET /layers`, then use it to render available layers and scenario outputs.
-6. Add `datacompleetheid` bins to layer/output/run metadata and show them in the frontend layer UI.
-7. Add `last_updated` and source dependency timestamps to layers, outputs, mappings, and scenario results.
-8. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
-9. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
-10. Add scenario result metadata records and output links, with file/GeoServer outputs for MVP and PostGIS/Timescale as the integration target.
-11. Start the PV map as an independent model service with standalone local inputs first.
-12. Start the EV charger model as an independent model service with standalone local inputs first.
-13. Start the grid map as an independent model service with standalone local inputs first.
-14. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
-15. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
+1. Inventory current policy-tool backend code into orchestration, consumption-model, congestion-model, data-ingestion, and layer-publishing responsibilities.
+2. Keep the current policy-tool backend name in code for now, but treat it as the frontend-facing scenario/orchestration API.
+3. Add a shared model output metadata record shape and generate it alongside the current CSV output.
+4. Introduce explicit standalone/RDP config switches in the current residential load code and its future consumption model service.
+5. Move direct external data calls in the residential model behind input adapters.
+6. Add a frontend layer registry backed by static `layers.json` or `GET /layers`, then use it to render available layers and scenario outputs.
+7. Add `datacompleetheid` bins to layer/output/run metadata and show them in the frontend layer UI.
+8. Add `last_updated` and source dependency timestamps to layers, outputs, mappings, and scenario results.
+9. Define the first scenario JSON request schema with flexible layer-native spatial selections in the policy-tool backend and frontend.
+10. Start the policy-tool backend scenario/orchestration API while preserving the current frontend flow.
+11. Extract or wrap current policy-tool backend congestion calculation into `congestion-model-service`.
+12. Add scenario result metadata records and output links, with file/GeoServer outputs for MVP and PostGIS/Timescale as the integration target.
+13. Start the PV map as an independent model service with standalone local inputs first.
+14. Start the EV charger model as an independent model service with standalone local inputs first.
+15. Start the grid map as an independent model service with standalone local inputs first.
+16. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
+17. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 
 ## Open Questions
+
+- Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
+- What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
+- Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
 - Should the first layer registry be served as static `layers.json`, from `GET /layers` in the policy-tool backend, or both?
 - Which registry fields are mandatory for the first frontend UI: title, group, GeoServer layer, geometry type, selectable feature type, `datacompleetheid`, freshness, actions, style, or legend?
 - Which scenario outputs must be shown as GeoServer layers in the MVP, and which can remain metadata/profile links only?
