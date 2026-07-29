@@ -67,6 +67,7 @@ Decisions made so far:
 - Development uses a long-lived `dev` integration branch. Feature/fix branches should open PRs into `dev`; `main` and the actual server receive releases only after a separate release decision.
 - Everything should keep functioning at all times. Once phase 1 starts, every model-layer PR into `dev` should run tests/smoke checks that protect dashboard, API, GeoServer layer, and layer-registry behavior before the next model is added.
 - Anything merged into `dev` should be fully working in the integration setup. For model-layer PRs, this means full end-to-end checks across model manifest, model API, output artifact, GeoServer publication, layer registry, and dashboard visibility, not metadata-only checks.
+- The first PV full end-to-end smoke test should use CBS buurt `BU03610302` / `Overdie-Oost` as the stable fixture area. The test should assert that this feature exists and that `pv_capacity_kwp` is present and greater than zero, unless the PV model repo later documents a better fixture with equivalent stability.
 
 Geonovum/NLDT interpretation:
 
@@ -701,11 +702,13 @@ After phase 1 starts landing, every model-layer PR into `dev` should include aut
 
 For the first PV model-layer PR, this means:
 
+Fixture area: CBS buurt `BU03610302` / `Overdie-Oost`.
+
 - Docker Compose configuration validation for the integrated stack;
-- model API checks: `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`;
+- model API checks: `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`, using `BU03610302` / `Overdie-Oost` where a spatial fixture is needed;
 - policy-tool backend health/API smoke tests, including layer-registry/orchestration compatibility where the PV layer is exposed through the policy-tool path;
 - frontend/dashboard smoke test: dashboard loads, PV layer is available in the layer UI or registry-driven equivalent, toggling/activating the layer produces no frontend errors;
-- GeoServer publication checks: WMS `GetCapabilities` includes the PV layer, WMS `GetMap` returns a non-empty image, and WFS `DescribeFeatureType` exposes expected fields including `pv_capacity_kwp`;
+- GeoServer publication checks: WMS `GetCapabilities` includes the PV layer, WMS `GetMap` returns a non-empty image for or around `BU03610302`, and WFS `DescribeFeatureType` exposes expected fields including `pv_capacity_kwp`;
 - layer registry schema/metadata validation, including `layer_id`, model/group, geometry type, selectable feature type, CRS, GeoServer layer fields, style status, freshness, and actions;
 - model-owned `model-manifest.json`/API consistency checks;
 - `datacompleetheid`, `last_updated`, source provenance, model version/git hash, CRS, output artifact, and output-link validation.
@@ -737,7 +740,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 - What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
-- Which exact test fixture/area should the first PV full end-to-end smoke test use, for example a known CBS buurt with non-empty `pv_capacity_kwp`?
+- Should the PV E2E smoke test assert an exact expected `pv_capacity_kwp` value for `BU03610302`, or only assert that the value is present, numeric, and greater than zero?
 
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
