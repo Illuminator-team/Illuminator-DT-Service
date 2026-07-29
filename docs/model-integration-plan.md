@@ -23,6 +23,8 @@ Decisions made so far:
 - Scenario calculations use a 15-minute time step, expressed as `PT15M` in metadata.
 - Layers may keep their native spatial resolution. Consumption can use PC6 or CBS buurt areas, public EV chargers can use point locations, PV can use CBS buurt areas, and grid assets can use exact grid geometries where available.
 - The first PV capacity layer uses CBS buurt polygons and `pv_capacity_kwp` as the canonical numeric attribute, expressed in kWp.
+- `pv_capacity_kwp` is model-estimated PV capacity derived from open available source datasets, including measurement-based inputs that the PV model combines. It should not be presented as a raw measured register value.
+- The first PV layer metadata should expose the estimate method and provenance with fields such as `capacity_method: model_estimated`, `source_names`, `source_last_updated`, `model_version`, and `lineage_summary`.
 - Every map feature may have one or more profiles. In standards-aligned terms, a profile is a time series or observation collection linked to a geo-object.
 - GeoServer is the first publication target for spatial layers. The design should keep a path toward OGC API Features and OGC API Tiles later.
 - Identifiers should be URI-style from the start, using `https://reformers01.ewi.tudelft.nl/id/` as the initial TU Delft base URI.
@@ -92,7 +94,7 @@ Planned services:
 
 - `policy-tool-backend`: frontend-facing scenario/orchestration API. It coordinates calls to model APIs and may temporarily keep current residential-load and congestion-related logic during migration.
 - `consumption-model-service`: generates residential, commercial, and industrial demand layers and profiles. The current residential-load logic should move here or be wrapped as this service over time.
-- `pv-map-service`: first publishes PV capacity at CBS buurt resolution using `pv_capacity_kwp`; future versions can add PV potential, production profiles, and scenario-derived generation layers.
+- `pv-map-service`: first publishes model-estimated PV capacity at CBS buurt resolution using `pv_capacity_kwp`; future versions can add PV potential, production profiles, and scenario-derived generation layers.
 - `ev-charger-model-service`: generates public EV charger location layers and charging demand profiles.
 - `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers. It should not own load/PV/EV-to-grid assignment logic.
 - `congestion-model-service`: consumes model profiles, grid layers, and the stored grid-assignment mapping to aggregate profiles and calculate congestion indicators. Current congestion-related calculation in the policy-tool backend should move here in a follow-up story.
@@ -110,7 +112,7 @@ Ownership boundaries:
 | --- | --- | --- |
 | `policy-tool-backend` | Frontend-facing API, scenario orchestration, model calls, result links, auth/routing glue where needed | Domain calculations for consumption, PV, EV, grid, or congestion |
 | `consumption-model-service` | Residential, commercial, and industrial consumption calculations and profiles | Frontend orchestration or grid congestion logic |
-| `pv-map-service` | PV potential/production calculations, layers, and profiles | Scenario orchestration or grid congestion logic |
+| `pv-map-service` | Model-estimated PV capacity first, later PV potential/production calculations, layers, and profiles | Scenario orchestration or grid congestion logic |
 | `ev-charger-model-service` | EV charger layer/profile logic | Scenario orchestration or grid congestion logic |
 | `grid-map-service` | Grid topology/assets/capacity/headroom publication | Load/PV/EV-to-grid assignment or congestion calculations |
 | `congestion-model-service` | Grid assignment consumption, profile aggregation, transformer/headroom/congestion indicators | Publishing the raw grid as source data or owning unrelated model logic |
@@ -673,7 +675,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 1. Create or confirm the long-lived `dev` branch from the cleaned deployed base once the cleanup base is agreed.
 2. Start phase 1 by treating the current combined policy-tool backend as the reference GeoServer-visible model: consumption plus congestion in one working service.
-3. Add the first new GeoServer-visible model layer for PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with smoke tests proving the existing stack still works.
+3. Add the first new GeoServer-visible model layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with smoke tests proving the existing stack still works.
 4. Repeat the model-layer PR pattern for EV chargers, grid, and later other layers, even if their first outputs are simple standalone datasets.
 5. Add a frontend layer registry backed by static `layers.json` or `GET /layers`, then use it to render available layers and scenario outputs.
 6. Add `datacompleetheid`, `last_updated`, and basic metadata to those layer records.
@@ -693,7 +695,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
 - Which smoke tests are mandatory before each model-layer PR can merge into `dev`?
-- For `pv_capacity_kwp`, should the value represent installed/measured capacity, model-estimated capacity, or both distinguished by a source/type metadata field?
+- Which open source datasets feed the first `pv_capacity_kwp` estimate, and what short `lineage_summary` should explain how measurement-based inputs are combined?
 
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
