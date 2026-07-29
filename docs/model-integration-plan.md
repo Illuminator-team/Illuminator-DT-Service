@@ -53,7 +53,7 @@ Decisions made so far:
 - Scenario result storage follows a hybrid maturity path: MVP writes result metadata and profile files, publishes map-visible result layers through GeoServer, and later moves the canonical result store to PostGIS/Timescale.
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
 - The frontend uses a layer registry driven by layer metadata. The MVP uses `GET /layers` on the policy-tool backend as the canonical dashboard contract, with static `layers.json` only as a fallback or seed; later versions should evolve toward catalogue-style discovery.
-- Layer registry records should include layer identity, group/model, GeoServer layer name, geometry type, selectable feature type, `datacompleetheid`, freshness/stale state, and available actions such as profile or scenario run.
+- Layer registry records have a mandatory MVP field set: stable ids, title/description, group/model/version, metadata URL, GeoServer publication details, geometry type, selectable feature type, CRS, metrics/units, style status, actions, `datacompleetheid`, freshness state, and lightweight provenance.
 - Model containers should own domain calculations and expose APIs. The policy-tool backend should own frontend-facing orchestration, not long-term model logic.
 - The current policy-tool backend is treated as the phase-1 reference model: a combined consumption-and-congestion prototype that is already exposed through the current dashboard/GeoServer path.
 - Before ripping that combined backend apart, PV is the first new standalone model layer to add.
@@ -87,7 +87,7 @@ Geonovum/NLDT interpretation:
 - Treat timestamps and source dependency versions as lightweight actuality/provenance metadata. Later event triggers should complement catalogue metadata and service links rather than replace them.
 - Keep metadata close to the source data/model code and generate as much of it as possible from model manifests, source-data configuration, run records, and API responses. This follows the Geonovum metadata direction of avoiding scattered manual metadata while preserving links between data, APIs, models, and concepts.
 - Publish map-visible scenario result geometries through GeoServer/WMS/WFS first, while keeping the design ready for OGC API Features/Tiles and catalogue records through DCAT-AP-NL or OGC API Records later.
-- Treat the frontend registry as the MVP discovery layer. It should use the same identifiers and metadata fields that can later be exposed through OGC API Records, DCAT-AP-NL catalogue entries, or OGC API Features/Tiles service metadata.
+- Treat the frontend registry as the MVP discovery layer. It should use the same identifiers and metadata fields that can later be exposed through OGC API Records, DCAT-AP-NL catalogue entries, or OGC API Features/Tiles service metadata. The mandatory MVP fields deliberately mirror Geonovum metadata basics: persistent identifiers, titles, summaries, dates, responsible model/source context, CRS, protocol/service links, and enough quality/provenance information for users to judge whether a layer is fit for purpose.
 - Keep ownership aligned with NLDT building blocks: Data & Sensors for crawler/ingestion, Rekenmodellen for model containers, Visualisatie for the frontend, and Fundament for catalogue/IAM/metadata concerns. Components should remain loosely coupled and API-speaking.
 - Keep the delivery workflow close to the Geonovum OGC API Testbed pattern: separate stable and sandbox/integration flows, use GitHub PR/workflow checks, and redeploy/test only affected services where possible.
 - Treat early JSON records as a pragmatic bridge toward standards, not as a private replacement for standards.
@@ -632,34 +632,75 @@ The frontend should evolve from hardcoded layer radio buttons into a layer regis
 
 In easy terms: the dashboard should ask the policy-tool backend, "which layers can I show right now?" The backend can then answer with consumption, PV, EV, grid, and scenario layers, even if some of those records were initially loaded from static configuration.
 
-MVP registry record:
+MVP registry record, using the first PV layer as the shape to implement:
 
 ```json
 {
-  "id": "https://reformers01.ewi.tudelft.nl/id/layer/consumption/residential-pc6",
-  "local_id": "layer:consumption:residential-pc6",
-  "title": "Residential Load by PC6",
-  "group": "consumption",
-  "model_id": "https://reformers01.ewi.tudelft.nl/id/model/consumption",
-  "geoserver_layer": "rdp:residential_pc6",
+  "id": "https://reformers01.ewi.tudelft.nl/id/layer/pv/capacity-cbs-buurt",
+  "local_id": "layer:pv:capacity-cbs-buurt",
+  "title": "PV Capacity by CBS Buurt",
+  "description": "Model-estimated installed PV capacity per CBS buurt.",
+  "group": "pv",
+  "model_id": "https://reformers01.ewi.tudelft.nl/id/model/pv-capacity",
+  "model_version": "to_be_confirmed",
+  "metadata_url": "/policy-api/models/pv-capacity/metadata",
+  "geoserver": {
+    "workspace": "rdp",
+    "layer": "pv_capacity_cbs_buurt",
+    "qualified_name": "rdp:pv_capacity_cbs_buurt",
+    "wms_url": "/geoserver/rdp/wms",
+    "wfs_url": "/geoserver/rdp/wfs"
+  },
   "geometry_type": "polygon",
-  "selectable_feature_type": "pc6",
+  "selectable_feature_type": "cbs_buurt",
+  "crs": "EPSG:28992",
+  "metrics": [
+    {
+      "name": "pv_capacity_kwp",
+      "title": "PV capacity",
+      "unit": "kWp",
+      "data_type": "number"
+    }
+  ],
   "style": {
-    "legend": "residential_load",
-    "default_visible": true
+    "style_status": "default_geoserver",
+    "sld_name": null,
+    "legend_url": null,
+    "default_visible": false
   },
   "actions": {
-    "show_profile": true,
+    "selectable": true,
+    "show_profile": false,
     "scenario_input": true
   },
   "data_quality": {
-    "datacompleetheid": 3,
-    "datacompleetheid_label": "hoog"
+    "datacompleetheid": 2,
+    "datacompleetheid_label": "middel",
+    "datacompleetheid_method": "to_be_confirmed"
   },
-  "last_updated": "2026-07-28T10:00:00Z",
+  "provenance": {
+    "source_names": ["to_be_confirmed"],
+    "lineage_summary": "to_be_confirmed"
+  },
+  "last_updated": "to_be_confirmed",
+  "source_last_updated": "to_be_confirmed",
   "state": "current"
 }
 ```
+
+Mandatory MVP fields:
+
+- identity: `id`, `local_id`, `title`, and `description`;
+- ownership and traceability: `group`, `model_id`, `model_version`, and `metadata_url`;
+- publication: `geoserver.workspace`, `geoserver.layer`, `geoserver.qualified_name`, `geoserver.wms_url`, and `geoserver.wfs_url`;
+- spatial contract: `geometry_type`, `selectable_feature_type`, and `crs`;
+- metric contract: `metrics[]` with `name`, `title`, `unit`, and `data_type`;
+- style contract: `style.style_status`, `style.default_visible`, and optional `sld_name`/`legend_url` values, which may be `null` while GeoServer default styling is used;
+- interaction contract: `actions.selectable`, `actions.show_profile`, and `actions.scenario_input`;
+- quality and freshness: `data_quality.datacompleetheid`, `data_quality.datacompleetheid_label`, `last_updated`, `source_last_updated`, and `state`;
+- provenance: `provenance.source_names` and `provenance.lineage_summary`.
+
+A field may temporarily contain `unknown`, `to_be_confirmed`, or `null` only when the owning model PR explains why and the value is not needed for the dashboard smoke test. The field itself should still be present so schema validation, frontend rendering, and later catalogue mapping do not drift.
 
 MVP behavior:
 
@@ -670,7 +711,8 @@ MVP behavior:
 - show `datacompleetheid`, freshness, and stale/current/refreshing/failed state per layer/result;
 - use registry metadata to decide whether a feature can show a profile, be selected for a scenario, or display a scenario output;
 - request scenario runs through the policy-tool backend when a registry action says a layer/feature can be used as scenario input;
-- render output metadata records rather than assuming every model writes one specific CSV filename.
+- render output metadata records rather than assuming every model writes one specific CSV filename;
+- validate the mandatory registry fields for every layer returned by `GET /layers`.
 
 Maturity path:
 
@@ -714,7 +756,7 @@ Fixture area: CBS buurt `BU03610302` / `Overdie-Oost`.
 - policy-tool backend health/API smoke tests, including layer-registry/orchestration compatibility where the PV layer is exposed through the policy-tool path;
 - frontend/dashboard smoke test: dashboard loads, PV layer is available in the layer UI or registry-driven equivalent, toggling/activating the layer produces no frontend errors;
 - GeoServer publication checks: WMS `GetCapabilities` includes the PV layer, WMS `GetMap` returns a non-empty image for or around `BU03610302`, and WFS `DescribeFeatureType` exposes expected fields including `pv_capacity_kwp`;
-- layer registry schema/metadata validation, including `layer_id`, model/group, geometry type, selectable feature type, CRS, GeoServer layer fields, style status, freshness, and actions;
+- layer registry schema/metadata validation, including ids, title/description, model/group/version, metadata URL, CRS, metric names/units, GeoServer layer and WMS/WFS fields, style status, freshness, `datacompleetheid`, provenance, and actions;
 - model-owned `model-manifest.json`/API consistency checks;
 - `datacompleetheid`, `last_updated`, source provenance, model version/git hash, CRS, output artifact, and output-link validation.
 
@@ -729,7 +771,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 3. Add the first new GeoServer-visible model layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with full end-to-end smoke tests proving the integrated stack still works.
 4. Repeat the model-layer PR pattern for EV chargers, grid, and later other layers, even if their first outputs are simple standalone datasets.
 5. Add a frontend layer registry backed by `GET /layers` on the policy-tool backend, optionally seeded by static `layers.json`, then use it to render available layers and scenario outputs.
-6. Add `datacompleetheid`, `last_updated`, and basic metadata to those layer records.
+6. Add mandatory registry fields, including `datacompleetheid`, `last_updated`, `source_last_updated`, CRS, metrics/units, GeoServer service links, style status, actions, and lightweight provenance.
 7. Add PR checks for `dev` that validate Docker Compose config, model API, policy-tool backend, dashboard reachability/layer toggle, GeoServer WMS/WFS publication, layer registry metadata, manifest consistency, provenance, and output links.
 8. Inventory current policy-tool backend code into orchestration, consumption-model, congestion-model, data-ingestion, and layer-publishing responsibilities, but do this as preparation for the later split rather than before the PV layer.
 9. Keep the current policy-tool backend name in code for now, and let it remain the combined model/orchestration component until PV is working as the first new model layer.
@@ -748,7 +790,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
-- Which registry fields are mandatory for the first frontend UI: title, group, GeoServer layer, geometry type, selectable feature type, `datacompleetheid`, freshness, actions, style, or legend?
 - Which scenario outputs must be shown as GeoServer layers in the MVP, and which can remain metadata/profile links only?
 - What retention policy should apply to scenario result files once PostGIS/Timescale becomes the canonical store?
 - Which layer update jobs can report changed feature ids or bounding boxes, and which only report a changed timestamp?
