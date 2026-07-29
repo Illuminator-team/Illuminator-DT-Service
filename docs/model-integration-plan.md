@@ -30,7 +30,7 @@ Decisions made so far:
 - Identifiers should be URI-style from the start, using `https://reformers01.ewi.tudelft.nl/id/` as the initial TU Delft base URI.
 - Model, layer, profile, scenario, and run metadata starts as lightweight JSON metadata records, not as full formal catalogue infrastructure.
 - Source dataset names, source versions, and detailed PV `lineage_summary` text can be finalized from the model repo once the PV model/API is finished; the architecture decision now is to reserve and validate those metadata fields, not guess their final values early.
-- Profile storage follows a maturity path: simple CSV/file outputs for standalone development first, shared Timescale/PostGIS storage for integrated RDP deployment next, and standards-facing observation APIs later.
+- Profiles use the existing Timescale/Postgres database as their canonical store from the first integrated implementation. PostGIS stores or references the associated geo-objects; CSV is only an optional export/debug artifact, including during standalone development.
 - All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
 - The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. Legacy endpoints may remain during transition.
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
@@ -56,7 +56,7 @@ Decisions made so far:
 - A generic dependency knowledge graph is a possible far-future professional target, not a phase-1 or phase-2 requirement. The first congestion implementation should use ordinary, congestion-owned assignment/dependency tables keyed by stable feature and grid-object identifiers.
 - A future data space and a future knowledge graph are related but separate concerns: the data space governs trusted sharing between independent parties, while the knowledge graph gives objects, concepts, and relationships machine-readable meaning. Adopt either only when a concrete interoperability use case justifies it.
 - Preserve that upgrade path now through persistent web identifiers, explicit typed relationships, versioned provenance, metadata manifests, and standards-friendly APIs; do not require RDF, a triple store, a data-space connector, or semantic reasoning for the first working integrations.
-- When scenario outputs are introduced later, scenario result storage follows a hybrid maturity path: write result metadata and profile files first, publish GeoServer-visible result layers only for outputs explicitly chosen for map display, and later move the canonical result store to PostGIS/Timescale.
+- When scenario outputs are introduced later, store run metadata and time-series/profile results in Postgres/Timescale from their first implementation. Publish PostGIS/GeoServer-visible result layers only for outputs explicitly chosen for map display; files remain optional exports rather than canonical storage.
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
 - Phase 1 does not include scenario result layers. Scenario output publication is deferred until scenario/congestion functionality exists; at that point, decide per output whether it should become a GeoServer-visible layer or remain a metadata/profile/download output.
 - The frontend uses a layer registry driven by layer metadata. The MVP uses `GET /layers` on the policy-tool backend as the canonical dashboard contract, with static `layers.json` only as a fallback or seed; later versions should evolve toward catalogue-style discovery.
@@ -108,7 +108,7 @@ Model services should follow this pattern:
 input adapter -> model core -> output adapter
 ```
 
-The model core should be independent from RDP infrastructure. Input and output adapters decide whether the model reads local files, direct API/cache data, Redis streams, Timescale/PostGIS tables, or writes file outputs, API responses, and GeoServer/PostGIS layers.
+The model core should be independent from RDP infrastructure. Input and output adapters decide whether the model reads local files, direct API/cache data, Redis streams, or Timescale/PostGIS tables. Canonical profile and integrated spatial outputs go to Postgres/Timescale/PostGIS; APIs expose them and optional file exporters can produce development/download artifacts.
 
 Planned services:
 
@@ -165,38 +165,53 @@ Recommended environment/config switches:
 ```text
 RUN_MODE=standalone|rdp
 INPUT_BACKEND=local|rdp
-OUTPUT_BACKEND=file|postgis|geoserver
+PROFILE_STORE=postgres
+SPATIAL_STORE=postgis
+EXPORT_BACKEND=none|file
 ```
 
 Standalone mode should prioritize fast development:
 
 - read sample CSV/GeoJSON/Parquet files from the service directory;
 - optionally read from a local cache of external API responses;
-- write outputs to `data/processed` or another ignored local output directory;
+- start a local Postgres/Timescale/PostGIS container and run the same versioned schema migrations used by RDP;
+- write canonical profiles and output metadata to that local database;
+- optionally export CSV/GeoJSON files to `data/processed` or another ignored local output directory for inspection;
 - expose the same HTTP API shape as the deployed service where practical.
 
 RDP mode should prioritize integration:
 
 - read from RDP-managed Redis streams, Timescale tables, or PostGIS tables;
 - use data generated by crawler/ingestion services instead of each model calling external APIs directly;
+- write profiles through a restricted data-writer role, never the database administrator account;
 - publish model outputs through shared RDP data stores and layer publication paths.
 
-## Profile Storage Maturity Path
+## Profile Storage Decision
 
-Profiles should be easy to generate during standalone model development and easy to share once models are integrated.
+Profiles should live in the database from the beginning. The repository already runs TimescaleDB/PostgreSQL with GIS support as RDP permanent time-series storage, initializes `rdp_db` through the `db-scheme` service, synchronizes selected Redis data into it, connects Grafana to it, and uses PostGIS as a GeoServer publication source. The current policy-tool profile CSV flow is therefore legacy behavior to migrate, not the target pattern for new models.
 
-MVP behavior:
+First implementation:
 
-- models may write profile outputs as CSV files, matching the current residential load dashboard flow;
-- each CSV should be accompanied by a small JSON metadata record that identifies the feature, model run, metric, unit, time resolution, data quality, and provenance;
-- GeoServer remains responsible for map layers, while profile files are fetched separately by the frontend or model-specific endpoint.
-
-Integrated RDP behavior:
-
-- model services write profiles into shared Timescale/Postgres tables;
+- model services write profile values, profile metadata, and run/output links into shared Timescale/Postgres tables;
 - PostGIS stores or references the geo-objects that the profiles belong to;
+- profile records reference stable model, run, metric, and feature identifiers rather than embedding duplicate geometries;
 - output metadata links GeoServer feature identifiers to the profile rows or profile collection;
-- the frontend stops depending on model-specific filenames and instead reads metadata records.
+- model APIs read profile metadata/values from the database and return metadata plus resource links;
+- the frontend reads those API resources and does not depend on model-specific filenames;
+- schema changes are delivered through versioned migrations and tested in standalone and integrated Docker Compose setups;
+- model services receive least-privilege database credentials appropriate for writing their own outputs.
+
+Standalone behavior:
+
+- the model's standalone Docker Compose setup includes a local compatible database service;
+- it applies the same profile schema migrations as RDP;
+- optional CSV/Parquet exports may be generated for developers, tests, or downloads, but they are never the authoritative copy.
+
+Geonovum alignment guardrail:
+
+- treat the database schema as an internal implementation contract and expose data to consumers through documented APIs and metadata;
+- keep time-series observations logically separate from geo-object geometry and connect them with stable identifiers;
+- keep data at its authoritative source and avoid model-specific file copies becoming parallel sources of truth.
 
 Professional target:
 
@@ -204,7 +219,7 @@ Professional target:
 - time-series/observation access can move toward a SensorThings-style API where that gives real interoperability value;
 - table-to-geo-object linking can align with OGC API Joins where profile or scenario data needs to be connected to existing spatial objects without duplicating geometries.
 
-This means early versions stay quick and working, while every output still carries enough identity and metadata to be upgraded later.
+This uses infrastructure already present in RDP, removes a later file-to-database migration from every new model, and still keeps standalone development self-contained.
 
 ## Data Ownership
 
@@ -240,13 +255,13 @@ Endpoint meanings:
 - `GET /layers`: map layer metadata for outputs that can be shown in GeoServer or a future OGC API layer endpoint.
 - `POST /runs`: starts a model run from scenario inputs. It may execute synchronously in the MVP, but should still return a `run_id` and output metadata when practical.
 - `GET /runs/{run_id}`: returns run status, parameters, timestamps, and links to outputs.
-- `GET /outputs/{output_id}`: returns output metadata plus links to layer resources, profile files, database records, or service endpoints.
+- `GET /outputs/{output_id}`: returns output metadata plus links to layer resources and database-backed profile/API resources; optional file exports may also be linked when they exist.
 
 The existing residential load behavior can keep `GET /simulate/{pc6}` during transition, but new model APIs should move toward run IDs and output metadata records. That will make it easier for the policy-tool backend to consume multiple model outputs consistently.
 
 Maturity path:
 
-- MVP: simple FastAPI/HTTP JSON routes, permissive internal schemas, synchronous runs allowed, and optional generated CSV/profile files.
+- MVP: simple FastAPI/HTTP JSON routes, permissive internal schemas, synchronous runs allowed, database-persisted run/output metadata and profiles, and optional generated export files.
 - Next: shared request/response schemas across models, explicit error responses, stable run/output ids, and generated OpenAPI specs.
 - Professional target: API Design Rules/OpenAPI documentation, geospatial alignment where applicable, and OGC API Processes-style execution for standardized process invocation when it starts paying for itself.
 
@@ -273,7 +288,7 @@ Minimum run fields:
 - `status`: at least `accepted`, `running`, `completed`, or `failed`, even if MVP runs usually jump straight to `completed` or `failed`.
 - `created_at`, `started_at`, and `finished_at`: timestamps for debugging, provenance, and later history views.
 - `inputs`: the scenario/model parameters used for the run, or a pointer to them.
-- `outputs`: links to layer metadata, profile files, database records, or API outputs.
+- `outputs`: links to layer metadata, database-backed profile resources, database records, or API outputs.
 - `data_quality`: completeness/confidence/provenance summary for the run result.
 
 Maturity path:
@@ -596,10 +611,11 @@ Scenario results are not one object. A result can include map layers, profiles, 
 
 MVP storage path:
 
-- write one scenario result metadata JSON record per run;
-- write profile outputs as CSV or simple files where that keeps standalone development fast;
-- publish map-visible geometries through GeoServer, using GeoJSON/PostGIS as the practical bridge depending on what the service can write at that stage;
+- store scenario/run/result metadata in Postgres;
+- store profile and time-series outputs in Timescale;
+- store map-visible geometries in PostGIS and publish them through GeoServer;
 - return output metadata and links from the policy-tool backend, rather than embedding all raw profile and map data in the API response;
+- allow CSV/Parquet/GeoJSON only as optional exports for download, inspection, or debugging;
 - include `run_id`, input summary, output links, `datacompleetheid`, `last_updated`, source dependency timestamps, and stale/current state.
 
 MVP result metadata shape:
@@ -626,7 +642,8 @@ MVP result metadata shape:
     "profiles": [
       {
         "id": "https://reformers01.ewi.tudelft.nl/id/time-series/scenario/local-dev-001/transformer-load",
-        "href": "/dashboard/processed/scenario_local_dev_001_transformer_load.csv"
+        "href": "/policy-api/outputs/scenario-local-dev-001-transformer-load",
+        "storage": "timescale"
       }
     ],
     "summary": {
@@ -641,7 +658,7 @@ MVP result metadata shape:
 }
 ```
 
-Integrated RDP target:
+Storage implementation rule:
 
 - store scenario metadata, summary outputs, and run records in Postgres;
 - store time-series outputs in Timescale;
@@ -822,7 +839,7 @@ Implementation phases:
 1. GeoServer-visible model layers: make each model publish its first useful output as a GeoServer-visible layer, similar to the current policy-tool example. This phase should be delivered model by model: integrate one model layer, verify that the existing dashboard, API, and GeoServer setup still work, then move to the next model. This includes consumption, PV, EV, grid, and later other model layers. At this stage, models may still be simple and standalone, and scenario result layers are out of scope.
 2. Transformer profile coupling: connect consumption, PV, EV, grid, and other outputs through the congestion model so profiles can be aggregated at LV/MV transformers and later MV/HV transformers.
 3. Scenario UI: add sliders, buttons, scenario requests, run metadata, and scenario result layers/profiles on top of the working model/layer foundation.
-4. Professional setup: harden the architecture toward PostGIS/Timescale canonical stores, event-based triggers, richer tests, OpenAPI documentation, catalogue-style metadata, and OGC API/Geonovum-aligned publication where useful.
+4. Professional setup: harden the existing PostGIS/Timescale stores with production migrations, retention, backup, performance, and access controls, then add event-based triggers, richer tests, OpenAPI documentation, catalogue-style metadata, and OGC API/Geonovum-aligned publication where useful.
 
 Branching policy:
 
@@ -870,7 +887,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 11. Add the first congestion-model grid-assignment mapping using closest Euclidean LV component, with incremental refresh on layer updates.
 12. Add transformer-level profile aggregation outputs and metadata links.
 13. Start phase 3 by adding scenario sliders/buttons and `POST /scenarios` flow once phase 2 outputs are stable enough.
-14. When phase 3 starts, decide which scenario outputs need GeoServer-visible result layers and which can remain metadata/profile/download outputs; then add result metadata records and output links, with PostGIS/Timescale as the later canonical store.
+14. When phase 3 starts, decide which scenario outputs need GeoServer-visible result layers and which remain database-backed metadata/profile outputs with optional downloads; use PostGIS/Timescale as the canonical store from the first scenario implementation.
 15. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 16. Start phase 4 hardening only after the working map/model/scenario flow is stable in `dev`.
 
@@ -881,8 +898,8 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
-- What retention policy should apply to scenario result files once PostGIS/Timescale becomes the canonical store?
-- What is the first shared Timescale/PostGIS schema for model profiles once CSV output is no longer enough?
+- What retention policy should apply to database-resident scenario runs/results and their optional export files?
+- What is the first shared Timescale/PostGIS schema for model profiles, run/output metadata, and stable feature links?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - For area features with multiple LV components, which congestion-model allocation rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
 - Once run persistence is added, how long should scenario history and output artifacts be retained?
