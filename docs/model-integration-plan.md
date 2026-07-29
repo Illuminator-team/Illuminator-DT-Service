@@ -52,7 +52,7 @@ Decisions made so far:
 - The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
 - Scenario result storage follows a hybrid maturity path: MVP writes result metadata and profile files, publishes map-visible result layers through GeoServer, and later moves the canonical result store to PostGIS/Timescale.
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
-- The frontend uses a layer registry driven by layer metadata. The MVP can use a static `layers.json` or `GET /layers`; later versions should evolve toward catalogue-style discovery.
+- The frontend uses a layer registry driven by layer metadata. The MVP uses `GET /layers` on the policy-tool backend as the canonical dashboard contract, with static `layers.json` only as a fallback or seed; later versions should evolve toward catalogue-style discovery.
 - Layer registry records should include layer identity, group/model, GeoServer layer name, geometry type, selectable feature type, `datacompleetheid`, freshness/stale state, and available actions such as profile or scenario run.
 - Model containers should own domain calculations and expose APIs. The policy-tool backend should own frontend-facing orchestration, not long-term model logic.
 - The current policy-tool backend is treated as the phase-1 reference model: a combined consumption-and-congestion prototype that is already exposed through the current dashboard/GeoServer path.
@@ -628,7 +628,9 @@ This record is deliberately smaller than DCAT-AP-NL or ISO 19115/19119 metadata.
 
 ## Frontend Direction
 
-The frontend should evolve from hardcoded layer radio buttons into a layer registry. In the MVP, that registry can be a static JSON file or `GET /layers` response. The important change is that the frontend reads layer metadata and builds the layer UI from that metadata.
+The frontend should evolve from hardcoded layer radio buttons into a layer registry. In the MVP, the dashboard should use `GET /layers` on the policy-tool backend as the canonical layer discovery endpoint. A static `layers.json` may still exist as fallback or seed data for local development, but it should not be the dashboard's primary source of truth.
+
+In easy terms: the dashboard should ask the policy-tool backend, "which layers can I show right now?" The backend can then answer with consumption, PV, EV, grid, and scenario layers, even if some of those records were initially loaded from static configuration.
 
 MVP registry record:
 
@@ -661,7 +663,8 @@ MVP registry record:
 
 MVP behavior:
 
-- load available layers from static metadata records or `GET /layers` on the policy-tool backend;
+- load available layers from `GET /layers` on the policy-tool backend;
+- allow a static `layers.json` fallback or seed dataset for local development and bootstrap cases;
 - group layers by model: consumption, PV, EV, grid, scenarios;
 - allow multiple overlays when they make sense;
 - show `datacompleetheid`, freshness, and stale/current/refreshing/failed state per layer/result;
@@ -671,7 +674,7 @@ MVP behavior:
 
 Maturity path:
 
-- MVP: static `layers.json` or simple `GET /layers` JSON from the policy-tool backend;
+- MVP: `GET /layers` JSON from the policy-tool backend, optionally seeded by static `layers.json`;
 - Next: merge static layers, model outputs, and scenario result layers into one registry response;
 - Professional target: catalogue-style discovery through OGC API Records/DCAT-AP-NL-style metadata, with geospatial access through GeoServer now and OGC API Features/Tiles later.
 
@@ -725,7 +728,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 2. Start phase 1 by treating the current combined policy-tool backend as the reference GeoServer-visible model: consumption plus congestion in one working service.
 3. Add the first new GeoServer-visible model layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with full end-to-end smoke tests proving the integrated stack still works.
 4. Repeat the model-layer PR pattern for EV chargers, grid, and later other layers, even if their first outputs are simple standalone datasets.
-5. Add a frontend layer registry backed by static `layers.json` or `GET /layers`, then use it to render available layers and scenario outputs.
+5. Add a frontend layer registry backed by `GET /layers` on the policy-tool backend, optionally seeded by static `layers.json`, then use it to render available layers and scenario outputs.
 6. Add `datacompleetheid`, `last_updated`, and basic metadata to those layer records.
 7. Add PR checks for `dev` that validate Docker Compose config, model API, policy-tool backend, dashboard reachability/layer toggle, GeoServer WMS/WFS publication, layer registry metadata, manifest consistency, provenance, and output links.
 8. Inventory current policy-tool backend code into orchestration, consumption-model, congestion-model, data-ingestion, and layer-publishing responsibilities, but do this as preparation for the later split rather than before the PV layer.
@@ -742,8 +745,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 - What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
-- Should the first layer registry be served as static `layers.json`, from `GET /layers` in the policy-tool backend, or both?
-
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
