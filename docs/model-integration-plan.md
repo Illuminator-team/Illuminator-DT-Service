@@ -70,6 +70,9 @@ Decisions made so far:
 - Current congestion-related calculation in the policy-tool backend needs a follow-up split into `congestion-model-service`, which owns profile aggregation, grid assignment consumption, and congestion indicators.
 - External data/API fetching moves toward shared crawler/data services for integrated RDP, while standalone model development may keep isolated input adapters and caches.
 - GeoServer publishing should use a shared layer-publishing path instead of every model implementing its own publishing logic.
+- The selected spatial publication path is option 3: model services own their output features and metadata, while the shared RDP layer publisher owns validation, PostGIS loading/upserting, GeoServer datastore/layer registration, and publication status.
+- Reuse and adapt the existing `layer-publisher` component as a configurable shared publisher; do not add a separate PV-specific publishing service. Model containers should not receive PostGIS writer or GeoServer administration credentials.
+- For the first PV capacity integration, the model supplies CBS buurt polygons, stable `cbs_buurt_code`, `pv_capacity_kwp`, CRS, version, provenance, and `datacompleetheid`; the shared publisher turns that output into the PostGIS/GeoServer layer.
 - The main frontend should call the policy-tool backend; direct model API calls remain useful for standalone development and testing.
 - Implementation order is phase-based and incremental: first use the current combined policy-tool backend as the already-working reference model layer, then add each new model as a GeoServer layer one model at a time, checking the whole stack after each model, then connect model outputs to transformer profiles, then add scenario UI controls, then harden into the professional standards-aligned setup.
 - After the current combined consumption/congestion layer path is used as the reference pattern, PV is the first new model layer to integrate in phase 1.
@@ -242,6 +245,65 @@ external source -> RDP crawler/ingestion -> Redis/Timescale/PostGIS -> model ser
 Temporary standalone exceptions are allowed for development, but any direct API call in a model should be isolated behind an input adapter so it can be replaced by an RDP data source later.
 
 Similarly, GeoServer publication should move through a shared layer-publishing path rather than being reimplemented inside every model service.
+
+## Shared Spatial Layer Publication
+
+Selected path: use the existing RDP `layer-publisher` component as the one shared PostGIS/GeoServer publication boundary.
+
+Easy explanation:
+
+The model says what the layer contains; the publisher handles where and how it is hosted. A PV model should be able to calculate and return a valid CBS buurt dataset without knowing database passwords, GeoServer workspaces, REST configuration, or dashboard registry details. In the integrated stack, the publisher takes that output and makes it available as a reliable map layer.
+
+Model responsibilities:
+
+- produce or expose a complete geospatial output artifact through its output/API contract;
+- provide stable feature ids, geometry, CRS, attribute schema, units, model/output version, freshness, provenance, and `datacompleetheid` metadata;
+- keep standalone generation and API behavior working without requiring GeoServer;
+- for the first PV layer, provide CBS buurt polygons with `cbs_buurt_code` and numeric `pv_capacity_kwp`.
+
+Shared layer-publisher responsibilities:
+
+- fetch/read the model output using its declared artifact or API link;
+- validate required fields, stable ids, geometry type, CRS, and manifest/output consistency before publication;
+- load or upsert features into the configured PostGIS table, preferably through a staging/transaction step so users never see a half-updated layer;
+- ensure the configured GeoServer workspace, PostGIS datastore, feature type/layer, and default style exist;
+- report `ready_for_publication`, `published`, or failed status and expose the resulting WMS/WFS links to the policy-tool layer registry;
+- be idempotent so rerunning the same output version does not create duplicate tables, layers, or features;
+- use restricted PostGIS-writer and GeoServer-publisher credentials held only by the publishing component.
+
+Reuse rule:
+
+- adapt the existing `layer-publisher` instead of creating another service;
+- replace its current hardcoded single-point/`p_forecast` assumptions with configuration from model/layer metadata;
+- do not use the file-only `geojson-loader` path as the canonical PV publication route because PostGIS is the selected source of truth;
+- add only the configuration and validation needed by real model layers, starting with PV capacity.
+
+First PV publication contract:
+
+```text
+source model:       pv-map-service
+feature type:       cbs_buurt
+feature id field:   cbs_buurt_code
+required metric:    pv_capacity_kwp (kWp)
+geometry:           polygon/multipolygon as declared by the model
+CRS:                concrete value declared by the model manifest
+canonical store:    PostGIS
+publication:        GeoServer WMS/WFS
+initial style:      default GeoServer style
+```
+
+Standalone and integration behavior:
+
+- standalone model tests stop after validating the model artifact/API and metadata;
+- the integrated PR test starts the publisher, PostGIS, and GeoServer and proves the layer is published end to end;
+- publication failure must not corrupt or replace the last successfully published layer;
+- the model remains callable even when the shared publisher or GeoServer is unavailable.
+
+Geonovum alignment guardrail:
+
+- keep WMS/WFS for the first working publication because they are supported by the current GeoServer/dashboard setup;
+- preserve stable feature ids, CRS, metadata, and object-oriented feature access so the same PostGIS data can later also be exposed through OGC API Features and OGC API Tiles;
+- treat the publication interface and metadata as the interoperability contract, not the internal PostGIS table layout.
 
 ## Model APIs And Orchestration
 
@@ -884,7 +946,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 1. Create or confirm the long-lived `dev` branch from the cleaned deployed base once the cleanup base is agreed.
 2. Start phase 1 by treating the current combined policy-tool backend as the reference GeoServer-visible model: consumption plus congestion in one working service.
-3. Add the first new GeoServer-visible model layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with full end-to-end smoke tests proving the integrated stack still works.
+3. Make the existing shared `layer-publisher` configurable for model-owned spatial outputs, then add the first new GeoServer-visible layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with full end-to-end smoke tests proving the integrated stack still works.
 4. Repeat the model-layer PR pattern for EV chargers, grid, and later other layers, even if their first outputs are simple standalone datasets.
 5. Add a frontend layer registry backed by `GET /layers` on the policy-tool backend, optionally seeded by static `layers.json`, then use it to render available model layers first and scenario outputs later.
 6. Add mandatory registry fields, including `datacompleetheid`, `last_updated`, `source_last_updated`, CRS, metrics/units, GeoServer service links, style status, actions, and lightweight provenance.
