@@ -43,6 +43,7 @@ Decisions made so far:
 - `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
 - Layer versioning starts with timestamp metadata: `last_updated` on layers/outputs/mappings and `source_last_updated` for dependencies.
 - Model metadata should be kept current by making the model repo the source of truth: model-owned metadata manifests feed `GET /metadata`, `GET /layers`, run records, and output records, while CI checks prevent required metadata from drifting when model code or source-data configuration changes.
+- The MVP manifest format is one combined `model-manifest.json` per model repo. It can be split into separate model, layer, source, and output records later if the manifest becomes too large or if catalogue publication needs a different structure.
 - The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
 - Scenario result storage follows a hybrid maturity path: MVP writes result metadata and profile files, publishes map-visible result layers through GeoServer, and later moves the canonical result store to PostGIS/Timescale.
 - API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
@@ -425,8 +426,8 @@ The first version should detect layer changes with timestamps. Every layer, outp
 
 Metadata maintenance rule:
 
-- each model repo owns a versioned metadata manifest, for example `model-metadata.json` plus layer/output schema records, stored next to the model code and source-data configuration;
-- `GET /metadata`, `GET /layers`, run records, and output records are generated from that manifest plus runtime fields such as git commit, container image digest, timestamps, source versions, and output ids;
+- each model repo owns one versioned `model-manifest.json`, stored next to the model code and source-data configuration;
+- `GET /metadata`, `GET /layers`, run records, and output records are generated from `model-manifest.json` plus runtime fields such as git commit, container image digest, timestamps, source versions, and output ids;
 - the policy-tool backend and frontend consume model API metadata instead of maintaining separate hand-copied layer descriptions;
 - every run/output stores a metadata snapshot so old scenario results remain explainable after the model changes.
 
@@ -713,7 +714,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
 - Which smoke tests are mandatory before each model-layer PR can merge into `dev`?
-- Which metadata manifest format should model repos use first: separate `model-metadata.json` plus layer records, or one combined `model-manifest.json`?
+- Which exact required fields should `model-manifest.json` validate for the first PV PR?
 
 - Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
 - What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
