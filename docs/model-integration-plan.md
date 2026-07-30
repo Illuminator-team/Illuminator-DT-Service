@@ -79,6 +79,8 @@ Decisions made so far:
 - GeoServer publishing should use a shared layer-publishing path instead of every model implementing its own publishing logic.
 - The selected spatial publication path is option 3: model services own their output features and metadata, while the shared RDP layer publisher owns validation, PostGIS loading/upserting, GeoServer datastore/layer registration, and publication status.
 - Reuse and adapt the existing `layer-publisher` component as a configurable shared publisher; do not add a separate PV-specific publishing service. Model containers should not receive PostGIS writer or GeoServer administration credentials.
+- The selected GeoServer organization path is option 2: reuse workspace `rdp` and database `rdp_db`, introduce one generic `rdp_postgis` datastore, and publish separately named layers from it instead of reusing the PV-specific datastore or creating a workspace per model.
+- The baseline PC6 layer uses PostGIS table `public.policy_tool_pc6_energy`, GeoServer layer `rdp:policy_tool_pc6_energy`, persistent layer URI `https://reformers01.ewi.tudelft.nl/id/layer/policy-tool/pc6-energy`, and feature URIs based on `https://reformers01.ewi.tudelft.nl/id/geo-object/pc6/{postcode6}`.
 - For the first PV capacity integration, the model supplies CBS buurt polygons, stable `cbs_buurt_code`, `pv_capacity_kwp`, CRS, version, provenance, and `datacompleetheid`; the shared publisher turns that output into the PostGIS/GeoServer layer.
 - The main frontend should call the policy-tool backend; direct model API calls remain useful for standalone development and testing.
 - Implementation order is phase-based and incremental: first migrate the current static PC6 energy layer to the shared PostGIS/GeoServer publication path, then add each new model as a GeoServer layer one model at a time, checking the whole stack after each model, then connect model outputs to transformer profiles, then add scenario UI controls, then harden into the professional standards-aligned setup.
@@ -317,6 +319,26 @@ Geonovum alignment guardrail:
 ## Baseline PC6 GeoServer Migration
 
 Selected path: option 1. Before integrating PV, migrate the existing PC6 energy map through the shared PostGIS/GeoServer publication path in a dedicated baseline PR.
+
+Selected identifiers:
+
+```text
+database:             rdp_db
+schema:               public
+table:                policy_tool_pc6_energy
+
+GeoServer workspace:  rdp
+GeoServer datastore:  rdp_postgis
+GeoServer layer:      policy_tool_pc6_energy
+qualified layer name: rdp:policy_tool_pc6_energy
+
+layer URI:            https://reformers01.ewi.tudelft.nl/id/layer/policy-tool/pc6-energy
+feature URI template: https://reformers01.ewi.tudelft.nl/id/geo-object/pc6/{postcode6}
+```
+
+The workspace and public URI namespace express stable ownership and meaning. The PostGIS schema/table and GeoServer datastore are implementation details: they may be reorganized during later hardening without changing the layer URI, feature URI template, or externally advertised layer contract.
+
+GeoServer should connect through `rdp_postgis` using a restricted read-only database role. The shared publisher uses a separate restricted writer role for validated loads/upserts; model containers receive neither GeoServer administration credentials nor general PostGIS write access.
 
 Easy explanation:
 
