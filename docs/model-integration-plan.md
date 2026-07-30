@@ -84,6 +84,7 @@ Decisions made so far:
 - Implementation order is phase-based and incremental: first migrate the current static PC6 energy layer to the shared PostGIS/GeoServer publication path, then add each new model as a GeoServer layer one model at a time, checking the whole stack after each model, then connect model outputs to transformer profiles, then add scenario UI controls, then harden into the professional standards-aligned setup.
 - After the PC6 baseline migration proves the shared publication pattern, PV is the first new model layer to integrate in phase 1.
 - Development uses a long-lived `dev` integration branch. Feature/fix branches should open PRs into `dev`; `main` and the actual server receive releases only after a separate release decision.
+- The selected `dev` base is cleaned deployment commit `7273c94d65e34a7680872445b70c9556eb25c329` (`Remove policy-tool deployment credential exposure`). Planning and implementation work enters that base through PRs rather than being included when the branch is created.
 - Everything should keep functioning at all times. Once phase 1 starts, every model-layer PR into `dev` should run tests/smoke checks that protect dashboard, API, GeoServer layer, and layer-registry behavior before the next model is added.
 - Anything merged into `dev` should be fully working in the integration setup. For model-layer PRs, this means full end-to-end checks across model manifest, model API, output artifact, GeoServer publication, layer registry, and dashboard visibility, not metadata-only checks.
 - The first PV full end-to-end smoke test should use CBS buurt `BU03610302` / `Overdie-Oost` as the stable fixture area. The test should assert that this feature exists and that `pv_capacity_kwp` is present and greater than zero, unless the PV model repo later documents a better fixture with equivalent stability.
@@ -963,7 +964,7 @@ Implementation phases:
 
 Branching policy:
 
-- use a long-lived `dev` branch as the integration branch for active development;
+- use the long-lived `dev` branch created from cleaned deployment commit `7273c94d65e34a7680872445b70c9556eb25c329` as the integration branch for active development;
 - create feature/fix branches from `dev` and open PRs back into `dev`; do not develop directly on `main`;
 - only merge/release from `dev` to `main` after an explicit release decision;
 - deployment to the actual server is a separate decision and may happen after phase 1, after phase 2, or later;
@@ -1006,7 +1007,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Near-Term Steps
 
-1. Create or confirm the long-lived `dev` branch from the cleaned deployed base once the cleanup base is agreed.
+1. Create the long-lived `dev` branch at cleaned deployment commit `7273c94d65e34a7680872445b70c9556eb25c329`, then merge this planning branch into `dev` only through its PR.
 2. Start phase 1 with a dedicated baseline PR that makes the shared `layer-publisher` configurable, publishes the existing PC6 energy GeoJSON through PostGIS/GeoServer, makes WFS the dashboard's primary feature source, and preserves the static file as a temporary fallback.
 3. After the baseline is fully working in `dev`, add the first new GeoServer-visible model layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with full end-to-end smoke tests proving the integrated stack still works.
 4. Repeat the model-layer PR pattern for EV chargers, grid, and later other layers, even if their first outputs are simple standalone datasets.
@@ -1025,7 +1026,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
 - Which current policy-tool backend functions belong to API/orchestration, consumption/profile behavior, or data ingestion, and which congestion capabilities must be introduced fresh?
 - What is the smallest first `congestion-model-service` implementation: start with profile aggregation, a congestion indicator contract, or another narrow vertical slice?
