@@ -46,8 +46,8 @@ Decisions made so far:
 - The congestion model consumes grid-assignment records for profile aggregation and congestion calculations; it does not implement the spatial matching algorithm.
 - Allocation rules for area features with multiple LV components, such as CBS buurten or PC6 areas, are deferred to the grid-assignment story and should be agreed with the congestion-model requirements.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
-- A coarse quantitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four integer bins from 0 to 3.
-- `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
+- A coarse qualitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four ordered integer levels from 0 to 3.
+- `datacompleetheid` is a simple user-facing trust indicator that summarizes data availability, expected accuracy, and reliance on assumptions. It is not a calculated percentage or a substitute for the richer quality metadata that should support it.
 - The producing model owns its model-specific `datacompleetheid` calculation and thresholds. For the PV capacity layer, the PV model agent defines, documents, tests, and versions the rule in the PV model repo; the integration layer validates and displays the result without recalculating it.
 - The legacy baseline PC6 layer is a temporary ownership exception because no standalone producing model exists yet: the current policy-tool component/repo owns its documented and versioned `datacompleetheid` rule until the layer is replaced or transferred to a standalone model.
 - The shared publisher validates that the baseline score, label, method version, timestamp, and evidence summary conform to the integration contract; it does not calculate or reinterpret the score.
@@ -574,33 +574,33 @@ Geonovum alignment guardrail:
 
 ## Datacompleetheid
 
-`datacompleetheid` is the first user-facing data quality measure. It should be coarse, quantitative, and easy to display on the map. It answers: how complete is the data behind this layer, mapping, profile, or scenario result?
+`datacompleetheid` is the first user-facing data quality measure. It should be coarse, qualitative, and easy to display on the map. It answers: how much confidence should the user place in this layer, mapping, profile, or scenario result, considering the available data, expected accuracy, missing values, and assumptions?
 
 MVP bins:
 
 | Value | Label | Meaning | Typical UI |
 | --- | --- | --- | --- |
-| `0` | `onbekend` | Completeness is unknown or cannot be assessed yet. | grey |
-| `1` | `laag` | Important source data is missing; result is mainly indicative. | red |
-| `2` | `middel` | Enough data exists for exploration, but visible gaps or coarse assumptions remain. | amber |
-| `3` | `hoog` | Most expected data is present for the selected purpose and resolution. | green |
+| `0` | `volledig gebaseerd op aannames` | No supporting observed or source data is available for the result; it is fully based on assumptions. | grey |
+| `1` | `lage betrouwbaarheid` | Some supporting data is available, but much of the result depends on assumptions or missing values. | red |
+| `2` | `redelijke betrouwbaarheid` | The result is expected to be reasonably accurate, but some assumptions, estimates, or missing values remain. | amber |
+| `3` | `hoge betrouwbaarheid` | All data required for the intended result is available and the result is expected to be very accurate. | green |
 
 Rules for the first version:
 
 - every layer metadata record should include `datacompleetheid` when possible;
-- the model or service that produces an output owns the score calculation, thresholds, supporting evidence, and changes to that method;
-- the shared integration contract requires a score from 0 to 3, its label, and a short method/explanation reference; method version, calculation timestamp, and evidence summary should be included when available;
+- the model or service that produces an output owns the qualitative assessment, model-specific rubric, supporting evidence, and changes to that method;
+- the shared integration contract requires a score from 0 to 3, its label, and a short method/explanation reference; method version, assessment timestamp, and an evidence summary distinguishing observed, estimated, missing, and assumed inputs should be included when available;
 - the model repo documents and tests its rule in `model-manifest.json` and exposes the resulting metadata through its API;
 - integration CI validates the field shape, allowed values, and manifest/API consistency, but does not attempt to judge or reproduce the domain calculation;
 - for the legacy PC6 baseline, treat the policy-tool component/repo as the temporary producer and owner of the score; the publisher only validates and carries the score into PostGIS, GeoServer attributes/metadata, and the layer registry;
 - grid-assignment mappings should include `datacompleetheid` so users can see whether profile-to-grid coupling is strong or approximate;
 - scenario results should expose an overall `datacompleetheid`, using the most conservative contributing score by default;
-- keep the bin calculation simple and documented per model or layer;
+- keep the level assignment simple and documented per model or layer; do not imply unsupported numerical precision;
 - if a score is manually assigned during prototyping, record that in provenance so it is not mistaken for an automated quality calculation.
 
 Professional target:
 
-Later versions can add richer quality dimensions such as accuracy, actuality, lineage, validation status, and uncertainty. `datacompleetheid` should remain a simple front-end summary, while the underlying metadata can grow toward ISO metadata quality elements, DCAT-AP-NL records, and NLDT trustworthiness requirements.
+Later versions can expose richer quality dimensions such as accuracy, completeness, actuality, lineage, validation status, and uncertainty separately. `datacompleetheid` should remain a simple front-end summary, while the underlying metadata can grow toward ISO metadata quality elements, DCAT-AP-NL records, and NLDT trustworthiness requirements.
 
 Geonovum alignment guardrail:
 
@@ -1060,7 +1060,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - Which required model-run, stable-feature, provenance, or quality fields, if any, cannot be represented by the complete existing RDP `data_points`/`forecasts` contract and API metadata?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - For area features with multiple LV components, which grid-assignment rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
-- Which exact required-field checks, four-bin thresholds, and feature-to-layer aggregation rule should the baseline PC6 `datacompleetheid` method use?
+- Which model-specific evidence and assessment rule should the baseline PC6 producer use to assign the agreed qualitative `datacompleetheid` levels, and how should feature-level evidence contribute to the layer-level assessment?
 - Once run persistence is added, how long should scenario history and output artifacts be retained?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
