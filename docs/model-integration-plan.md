@@ -87,7 +87,7 @@ Decisions made so far:
 - The main frontend should call the policy-tool backend; direct model API calls remain useful for standalone development and testing.
 - Implementation order is phase-based and incremental: first migrate the current static PC6 energy layer to the shared PostGIS/GeoServer publication path, then add each new model as a GeoServer layer one model at a time, checking the whole stack after each model, then connect model outputs to transformer profiles, then add scenario UI controls, then harden into the professional standards-aligned setup.
 - After the PC6 baseline migration proves the shared publication pattern, PV is the first new model layer to integrate in phase 1.
-- Development uses a long-lived `dev` integration branch. Feature/fix branches should open PRs into `dev`; `main` and the actual server receive releases only after a separate release decision.
+- Development uses a long-lived `dev` integration branch. Feature/fix branches should open PRs into `dev`; the project owner may explicitly approve a release to `main` at any working checkpoint, independent of the implementation phase.
 - The selected `dev` base is cleaned deployment commit `7273c94d65e34a7680872445b70c9556eb25c329` (`Remove policy-tool deployment credential exposure`). Planning and implementation work enters that base through PRs rather than being included when the branch is created.
 - Everything should keep functioning at all times. Once phase 1 starts, every model-layer PR into `dev` should run tests/smoke checks that protect dashboard, API, GeoServer layer, and layer-registry behavior before the next model is added.
 - Anything merged into `dev` should be fully working in the integration setup. For model-layer PRs, this means full end-to-end checks across model manifest, model API, output artifact, GeoServer publication, layer registry, and dashboard visibility, not metadata-only checks.
@@ -992,8 +992,8 @@ Branching policy:
 
 - use the long-lived `dev` branch created from cleaned deployment commit `7273c94d65e34a7680872445b70c9556eb25c329` as the integration branch for active development;
 - create feature/fix branches from `dev` and open PRs back into `dev`; do not develop directly on `main`;
-- only merge/release from `dev` to `main` after an explicit release decision;
-- deployment to the actual server is a separate decision and may happen after phase 1, after phase 2, or later;
+- only merge/release from `dev` to `main` after explicit approval from the project owner;
+- no implementation phase automatically triggers a release; approval may be given at any working and sufficiently tested checkpoint; deployment to the actual server remains a separate explicit decision;
 - use `dev` for full integration tests before anything is shipped to `main` or the live server;
 - keep branch names informative, such as `feature/...` or `fix/...`.
 
@@ -1052,7 +1052,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
 - Which current policy-tool backend functions belong to API/orchestration, consumption/profile behavior, or data ingestion, and which congestion capabilities must be introduced fresh?
 - What is the smallest first `congestion-model-service` implementation: start with profile aggregation, a congestion indicator contract, or another narrow vertical slice?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
