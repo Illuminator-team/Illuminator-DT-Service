@@ -49,6 +49,8 @@ Decisions made so far:
 - A coarse quantitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four integer bins from 0 to 3.
 - `datacompleetheid` is not a precise accuracy score. It is a simple user-facing completeness indicator that can later be backed by richer metadata quality rules.
 - The producing model owns its model-specific `datacompleetheid` calculation and thresholds. For the PV capacity layer, the PV model agent defines, documents, tests, and versions the rule in the PV model repo; the integration layer validates and displays the result without recalculating it.
+- The legacy baseline PC6 layer is a temporary ownership exception because no standalone producing model exists yet: the current policy-tool component/repo owns its documented and versioned `datacompleetheid` rule until the layer is replaced or transferred to a standalone model.
+- The shared publisher validates that the baseline score, label, method version, timestamp, and evidence summary conform to the integration contract; it does not calculate or reinterpret the score.
 - Layer versioning starts with timestamp metadata: `last_updated` on layers/outputs/mappings and `source_last_updated` for dependencies.
 - Layer change detection should use a shared lightweight diff checker in the crawler/ingestion/layer-publishing path. Models may report their own changed feature ids when available, but the shared diff checker is the fallback that compares previous and current published layer versions by stable feature id and feature hash.
 - Phase 1 only requires stable feature ids, layer version/update metadata, and room for optional change manifests; incremental congestion recalculation consumes these manifests later and is not required for the first PV layer PR.
@@ -354,6 +356,7 @@ Baseline PR scope:
 - keep the current `GET /simulate/{pc6}`, shared CSV volume, sliders, and chart behavior working unchanged;
 - do not split the policy backend, redesign the data-generation helper, add PV, or introduce scenario/congestion functionality in this baseline PR;
 - add lightweight layer metadata for stable identity, CRS, attributes/units, source artifact, update timestamp, publication links, and known quality limitations.
+- include baseline `datacompleetheid` metadata owned by the policy-tool component, with a documented four-bin rule, method version, calculation timestamp, evidence summary, and explicit treatment of missing/sentinel energy values.
 
 Completion criteria:
 
@@ -589,6 +592,7 @@ Rules for the first version:
 - the shared integration contract requires a score from 0 to 3, its label, and a short method/explanation reference; method version, calculation timestamp, and evidence summary should be included when available;
 - the model repo documents and tests its rule in `model-manifest.json` and exposes the resulting metadata through its API;
 - integration CI validates the field shape, allowed values, and manifest/API consistency, but does not attempt to judge or reproduce the domain calculation;
+- for the legacy PC6 baseline, treat the policy-tool component/repo as the temporary producer and owner of the score; the publisher only validates and carries the score into PostGIS, GeoServer attributes/metadata, and the layer registry;
 - grid-assignment mappings should include `datacompleetheid` so users can see whether profile-to-grid coupling is strong or approximate;
 - scenario results should expose an overall `datacompleetheid`, using the most conservative contributing score by default;
 - keep the bin calculation simple and documented per model or layer;
@@ -1056,6 +1060,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 - Which required model-run, stable-feature, provenance, or quality fields, if any, cannot be represented by the complete existing RDP `data_points`/`forecasts` contract and API metadata?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - For area features with multiple LV components, which grid-assignment rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
+- Which exact required-field checks, four-bin thresholds, and feature-to-layer aggregation rule should the baseline PC6 `datacompleetheid` method use?
 - Once run persistence is added, how long should scenario history and output artifacts be retained?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
