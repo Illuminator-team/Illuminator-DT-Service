@@ -4,7 +4,7 @@
 
 This document sketches how the current policy-tool stack can grow into a set of independent RDP model services that feed shared frontend layers and can later interact through scenario models.
 
-The current `policy-tool-backend` contains early model behavior and scenario logic, including residential load behavior and congestion-related calculation. The target architecture treats it as the frontend-facing orchestration API, while model calculations move into independent services that can also run standalone during development.
+The current `policy-tool-backend` contains early residential-load, electrification, PV, and net grid import/export profile behavior behind a small API. Transformer-level congestion calculation is a target capability rather than a current implementation. The target architecture keeps the backend as the frontend-facing orchestration API while model calculations move into independent services that can also run standalone during development.
 
 ## Current Starting Point
 
@@ -12,7 +12,10 @@ The current `policy-tool-backend` contains early model behavior and scenario log
 - `policy-tool-backend` serves the API at `/policy-api`.
 - The backend currently exposes `GET /simulate/{pc6}` and writes `pc6_profile_<PC6>.csv` into a shared processed-data volume.
 - The frontend fetches the simulation endpoint, then reads the generated CSV from `/dashboard/processed`.
-- The current backend mixes orchestration, consumption-model behavior, congestion-model behavior, local file ingestion, layer publication, and some direct external data fetching. Functionally, this combined backend is the first model already visible through the current dashboard/GeoServer path. That is acceptable for the prototype, but should be split into explicit ownership boundaries as new models are added.
+- The dashboard currently loads the checked-in `policy-tool-frontend/data/alkmaar_energy_map.geojson` directly into Leaflet. The current PC6 energy layer is not loaded from PostGIS or GeoServer.
+- That GeoJSON was produced offline by `policy-tool-frontend/helper scripts/layer_maker.py`, which joins PDOK PC6 polygons to energy attributes.
+- The current backend mixes API/orchestration glue, consumption/heat/PV profile behavior, local file ingestion, and direct PVGIS fetching. It does not currently publish the PC6 layer to GeoServer or calculate transformer congestion.
+- The existing RDP `layer-publisher` and live GeoServer currently publish only the separate tutorial `rdp:solar_panel_layer`; they are not the publication path for the policy-tool PC6 map.
 
 ## Epic 1 Decisions: Shared Data And Layer Contract
 
@@ -57,7 +60,7 @@ Decisions made so far:
 - GeoServer publication details such as workspace, final layer name, WMS/WFS URLs, style, and legend may be provisional when publication wiring is not finished yet, but the manifest must state the intended values, owner, and whether the layer is `ready_for_publication` or already `published`.
 - Default GeoServer styling is acceptable for the first PV PR. A custom SLD style and polished legend are not required before merge, but the manifest should expose style metadata such as `style_status: default_geoserver` so the dashboard can later replace it with a proper PV capacity style.
 - The professional target is event-based update triggers, but refresh work should be incremental: update only affected mapping rows and derived results when changed feature ids can be identified.
-- A generic dependency knowledge graph is a possible far-future professional target, not a phase-1 or phase-2 requirement. The first congestion implementation should use ordinary, congestion-owned assignment/dependency tables keyed by stable feature and grid-object identifiers.
+- A generic dependency knowledge graph is a possible far-future professional target, not a phase-1 or phase-2 requirement. The first implementation should use an ordinary grid-owned assignment table and congestion-owned aggregation/dependency records keyed by stable feature and grid-object identifiers.
 - A future data space and a future knowledge graph are related but separate concerns: the data space governs trusted sharing between independent parties, while the knowledge graph gives objects, concepts, and relationships machine-readable meaning. Adopt either only when a concrete interoperability use case justifies it.
 - Preserve that upgrade path now through persistent web identifiers, explicit typed relationships, versioned provenance, metadata manifests, and standards-friendly APIs; do not require RDF, a triple store, a data-space connector, or semantic reasoning for the first working integrations.
 - When scenario outputs are introduced later, store run metadata and time-series/profile results in Postgres/Timescale from their first implementation. Publish PostGIS/GeoServer-visible result layers only for outputs explicitly chosen for map display; files remain optional exports rather than canonical storage.
@@ -66,18 +69,20 @@ Decisions made so far:
 - The frontend uses a layer registry driven by layer metadata. The MVP uses `GET /layers` on the policy-tool backend as the canonical dashboard contract, with static `layers.json` only as a fallback or seed; later versions should evolve toward catalogue-style discovery.
 - Layer registry records have a mandatory MVP field set: stable ids, title/description, group/model/version, metadata URL, GeoServer publication details, geometry type, selectable feature type, CRS, metrics/units, style status, actions, `datacompleetheid`, freshness state, and lightweight provenance.
 - Model containers should own domain calculations and expose APIs. The policy-tool backend should own frontend-facing orchestration, not long-term model logic.
-- The current policy-tool backend is treated as the phase-1 reference model: a combined consumption-and-congestion prototype that is already exposed through the current dashboard/GeoServer path.
-- Before ripping that combined backend apart, PV is the first new standalone model layer to add.
+- The current policy-tool map/profile workflow is treated as the phase-1 reference behavior, but its PC6 energy layer is currently dashboard-visible through static GeoJSON rather than GeoServer-visible.
+- The selected phase-1 baseline PR first migrates that existing PC6 energy layer through the shared publisher into PostGIS/GeoServer and makes GeoServer WFS the dashboard's primary layer source while retaining the static GeoJSON as a temporary fallback.
+- The baseline migration must preserve the existing feature selection, sliders, policy-backend profile calculation, and chart workflow. It does not split the policy backend or change model calculations.
+- After that baseline PR, PV remains the first new standalone model layer to add.
 - Current residential-load behavior can stay in the policy-tool backend during transition, but should move into or be wrapped as `consumption-model-service` over time.
-- Current congestion-related calculation in the policy-tool backend needs a follow-up split into `congestion-model-service`, which owns profile aggregation, grid assignment consumption, and congestion indicators.
+- The intended congestion responsibility associated with the policy tool needs a follow-up `congestion-model-service`, which owns profile aggregation, grid assignment consumption, and congestion indicators. The current checked-in backend does not yet implement transformer-level congestion calculation.
 - External data/API fetching moves toward shared crawler/data services for integrated RDP, while standalone model development may keep isolated input adapters and caches.
 - GeoServer publishing should use a shared layer-publishing path instead of every model implementing its own publishing logic.
 - The selected spatial publication path is option 3: model services own their output features and metadata, while the shared RDP layer publisher owns validation, PostGIS loading/upserting, GeoServer datastore/layer registration, and publication status.
 - Reuse and adapt the existing `layer-publisher` component as a configurable shared publisher; do not add a separate PV-specific publishing service. Model containers should not receive PostGIS writer or GeoServer administration credentials.
 - For the first PV capacity integration, the model supplies CBS buurt polygons, stable `cbs_buurt_code`, `pv_capacity_kwp`, CRS, version, provenance, and `datacompleetheid`; the shared publisher turns that output into the PostGIS/GeoServer layer.
 - The main frontend should call the policy-tool backend; direct model API calls remain useful for standalone development and testing.
-- Implementation order is phase-based and incremental: first use the current combined policy-tool backend as the already-working reference model layer, then add each new model as a GeoServer layer one model at a time, checking the whole stack after each model, then connect model outputs to transformer profiles, then add scenario UI controls, then harden into the professional standards-aligned setup.
-- After the current combined consumption/congestion layer path is used as the reference pattern, PV is the first new model layer to integrate in phase 1.
+- Implementation order is phase-based and incremental: first migrate the current static PC6 energy layer to the shared PostGIS/GeoServer publication path, then add each new model as a GeoServer layer one model at a time, checking the whole stack after each model, then connect model outputs to transformer profiles, then add scenario UI controls, then harden into the professional standards-aligned setup.
+- After the PC6 baseline migration proves the shared publication pattern, PV is the first new model layer to integrate in phase 1.
 - Development uses a long-lived `dev` integration branch. Feature/fix branches should open PRs into `dev`; `main` and the actual server receive releases only after a separate release decision.
 - Everything should keep functioning at all times. Once phase 1 starts, every model-layer PR into `dev` should run tests/smoke checks that protect dashboard, API, GeoServer layer, and layer-registry behavior before the next model is added.
 - Anything merged into `dev` should be fully working in the integration setup. For model-layer PRs, this means full end-to-end checks across model manifest, model API, output artifact, GeoServer publication, layer registry, and dashboard visibility, not metadata-only checks.
@@ -91,7 +96,7 @@ Geonovum/NLDT interpretation:
 - Use ISO 19115/19119 and DCAT-AP-NL concepts for dataset and service metadata, but do not require full catalogue publication in the first prototype.
 - Use observation/time-series language for profiles so the system can later align with SensorThings-style APIs.
 - Keep spatial features and observation/time-series data conceptually separate, even when the prototype stores them in simple files. This leaves room for SensorThings and OGC API Joins later without blocking the first working version.
-- Treat the current policy-tool backend as a pragmatic combined prototype: it already blends consumption, congestion, and orchestration behavior into one working component and publishes a useful layer. This fits the NLDT guardrails of working from use cases, using what is reliable today, avoiding pre-optimization, and moving toward loosely coupled API-speaking components over time; OGC API Processes can be a later alignment target for standardized process execution, not an MVP requirement.
+- Treat the current policy-tool workflow as a pragmatic prototype: it combines profile calculations, a small API, and a useful static dashboard layer. The baseline migration moves that layer behind a shared standards-based publication boundary before deeper model separation. This fits the NLDT guardrails of working from use cases, using what is reliable today, avoiding pre-optimization, and moving toward loosely coupled API-speaking components over time; OGC API Processes can be a later alignment target for standardized process execution, not an MVP requirement.
 - Document APIs with OpenAPI once the route shapes stabilize, matching the Dutch API Strategy direction. Geo-oriented APIs should stay compatible with the geospatial API strategy and OGC API Features direction where relevant.
 - OGC API Processes supports synchronous and asynchronous execution patterns with job/status/result concepts. The MVP should borrow those concepts lightly without implementing the full standard yet.
 - Scenario request fields should use standards-friendly names and explicit units, identifiers, geometry references, and output links so they can later be expressed as JSON Schema/OpenAPI, catalogue metadata, or OGC API Processes execution inputs.
@@ -119,12 +124,12 @@ The model core should be independent from RDP infrastructure. Input and output a
 
 Planned services:
 
-- `policy-tool-backend`: frontend-facing scenario/orchestration API. It coordinates calls to model APIs and may temporarily keep current residential-load and congestion-related logic during migration.
+- `policy-tool-backend`: frontend-facing scenario/orchestration API. It coordinates calls to model APIs and may temporarily keep the current residential-load, electrification, and profile logic during migration.
 - `consumption-model-service`: generates residential, commercial, and industrial demand layers and profiles. The current residential-load logic should move here or be wrapped as this service over time.
 - `pv-map-service`: first publishes model-estimated PV capacity at CBS buurt resolution using `pv_capacity_kwp`; future versions can add PV potential, production profiles, and scenario-derived generation layers.
 - `ev-charger-model-service`: generates public EV charger location layers and charging demand profiles.
 - `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers and owns the API, logic, and persistent records for matching external areas or points to grid components.
-- `congestion-model-service`: consumes model profiles, grid layers, and the stored grid-assignment mapping to aggregate profiles and calculate congestion indicators. Current congestion-related calculation in the policy-tool backend should move here in a follow-up story.
+- `congestion-model-service`: consumes model profiles, grid layers, and stored grid-assignment records to aggregate transformer profiles and calculate congestion indicators. This capability is introduced as a separate service rather than extracted from a complete existing transformer-congestion implementation.
 - `other-model-service`: placeholder for later independent model services that publish layers/profiles through the same contract.
 
 If orchestration grows beyond simple scenario coordination, it can later be split out of the policy-tool backend. For the next versions, keeping orchestration in the policy-tool backend gives the frontend one stable API to call.
@@ -149,7 +154,7 @@ Ownership boundaries:
 
 Migration note:
 
-The current policy-tool backend may keep existing calculations while the MVP is being stabilized. Follow-up work should identify which current code belongs to orchestration, which belongs to `consumption-model-service`, and which belongs to `congestion-model-service`. The congestion split is especially important because congestion calculation is currently present in the policy-tool backend but belongs in the congestion model target boundary.
+The current policy-tool backend may keep existing calculations while the MVP is being stabilized. Follow-up work should identify which current code belongs to orchestration and which belongs to `consumption-model-service`. Transformer aggregation and congestion calculation should be introduced behind the separate `congestion-model-service` boundary instead of being added to the legacy backend.
 
 MVP behavior:
 
@@ -304,9 +309,41 @@ Standalone and integration behavior:
 
 Geonovum alignment guardrail:
 
-- keep WMS/WFS for the first working publication because they are supported by the current GeoServer/dashboard setup;
+- keep WMS/WFS for the first working publication because GeoServer supports them and WFS GeoJSON can preserve the current Leaflet feature interactions;
 - preserve stable feature ids, CRS, metadata, and object-oriented feature access so the same PostGIS data can later also be exposed through OGC API Features and OGC API Tiles;
 - treat the publication interface and metadata as the interoperability contract, not the internal PostGIS table layout.
+
+## Baseline PC6 GeoServer Migration
+
+Selected path: option 1. Before integrating PV, migrate the existing PC6 energy map through the shared PostGIS/GeoServer publication path in a dedicated baseline PR.
+
+Easy explanation:
+
+Use data and interactions that already work to prove the new publication route. The calculation behavior stays in place; only the way the existing map layer is stored, published, and loaded changes.
+
+Baseline PR scope:
+
+- use the current `alkmaar_energy_map.geojson` as the initial publication artifact without redesigning its offline generation process;
+- use `postcode6` as the stable feature id and preserve the existing polygon/multipolygon geometry and dashboard attributes, including `p6_gasm3_2023`, `p6_kwh_2023`, and `p6_kwh_productie_2023`;
+- make the shared `layer-publisher` configurable enough to validate the artifact, transactionally load/upsert it into PostGIS, and register the PostGIS layer in GeoServer;
+- make GeoServer WFS the dashboard's primary feature source so current client-side selection and styling can continue with GeoJSON features;
+- retain the checked-in static GeoJSON as a clearly marked temporary fallback while the WFS route is being stabilized in `dev`;
+- keep the current `GET /simulate/{pc6}`, shared CSV volume, sliders, and chart behavior working unchanged;
+- do not split the policy backend, redesign the data-generation helper, add PV, or introduce scenario/congestion functionality in this baseline PR;
+- add lightweight layer metadata for stable identity, CRS, attributes/units, source artifact, update timestamp, publication links, and known quality limitations.
+
+Completion criteria:
+
+- the layer exists in PostGIS and is advertised by GeoServer WMS and WFS;
+- the dashboard normally obtains PC6 features from GeoServer WFS;
+- PC6 `1842EM` is available as the stable baseline fixture with numeric gas, electricity, and PV-production attributes;
+- selecting a PC6, moving the current sliders, running the existing backend profile calculation, and rendering the returned CSV chart still work;
+- disabling or making WFS unavailable exercises the static fallback without breaking the dashboard;
+- publication is repeatable and does not duplicate features or corrupt the last successful layer.
+
+Upgrade path:
+
+Once the WFS-backed dashboard has proved stable in `dev`, remove the static fallback in a later cleanup PR. The same publisher contract then becomes the route for PV and each subsequent model layer. Stable PC6 identifiers, CRS, WMS/WFS links, and metadata preserve the path toward OGC API Features and catalogue discovery.
 
 ## Model APIs And Orchestration
 
@@ -919,7 +956,7 @@ The implementation should prioritize visible, working map layers before deeper m
 
 Implementation phases:
 
-1. GeoServer-visible model layers: make each model publish its first useful output as a GeoServer-visible layer, similar to the current policy-tool example. This phase should be delivered model by model: integrate one model layer, verify that the existing dashboard, API, and GeoServer setup still work, then move to the next model. This includes consumption, PV, EV, grid, and later other model layers. At this stage, models may still be simple and standalone, and scenario result layers are out of scope.
+1. GeoServer-visible model layers: first migrate the current static PC6 energy layer into the shared PostGIS/GeoServer path, then make each new model publish its first useful output as a GeoServer-visible layer. Deliver this phase one layer/model at a time: verify the dashboard, API, publisher, and GeoServer setup after the PC6 baseline and after every new model. PV is the first new model, followed by EV, grid, and later others. Scenario result layers remain out of scope.
 2. Transformer profile coupling: connect consumption, PV, EV, grid, and other outputs through the congestion model so profiles can be aggregated at LV/MV transformers and later MV/HV transformers.
 3. Scenario UI: add sliders, buttons, scenario requests, run metadata, and scenario result layers/profiles on top of the working model/layer foundation.
 4. Professional setup: harden the existing PostGIS/Timescale stores with production migrations, retention, backup, performance, and access controls, then add event-based triggers, richer tests, OpenAPI documentation, catalogue-style metadata, and OGC API/Geonovum-aligned publication where useful.
@@ -936,6 +973,18 @@ Branching policy:
 PR/testing guardrail:
 
 After phase 1 starts landing, every model-layer PR into `dev` should include automated checks that prove the existing app still works and that the new model layer is fully usable before adding the next model. The required path is full end-to-end, not API-only or GeoServer-only.
+
+For the baseline PC6 GeoServer migration PR, this means:
+
+Fixture area: PC6 `1842EM`.
+
+- Docker Compose configuration validation for the integrated stack;
+- repeatable publisher execution and PostGIS feature-count/id uniqueness checks;
+- WMS `GetCapabilities`, non-empty `GetMap`, WFS `DescribeFeatureType`, and WFS `GetFeature` checks for the published PC6 layer;
+- fixture checks that `1842EM` exists and has numeric `p6_gasm3_2023`, `p6_kwh_2023`, and `p6_kwh_productie_2023` attributes;
+- dashboard checks that WFS is the primary source, PC6 selection and sliders work, and the static GeoJSON fallback works when WFS is unavailable;
+- existing policy-backend health and `GET /simulate/1842EM` checks, including retrieval and chart parsing of the generated CSV;
+- checks that the baseline PR does not introduce PV-model, transformer-assignment, or congestion behavior.
 
 For the first PV model-layer PR, this means:
 
@@ -958,15 +1007,15 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 ## Near-Term Steps
 
 1. Create or confirm the long-lived `dev` branch from the cleaned deployed base once the cleanup base is agreed.
-2. Start phase 1 by treating the current combined policy-tool backend as the reference GeoServer-visible model: consumption plus congestion in one working service.
-3. Make the existing shared `layer-publisher` configurable for model-owned spatial outputs, then add the first new GeoServer-visible layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with full end-to-end smoke tests proving the integrated stack still works.
+2. Start phase 1 with a dedicated baseline PR that makes the shared `layer-publisher` configurable, publishes the existing PC6 energy GeoJSON through PostGIS/GeoServer, makes WFS the dashboard's primary feature source, and preserves the static file as a temporary fallback.
+3. After the baseline is fully working in `dev`, add the first new GeoServer-visible model layer for model-estimated PV capacity in its own PR, using CBS buurt polygons and `pv_capacity_kwp`, with full end-to-end smoke tests proving the integrated stack still works.
 4. Repeat the model-layer PR pattern for EV chargers, grid, and later other layers, even if their first outputs are simple standalone datasets.
 5. Add a frontend layer registry backed by `GET /layers` on the policy-tool backend, optionally seeded by static `layers.json`, then use it to render available model layers first and scenario outputs later.
 6. Add mandatory registry fields, including `datacompleetheid`, `last_updated`, `source_last_updated`, CRS, metrics/units, GeoServer service links, style status, actions, and lightweight provenance.
 7. Add PR checks for `dev` that validate Docker Compose config, model API, policy-tool backend, dashboard reachability/layer toggle, GeoServer WMS/WFS publication, layer registry metadata, manifest consistency, provenance, and output links.
-8. Inventory current policy-tool backend code into orchestration, consumption-model, congestion-model, data-ingestion, and layer-publishing responsibilities, but do this as preparation for the later split rather than before the PV layer.
-9. Keep the current policy-tool backend name in code for now, and let it remain the combined model/orchestration component until PV is working as the first new model layer.
-10. Start phase 2 by extracting or wrapping current policy-tool backend congestion calculation into `congestion-model-service`.
+8. Inventory current policy-tool backend code into API/orchestration glue, consumption/profile behavior, and data ingestion, and document the missing transformer-level congestion capability; do this as preparation for later splits rather than before the PV layer.
+9. Keep the current policy-tool backend name and legacy profile/orchestration behavior in code until PV is working as the first new model layer.
+10. Start phase 2 by introducing `congestion-model-service` for grid-assignment consumption, transformer profile aggregation, and congestion indicators.
 11. Add the first grid-model matching API and grid-assignment records using closest Euclidean LV component, with incremental refresh on layer updates and consumption by the congestion model.
 12. Add transformer-level profile aggregation outputs and metadata links.
 13. Start phase 3 by adding scenario sliders/buttons and `POST /scenarios` flow once phase 2 outputs are stable enough.
@@ -978,8 +1027,8 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 - What exact branch/commit should be used to create the long-lived `dev` branch?
 - Which phase is the first candidate for release from `dev` to `main` and the live server: after GeoServer-visible layers, after transformer profile coupling, or later?
-- Which current policy-tool backend functions are orchestration, consumption model logic, congestion model logic, data ingestion, or layer publishing?
-- What is the smallest first `congestion-model-service` extraction: wrap existing backend calculation behind an internal API, move the code into a new container, or start with a fresh service contract?
+- Which current policy-tool backend functions belong to API/orchestration, consumption/profile behavior, or data ingestion, and which congestion capabilities must be introduced fresh?
+- What is the smallest first `congestion-model-service` implementation: start with profile aggregation, a congestion indicator contract, or another narrow vertical slice?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
 - What retention policy should apply to database-resident scenario runs/results and their optional export files?
 - Which required model-run, stable-feature, provenance, or quality fields, if any, cannot be represented by the complete existing RDP `data_points`/`forecasts` contract and API metadata?
