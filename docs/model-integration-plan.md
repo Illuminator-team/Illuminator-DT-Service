@@ -65,9 +65,9 @@ Decisions made so far:
 - A generic dependency knowledge graph is a possible far-future professional target, not a phase-1 or phase-2 requirement. The first implementation should use an ordinary grid-owned assignment table and congestion-owned aggregation/dependency records keyed by stable feature and grid-object identifiers.
 - A future data space and a future knowledge graph are related but separate concerns: the data space governs trusted sharing between independent parties, while the knowledge graph gives objects, concepts, and relationships machine-readable meaning. Adopt either only when a concrete interoperability use case justifies it.
 - Preserve that upgrade path now through persistent web identifiers, explicit typed relationships, versioned provenance, metadata manifests, and standards-friendly APIs; do not require RDF, a triple store, a data-space connector, or semantic reasoning for the first working integrations.
-- When scenario outputs are introduced later, store run metadata and time-series/profile results in Postgres/Timescale from their first implementation. Publish PostGIS/GeoServer-visible result layers only for outputs explicitly chosen for map display; files remain optional exports rather than canonical storage.
-- API responses should return result metadata and links to outputs, not assume every scenario result can be returned inline as one JSON response.
-- Phase 1 does not include scenario result layers. Scenario output publication is deferred until scenario/congestion functionality exists; at that point, decide per output whether it should become a GeoServer-visible layer or remain a metadata/profile/download output.
+- Initial scenario execution does not durably store run history or scenario-specific results. It returns a transient run/result envelope and keeps a storage adapter boundary plus persistence-ready identifiers and metadata fields so Postgres/Timescale/PostGIS persistence can be enabled later without changing the API contract. This exception does not change the chosen storage paths for reusable model data, published source/model layers, profiles outside scenario history, or grid assignments.
+- While scenario persistence is disabled, API responses return result metadata plus inline or streamed transient outputs. The contract reserves output identifiers, persistence state, and future links without claiming that a durable result resource exists.
+- Phase 1 does not include scenario result layers. Scenario output persistence and GeoServer publication remain disabled for the first scenario implementation and require a later explicit decision.
 - The frontend uses a layer registry driven by layer metadata. The MVP uses `GET /layers` on the policy-tool backend as the canonical dashboard contract, with static `layers.json` only as a fallback or seed; later versions should evolve toward catalogue-style discovery.
 - Layer registry records have a mandatory MVP field set: stable ids, title/description, group/model/version, metadata URL, GeoServer publication details, geometry type, selectable feature type, CRS, metrics/units, style status, actions, `datacompleetheid`, freshness state, and lightweight provenance.
 - Model containers should own domain calculations and expose APIs. The policy-tool backend should own frontend-facing orchestration, not long-term model logic.
@@ -398,7 +398,7 @@ The existing residential load behavior keeps `GET /simulate/{pc6}` during transi
 
 Maturity path:
 
-- MVP: simple FastAPI/HTTP JSON routes, permissive internal schemas, synchronous runs allowed, database-persisted run/output metadata and profiles, and optional generated export files.
+- MVP: simple FastAPI/HTTP JSON routes, permissive internal schemas, synchronous runs, transient scenario results returned directly or streamed, no durable scenario history, and a disabled persistence adapter boundary for later use.
 - Next: shared request/response schemas across models, explicit error responses, stable run/output ids, and generated OpenAPI specs.
 - Professional target: API Design Rules/OpenAPI documentation, geospatial alignment where applicable, and OGC API Processes-style execution for standardized process invocation when it starts paying for itself.
 
@@ -417,7 +417,7 @@ In the MVP, orchestration may be synchronous and direct: receive scenario settin
 
 ## Run Lifecycle
 
-The first version should execute model and scenario runs synchronously when the calculation is quick enough for an HTTP request. The response should still be shaped like a persisted run so the frontend and orchestrator do not need a redesign later.
+The first version should execute model and scenario runs synchronously when the calculation is quick enough for an HTTP request. The response should still use a persistence-ready run envelope so the frontend and orchestrator do not need a redesign later, but the envelope is not durably stored.
 
 Minimum run fields:
 
@@ -425,12 +425,12 @@ Minimum run fields:
 - `status`: at least `accepted`, `running`, `completed`, or `failed`, even if MVP runs usually jump straight to `completed` or `failed`.
 - `created_at`, `started_at`, and `finished_at`: timestamps for debugging, provenance, and later history views.
 - `inputs`: the scenario/model parameters used for the run, or a pointer to them.
-- `outputs`: links to layer metadata, database-backed profile resources, database records, or API outputs.
+- `outputs`: inline or streamed transient results in the MVP; later this may also contain links to durable layer metadata, profile resources, or database-backed outputs.
 - `data_quality`: completeness/confidence/provenance summary for the run result.
 
 Maturity path:
 
-- MVP: calculate immediately, return `run_id`, status, outputs, and metadata in the same response.
+- MVP: calculate immediately, return `run_id`, status, outputs, metadata, and `persistence: none` in the same response; do not promise historical retrieval after the request/process lifetime.
 - Next: persist run records so `GET /runs/{run_id}` can return previous results and failures.
 - Professional target: support asynchronous jobs, cancellation, progress/status polling, result retrieval, and OGC API Processes-style execution where it improves interoperability.
 
@@ -618,7 +618,7 @@ Metadata maintenance rule:
 - each model repo owns one versioned `model-manifest.json`, stored next to the model code and source-data configuration;
 - `GET /metadata`, `GET /layers`, run records, and output records are generated from `model-manifest.json` plus runtime fields such as git commit, container image digest, timestamps, source versions, and output ids;
 - the policy-tool backend and frontend consume model API metadata instead of maintaining separate hand-copied layer descriptions;
-- every run/output stores a metadata snapshot so old scenario results remain explainable after the model changes.
+- every transient run/output response includes a metadata snapshot; when durable persistence is enabled later, that same snapshot is stored so historical scenario results remain explainable after model changes.
 - the first PV manifest is intentionally rich: it must include the categories needed for discovery, publication, provenance, data quality, and API integration, even when some individual values are provisional during model development.
 - CRS and GeoServer-readiness are not optional for geospatial outputs: the first PV layer must state the output CRS and produce a publishable artifact, even if the final GeoServer service URLs remain provisional.
 - default GeoServer styling is acceptable for the first PV layer; custom SLD and legend metadata can be added once the layer is visible and the dashboard styling need is clear.
@@ -753,45 +753,41 @@ Geonovum alignment guardrail:
 - Geonovum's data-space exploration treats APIs, metadata/self-descriptions, catalogues, provenance, identity, access/usage control, governance, and connectors as distinct building blocks rather than one product that must be installed at once;
 - this staged approach follows the wider Geonovum data-ecosystem direction: start from a concrete societal use case, reuse standards and shared building blocks, and grow federation only as participants and trust requirements demand it.
 
-## Scenario Result Storage
+## Scenario Result Handling And Future Storage
 
-Scenario results are not one object. A result can include map layers, profiles, summary values, provenance, `datacompleetheid`, and links back to the model outputs and source layer versions that produced it.
+Scenario results can include profiles, summary values, provenance, `datacompleetheid`, and references to the model outputs and source layer versions used during the calculation.
 
-MVP storage path:
+Current decision: transient execution only.
 
-- store scenario/run/result metadata in Postgres;
-- store profile and time-series outputs in Timescale;
-- store map-visible geometries in PostGIS and publish them through GeoServer;
-- return output metadata and links from the policy-tool backend, rather than embedding all raw profile and map data in the API response;
-- allow CSV/Parquet/GeoJSON only as optional exports for download, inspection, or debugging;
-- include `run_id`, input summary, output links, `datacompleetheid`, `last_updated`, source dependency timestamps, and stale/current state.
+- do not durably store scenario/run/result records in Postgres, Timescale, PostGIS, files, or export folders;
+- execute the first scenario flow synchronously and return the result directly in the response, or stream a large profile to the requesting client;
+- include a generated `run_id`, status, timestamps, input summary, model/source versions, provenance, `datacompleetheid`, and `persistence: none` in the returned envelope;
+- do not advertise durable output URLs or historical retrieval when no stored resource exists;
+- `GET /runs/{run_id}` may expose an active or short-lived in-process run, but the MVP makes no guarantee that completed runs survive a restart or remain historically retrievable;
+- keep published reusable model layers, canonical non-scenario model data/profiles, and persistent grid assignments separate from this no-scenario-history decision.
 
-MVP result metadata shape:
+Transient MVP response shape:
 
 ```json
 {
-  "run_id": "https://reformers01.ewi.tudelft.nl/id/run/scenario/local-dev-001",
+  "run_id": "scenario-local-dev-001",
   "scenario_name": "High PV and EV adoption",
   "status": "completed",
-  "last_updated": "2026-07-28T11:00:00Z",
-  "source_last_updated": {
+  "persistence": "none",
+  "finished_at": "2026-07-28T11:00:00Z",
+  "source_versions": {
     "consumption": "2026-07-28T10:00:00Z",
     "pv": "2026-07-28T10:15:00Z",
     "ev": "2026-07-28T10:30:00Z",
     "grid_assignment": "2026-07-28T10:45:00Z"
   },
   "outputs": {
-    "layers": [
-      {
-        "id": "https://reformers01.ewi.tudelft.nl/id/layer/scenario/congestion/local-dev-001",
-        "geoserver_layer": "rdp:scenario_congestion_local_dev_001"
-      }
-    ],
     "profiles": [
       {
-        "id": "https://reformers01.ewi.tudelft.nl/id/time-series/scenario/local-dev-001/transformer-load",
-        "href": "/policy-api/outputs/scenario-local-dev-001-transformer-load",
-        "storage": "timescale"
+        "profile_type": "transformer_load",
+        "time_resolution": "PT15M",
+        "unit": "kW",
+        "delivery": "inline_or_streamed"
       }
     ],
     "summary": {
@@ -801,32 +797,24 @@ MVP result metadata shape:
   },
   "data_quality": {
     "datacompleetheid": 2,
-    "datacompleetheid_label": "middel"
+    "datacompleetheid_label": "redelijke betrouwbaarheid"
   }
 }
 ```
 
-Storage implementation rule:
+Future-storage guardrail:
 
-- store scenario metadata, summary outputs, and run records in Postgres;
-- store time-series outputs in Timescale;
-- store map geometries and derived spatial outputs in PostGIS;
-- publish map layers from PostGIS through GeoServer first, and later through OGC API Features/Tiles where useful;
-- keep file exports as optional downloads/debug artifacts, not as the canonical source of truth.
-
-Professional target:
-
-- API responses return links and metadata for result resources;
-- catalogue-style metadata can expose scenario outputs through DCAT-AP-NL, ISO metadata, or OGC API Records;
-- result records keep lineage from scenario inputs, model versions, source layer timestamps, grid assignments, and output artifacts;
-- stale/current/refreshing/failed state is visible to both API clients and the frontend.
+- place persistence behind a replaceable interface/configuration switch that is disabled in the first version;
+- keep request/response schemas stable enough to add durable output ids and links later;
+- reserve optional fields such as `expires_at` without requiring or populating them now;
+- when persistence is explicitly enabled, reuse Postgres for run metadata, Timescale for time series, PostGIS/GeoServer for selected map-visible result layers, and files only for optional exports;
+- decide retention, cleanup, access control, catalogue exposure, and stale-result handling at that later activation point.
 
 Geonovum alignment guardrail:
 
-- use GeoServer/WMS/WFS as the practical current geospatial publication path;
-- keep the path open to OGC API Features and OGC API Tiles for modern standards-based feature and tile access;
-- keep result metadata rich enough to become catalogue/search metadata later;
-- keep profiles separate from spatial features so time-series access can move toward SensorThings-style APIs if needed.
+- describe the synchronous operation and response through OpenAPI even though results are not persisted;
+- use explicit identifiers, units, timestamps, source versions, provenance, and quality metadata in the transient response;
+- keep the contract ready for later OGC API Processes-style jobs and OGC API/GeoServer publication without implementing durable job resources prematurely.
 
 ## Layer Metadata Record
 
@@ -862,7 +850,7 @@ Each model output intended for the map should include a lightweight layer metada
   ],
   "data_quality": {
     "datacompleetheid": 3,
-    "datacompleetheid_label": "hoog",
+    "datacompleetheid_label": "hoge betrouwbaarheid",
     "confidence": "medium",
     "estimated_values": true
   }
@@ -931,7 +919,7 @@ MVP registry record, using the first PV layer as the shape to implement:
   },
   "data_quality": {
     "datacompleetheid": 2,
-    "datacompleetheid_label": "middel",
+    "datacompleetheid_label": "redelijke betrouwbaarheid",
     "datacompleetheid_method": "to_be_confirmed"
   },
   "provenance": {
@@ -986,7 +974,7 @@ Implementation phases:
 
 1. GeoServer-visible model layers: first migrate the current static PC6 energy layer into the shared PostGIS/GeoServer path, then make each new model publish its first useful output as a GeoServer-visible layer. Deliver this phase one layer/model at a time: verify the dashboard, API, publisher, and GeoServer setup after the PC6 baseline and after every new model. PV is the first new model, followed by EV, grid, and later others. Scenario result layers remain out of scope.
 2. Transformer profile coupling: connect consumption, PV, EV, grid, and other outputs through the congestion model so profiles can be aggregated at LV/MV transformers and later MV/HV transformers.
-3. Scenario UI: add sliders, buttons, scenario requests, run metadata, and scenario result layers/profiles on top of the working model/layer foundation.
+3. Scenario UI: add sliders, buttons, synchronous scenario requests, transient run metadata, and directly returned profiles/summaries on top of the working model/layer foundation. Durable history and GeoServer-published scenario result layers remain disabled until explicitly introduced.
 4. Professional setup: harden the existing PostGIS/Timescale stores with production migrations, retention, backup, performance, and access controls, then add event-based triggers, richer tests, OpenAPI documentation, catalogue-style metadata, and OGC API/Geonovum-aligned publication where useful.
 
 Branching policy:
@@ -1047,18 +1035,16 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 11. Add the first grid-model matching API and grid-assignment records using closest Euclidean LV component, with incremental refresh on layer updates and consumption by the congestion model.
 12. Once transformer profile aggregation is reliable, add transformer capacity/headroom comparison and the first congestion indicators as a separate increment.
 13. Start phase 3 by adding scenario sliders/buttons and `POST /scenarios` flow once phase 2 outputs are stable enough.
-14. When phase 3 starts, decide which scenario outputs need GeoServer-visible result layers and which remain database-backed metadata/profile outputs with optional downloads; use PostGIS/Timescale as the canonical store from the first scenario implementation.
+14. Keep the first scenario implementation transient. Introduce durable Postgres/Timescale/PostGIS storage, downloadable exports, retention rules, and GeoServer-visible scenario result layers only through a later explicit decision, using the existing persistence-ready contract.
 15. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
 16. Start phase 4 hardening only after the working map/model/scenario flow is stable in `dev`.
 
 ## Open Questions
 
-- What retention policy should apply to database-resident scenario runs/results and their optional export files?
 - Which required model-run, stable-feature, provenance, or quality fields, if any, cannot be represented by the complete existing RDP `data_points`/`forecasts` contract and API metadata?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - For area features with multiple LV components, which grid-assignment rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
 - Which model-specific evidence and assessment rule should the baseline PC6 producer use to assign the agreed qualitative `datacompleetheid` levels, and how should feature-level evidence contribute to the layer-level assessment?
-- Once run persistence is added, how long should scenario history and output artifacts be retained?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
 - Which external sources belong in the RDP crawler immediately, and which can remain standalone-only while prototyping?
