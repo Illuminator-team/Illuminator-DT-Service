@@ -49,7 +49,7 @@ Decisions made so far:
 - A coarse qualitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four ordered integer levels from 0 to 3.
 - `datacompleetheid` is a simple user-facing trust indicator that summarizes data availability, expected accuracy, and reliance on assumptions. It is not a calculated percentage or a substitute for the richer quality metadata that should support it.
 - The producing model owns its model-specific `datacompleetheid` calculation and thresholds. For the PV capacity layer, the PV model agent defines, documents, tests, and versions the rule in the PV model repo; the integration layer validates and displays the result without recalculating it.
-- The legacy baseline PC6 layer is a temporary ownership exception because no standalone producing model exists yet: the current policy-tool component/repo owns its documented and versioned `datacompleetheid` rule until the layer is replaced or transferred to a standalone model.
+- The legacy baseline PC6 layer is a temporary ownership exception because no standalone producing model exists yet: the current policy-tool component/repo assigns qualitative `datacompleetheid: 2` with label `redelijke betrouwbaarheid` and method version `legacy-pc6-layer-qualitative-v1`. This is one layer-level assessment inherited by every PC6 feature for display, not a feature-specific calculation. Its evidence summary states that the layer combines real/open annual energy and building data with standard load profiles, enrichment, estimates, and assumptions. The renewed consumption model replaces this temporary assessment with its own documented output-level or feature-level method.
 - The shared publisher validates that the baseline score, label, method version, timestamp, and evidence summary conform to the integration contract; it does not calculate or reinterpret the score.
 - Layer versioning starts with timestamp metadata: `last_updated` on layers/outputs/mappings and `source_last_updated` for dependencies.
 - Layer change detection should use a shared lightweight diff checker in the crawler/ingestion/layer-publishing path. Models may report their own changed feature ids when available, but the shared diff checker is the fallback that compares previous and current published layer versions by stable feature id and feature hash.
@@ -357,7 +357,7 @@ Baseline PR scope:
 - keep the current `GET /simulate/{pc6}`, shared CSV volume, sliders, and chart behavior working unchanged;
 - do not split the policy backend, redesign the data-generation helper, add PV, or introduce scenario/congestion functionality in this baseline PR;
 - add lightweight layer metadata for stable identity, CRS, attributes/units, source artifact, update timestamp, publication links, and known quality limitations.
-- include baseline `datacompleetheid` metadata owned by the policy-tool component, with a documented four-bin rule, method version, calculation timestamp, evidence summary, and explicit treatment of missing/sentinel energy values.
+- publish the temporary layer-level `datacompleetheid: 2` / `redelijke betrouwbaarheid` assessment as inherited metadata on every baseline PC6 feature, using method version `legacy-pc6-layer-qualitative-v1`, publication-time assessment timestamp, and an evidence summary covering real/open source data, standard profiles, estimates, assumptions, and known missing/sentinel values.
 
 Completion criteria:
 
@@ -593,7 +593,7 @@ Rules for the first version:
 - the shared integration contract requires a score from 0 to 3, its label, and a short method/explanation reference; method version, assessment timestamp, and an evidence summary distinguishing observed, estimated, missing, and assumed inputs should be included when available;
 - the model repo documents and tests its rule in `model-manifest.json` and exposes the resulting metadata through its API;
 - integration CI validates the field shape, allowed values, and manifest/API consistency, but does not attempt to judge or reproduce the domain calculation;
-- for the legacy PC6 baseline, treat the policy-tool component/repo as the temporary producer and owner of the score; the publisher only validates and carries the score into PostGIS, GeoServer attributes/metadata, and the layer registry;
+- for the legacy PC6 baseline, use the agreed inherited layer-level score `2`, label `redelijke betrouwbaarheid`, and method `legacy-pc6-layer-qualitative-v1`; the publisher validates and carries that assessment into PostGIS, GeoServer attributes/metadata, and the layer registry without presenting it as feature-specific;
 - grid-assignment mappings should include `datacompleetheid` so users can see whether profile-to-grid coupling is strong or approximate;
 - scenario results should expose an overall `datacompleetheid`, using the most conservative contributing score by default;
 - keep the level assignment simple and documented per model or layer; do not imply unsupported numerical precision;
@@ -997,7 +997,7 @@ Fixture area: PC6 `1842EM`.
 - Docker Compose configuration validation for the integrated stack;
 - repeatable publisher execution and PostGIS feature-count/id uniqueness checks;
 - WMS `GetCapabilities`, non-empty `GetMap`, WFS `DescribeFeatureType`, and WFS `GetFeature` checks for the published PC6 layer;
-- fixture checks that `1842EM` exists and has numeric `p6_gasm3_2023`, `p6_kwh_2023`, and `p6_kwh_productie_2023` attributes;
+- fixture checks that `1842EM` exists, has numeric `p6_gasm3_2023`, `p6_kwh_2023`, and `p6_kwh_productie_2023` attributes, and exposes inherited `datacompleetheid: 2` with label `redelijke betrouwbaarheid` and method `legacy-pc6-layer-qualitative-v1`;
 - dashboard checks that WFS is the primary source, PC6 selection and sliders work, and the static GeoJSON fallback works when WFS is unavailable;
 - existing policy-backend health and `GET /simulate/1842EM` checks, including retrieval and chart parsing of the generated CSV;
 - checks that the baseline PR does not introduce PV-model, transformer-assignment, or congestion behavior.
@@ -1041,7 +1041,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- Which model-specific evidence and assessment rule should the baseline PC6 producer use to assign the agreed qualitative `datacompleetheid` levels, and how should feature-level evidence contribute to the layer-level assessment?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
 - Which external sources belong in the RDP crawler immediately, and which can remain standalone-only while prototyping?
