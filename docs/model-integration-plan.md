@@ -41,10 +41,10 @@ Decisions made so far:
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
 - Scenario execution uses one JSON request to the policy-tool backend, with time settings, layer-native spatial selections, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
 - There is no single canonical scenario area. Spatial selections use stable layer-native `layer_id` and `feature_id` references, with geometry type, selectable feature type, and CRS supplied by layer metadata. The first types are CBS buurt for PV, an individual public charger for EV, and an individual grid asset or transformer for grid/congestion workflows. The renewed consumption model declares whether its first selectable layer uses PC6 or CBS buurt. Custom geometry and additional types can be added later without changing the common reference shape.
-- The grid model owns the spatial matching calculation and persistent assignment records that link each layer feature/profile to an appropriate grid component. Integrated records live in a grid-owned table in the existing RDP PostGIS database. The first working rule is closest Euclidean LV component.
+- The grid model owns the complete grid-connection calculation and its assignment records for points, areas, profiles, and grid components. Its output is authoritative for downstream services; this integration does not prescribe or reimplement the connection algorithm. Integrated records live in a grid-owned table in the existing RDP PostGIS database.
 - In the MVP, the shared layer publisher calls the grid model's assignment-refresh API after successfully publishing a changed source layer. Later this direct call should become a Redis layer-update event without changing assignment ownership.
 - The congestion model consumes grid-assignment records for profile aggregation and congestion calculations; it does not implement the spatial matching algorithm.
-- Allocation rules for area features with multiple LV components, such as CBS buurten or PC6 areas, are deferred to the grid-assignment story and should be agreed with the congestion-model requirements.
+- Point and area connection rules, including cases with multiple LV components inside CBS buurten or PC6 areas, remain internal to the grid model. The congestion model consumes the returned assignment or connection result without choosing the rule.
 - Each metadata record should be designed so it can later map to DCAT-AP-NL, ISO 19115/19119, OGC API Records, and SensorThings concepts.
 - A coarse qualitative measure called `datacompleetheid` should be available for every layer, mapping, profile, and scenario result where possible. The MVP uses four ordered integer levels from 0 to 3.
 - `datacompleetheid` is a simple user-facing trust indicator that summarizes data availability, expected accuracy, and reliance on assumptions. It is not a calculated percentage or a substitute for the richer quality metadata that should support it.
@@ -507,9 +507,9 @@ This gives the dashboard a quick working contract while keeping a clear path to 
 
 ## Grid Assignment Mapping
 
-The grid model should share the grid: topology, assets, geometry, voltage level, capacity, and other grid metadata. Because it owns the authoritative grid geometries and knows which components are valid connection targets, it should also own the spatial matching calculation for consumption, PV, EV, and other source features.
+The grid model shares the grid topology, assets, geometry, voltage level, capacity, and other grid metadata. It also owns the existing grid-connection logic for consumption, PV, EV, and other source features because it owns the authoritative grid representation and valid connection targets.
 
-The grid model should accept a stable source-feature reference and geometry, calculate the match, and return an explicit grid-assignment record. The first working rule is closest Euclidean LV component. The congestion model consumes these records to aggregate profiles and calculate congestion; it should not duplicate the matching logic.
+The grid model exposes its connection result through its API and/or assignment records using stable source and grid-object references. Its own repository and API contract define the algorithm and required inputs. The congestion model consumes these results to aggregate profiles and calculate congestion; it does not duplicate or reinterpret the grid-connection logic.
 
 MVP mapping record:
 
@@ -528,8 +528,8 @@ MVP mapping record:
     "component_id": "lv-component-987"
   },
   "assignment": {
-    "method": "nearest_euclidean_lv_component",
-    "distance_m": 42.7,
+    "method": "grid_model_defined",
+    "method_version": "grid-model-version-or-method-id",
     "share": 1.0,
     "confidence": "medium",
     "datacompleetheid": 2
@@ -562,15 +562,15 @@ MVP behavior:
 
 Later path: replace the publisher's direct refresh call with a versioned `layer.updated` event on an RDP Redis stream. The grid model subscribes to that event and performs the same targeted refresh, so the direct MVP flow can evolve without changing the assignment contract.
 
-Deferred story:
+Ownership rule:
 
-For area features such as CBS buurten or PC6 areas, there may be multiple LV components inside the area. The exact allocation rule is not decided here. The grid-assignment story should decide whether to use nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule, based on what the congestion model needs. Until then, any area assignment must clearly record the method and confidence.
+The integration plan does not choose point or area allocation rules. For CBS buurten, PC6 areas, chargers, or other features, the grid model decides how many grid connections are returned and any associated shares or confidence. Downstream services rely on that output and retain the grid-model method/version and provenance where the grid contract exposes them.
 
 Geonovum alignment guardrail:
 
 - treat assignments as explicit relationships between geo-objects, not as hidden assumptions;
 - prefer persistent identifiers for both source features and grid assets;
-- record method, distance, versions, confidence, and provenance;
+- retain the grid model method/version and any distance, share, confidence, and provenance fields its authoritative contract exposes;
 - keep the structure compatible with later OGC API Joins-style linking between profile/scenario tables and geo-objects.
 
 ## Datacompleetheid
@@ -1032,7 +1032,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 8. Inventory current policy-tool backend code into API/orchestration glue, consumption/profile behavior, and data ingestion, and document the missing transformer-level congestion capability; do this as preparation for later splits rather than before the PV layer.
 9. Keep the current policy-tool backend name and legacy profile/orchestration behavior in code until PV is working as the first new model layer.
 10. Start phase 2 with the first `congestion-model-service` vertical slice: consume grid assignments and aligned 15-minute model profiles, aggregate them per transformer, and persist/expose the transformer profile with provenance and quality metadata.
-11. Add the first grid-model matching API and grid-assignment records using closest Euclidean LV component, with incremental refresh on layer updates and consumption by the congestion model.
+11. Integrate the grid model's existing grid-connection API/output and authoritative assignment records, with incremental refresh on relevant layer updates and consumption by the congestion model; do not implement a competing matching rule in this repository.
 12. Once transformer profile aggregation is reliable, add transformer capacity/headroom comparison and the first congestion indicators as a separate increment.
 13. Start phase 3 by adding scenario sliders/buttons and `POST /scenarios` flow once phase 2 outputs are stable enough.
 14. Keep the first scenario implementation transient. Introduce durable Postgres/Timescale/PostGIS storage, downloadable exports, retention rules, and GeoServer-visible scenario result layers only through a later explicit decision, using the existing persistence-ready contract.
@@ -1041,7 +1041,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- For area features with multiple LV components, which grid-assignment rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
 - Which model-specific evidence and assessment rule should the baseline PC6 producer use to assign the agreed qualitative `datacompleetheid` levels, and how should feature-level evidence contribute to the layer-level assessment?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
