@@ -1,0 +1,215 @@
+import argparse
+import csv
+import io
+import json
+import ssl
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+PC6_LAYER = "policy_tool_pc6_energy"
+FIXTURE = "1842EM"
+
+
+class SmokeClient:
+    def __init__(self, base_url: str) -> None:
+        self.base_url = base_url.rstrip("/")
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=context)
+        )
+
+    def get(self, path: str, timeout: int = 60) -> tuple[int, bytes, str]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            headers={"Accept": "*/*", "User-Agent": "rdp-integration-smoke/1.0"},
+        )
+        with self.opener.open(request, timeout=timeout) as response:
+            return response.status, response.read(), response.headers.get_content_type()
+
+    def get_json(self, path: str, timeout: int = 60) -> dict:
+        status, body, _ = self.get(path, timeout=timeout)
+        if status != 200:
+            raise AssertionError(f"{path} returned HTTP {status}")
+        return json.loads(body)
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+def wait_until_ready(client: SmokeClient, path: str, timeout: int = 720) -> None:
+    deadline = time.monotonic() + timeout
+    last_error = "not attempted"
+    while time.monotonic() < deadline:
+        try:
+            status, _, _ = client.get(path, timeout=20)
+            if status == 200:
+                return
+            last_error = f"HTTP {status}"
+        except (OSError, urllib.error.URLError) as exc:
+            last_error = str(exc)
+        time.sleep(5)
+    raise AssertionError(f"Timed out waiting for {path}: {last_error}")
+
+
+def flatten_coordinates(value):
+    if value and isinstance(value[0], (int, float)):
+        yield value
+        return
+    for child in value:
+        yield from flatten_coordinates(child)
+
+
+def check_pc6_layer(client: SmokeClient) -> None:
+    capabilities_query = urllib.parse.urlencode(
+        {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}
+    )
+    capabilities_path = f"/geoserver/wms?{capabilities_query}"
+    deadline = time.monotonic() + 300
+    while True:
+        status, body, _ = client.get(capabilities_path)
+        if status == 200 and PC6_LAYER.encode() in body:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError("PC6 layer missing from WMS capabilities")
+        time.sleep(5)
+
+    describe_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "DescribeFeatureType",
+            "typeNames": PC6_LAYER,
+        }
+    )
+    status, body, _ = client.get(f"/geoserver/rdp/ows?{describe_query}")
+    require(status == 200, "WFS DescribeFeatureType failed")
+    for field in (
+        "postcode6",
+        "p6_gasm3_2023",
+        "p6_kwh_2023",
+        "p6_kwh_productie_2023",
+        "datacompleetheid",
+        "datacompleetheid_label",
+        "datacompleetheid_method",
+    ):
+        require(field.encode() in body, f"WFS schema is missing {field}")
+
+    feature_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": PC6_LAYER,
+            "outputFormat": "application/json",
+            "cql_filter": f"postcode6='{FIXTURE}'",
+        }
+    )
+    feature_collection = client.get_json(f"/geoserver/rdp/ows?{feature_query}")
+    require(feature_collection.get("numberReturned") == 1, "Fixture feature is missing")
+    feature = feature_collection["features"][0]
+    properties = feature["properties"]
+    require(properties["postcode6"] == FIXTURE, "Unexpected fixture postcode")
+    for field in ("p6_gasm3_2023", "p6_kwh_2023", "p6_kwh_productie_2023"):
+        require(isinstance(properties[field], (int, float)), f"{field} is not numeric")
+    require(properties["datacompleetheid"] == 2, "Unexpected datacompleetheid")
+    require(
+        properties["datacompleetheid_label"] == "redelijke betrouwbaarheid",
+        "Unexpected datacompleetheid label",
+    )
+    require(
+        properties["datacompleetheid_method"]
+        == "legacy-pc6-layer-qualitative-v1",
+        "Unexpected datacompleetheid method",
+    )
+
+    coordinates = list(flatten_coordinates(feature["geometry"]["coordinates"]))
+    xs = [coordinate[0] for coordinate in coordinates]
+    ys = [coordinate[1] for coordinate in coordinates]
+    padding = 0.001
+    bbox = f"{min(xs)-padding},{min(ys)-padding},{max(xs)+padding},{max(ys)+padding}"
+    map_query = urllib.parse.urlencode(
+        {
+            "service": "WMS",
+            "version": "1.1.1",
+            "request": "GetMap",
+            "layers": f"rdp:{PC6_LAYER}",
+            "styles": "",
+            "srs": "EPSG:4326",
+            "bbox": bbox,
+            "width": 256,
+            "height": 256,
+            "format": "image/png",
+        }
+    )
+    status, image, content_type = client.get(f"/geoserver/rdp/wms?{map_query}")
+    require(status == 200, "WMS GetMap failed")
+    require(content_type == "image/png", f"Unexpected WMS content type: {content_type}")
+    require(image.startswith(b"\x89PNG") and len(image) > 1000, "WMS map is empty")
+
+
+def check_dashboard_and_simulation(client: SmokeClient) -> None:
+    status, dashboard, _ = client.get("/dashboard/")
+    require(status == 200, "Dashboard did not load")
+    require(b"map-data.js" in dashboard, "Dashboard does not load its map data adapter")
+
+    status, script, _ = client.get("/dashboard/map-data.js")
+    require(status == 200, "Map data adapter did not load")
+    require(b"policy_tool_pc6_energy" in script, "Dashboard is not configured for PC6 WFS")
+    require(b"alkmaar_energy_map.geojson" in script, "Static fallback is missing")
+
+    api = client.get_json("/policy-api/")
+    require(api.get("message") == "Policy Tool API is active", "Policy API is unhealthy")
+    simulation = client.get_json(
+        f"/policy-api/simulate/{FIXTURE}?electrification=0", timeout=300
+    )
+    require(simulation.get("status") == "success", "PC6 simulation failed")
+    status, csv_body, _ = client.get(simulation["url"], timeout=60)
+    require(status == 200, "Generated profile CSV was not served")
+    rows = list(csv.reader(io.StringIO(csv_body.decode("utf-8"))))
+    require(len(rows) > 100, "Generated profile CSV is unexpectedly short")
+    require(
+        rows[0]
+        == [
+            "timestamp",
+            "electrical_demand_gross_kwh",
+            "pv_generation_kwh",
+            "electrical_demand_net_kwh",
+            "heat_demand_kwh_th",
+            "hp_electricity_input_kwh",
+            "gas_input_kwh",
+        ],
+        "Generated profile CSV schema changed",
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base-url", default="https://localhost")
+    args = parser.parse_args()
+
+    client = SmokeClient(args.base_url)
+    wait_until_ready(client, "/dashboard/")
+    wait_until_ready(client, "/policy-api/")
+    wait_until_ready(
+        client, "/geoserver/wms?service=WMS&version=1.3.0&request=GetCapabilities"
+    )
+    check_pc6_layer(client)
+    check_dashboard_and_simulation(client)
+    print("Integrated PC6 baseline smoke test passed")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(f"Smoke test failed: {exc}", file=sys.stderr)
+        raise
