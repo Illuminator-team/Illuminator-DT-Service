@@ -1,0 +1,33 @@
+services:
+  policy-tool-frontend:
+    labels:
+      traefik.http.routers.dashboard.rule: Host(`localhost`) && PathPrefix(`/dashboard`)
+
+  policy-tool-backend:
+    labels:
+      traefik.http.routers.policy-router.rule: Host(`localhost`) && PathPrefix(`/policy-api`)
+
+  grafana:
+    environment:
+      GF_SERVER_ROOT_URL: https://localhost/grafana
+    labels:
+      traefik.http.routers.grafana.rule: Host(`localhost`) && (Path(`/grafana`) || PathPrefix(`/grafana/`))
+
+  geo:
+    environment:
+      RUN_AS_ROOT: "true"
+      STABLE_EXTENSIONS: ""
+    volumes:
+      - geoserver-local-data:/opt/geoserver/data_dir
+    labels:
+      traefik.http.routers.geoserver.rule: Host(`localhost`) && PathPrefix(`/geoserver`)
+
+  illuminator-service:
+    volumes:
+      - ./illuminator-service/config.yml:/app/config.yml:ro
+      - illuminator-local-output:/app/output
+      - ./illuminator-output/pv.yaml:/app/output/pv.yaml:ro
+
+volumes:
+  geoserver-local-data:
+  illuminator-local-output:
