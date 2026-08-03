@@ -35,7 +35,7 @@ Decisions made so far:
 - Source dataset names, source versions, and detailed PV `lineage_summary` text can be finalized from the model repo once the PV model/API is finished; the architecture decision now is to reserve and validate those metadata fields, not guess their final values early.
 - Profiles reuse the existing RDP persistence path as their canonical store: model services publish standard Redis output streams, `data-sync-service` resolves `data_points` and writes values to `forecasts` in Timescale/Postgres. PostGIS stores spatial outputs; CSV is only an optional export/debug artifact.
 - Model-generated consumption, PV-production, EV, and congestion profiles belong in the existing `forecasts` structure; genuinely observed source values belong in `measurements`. Do not create parallel profile-value tables unless an evidenced requirement cannot fit the RDP contract.
-- Reuse the existing RDP schema and services before extending them. Add only the smallest versioned metadata/link extension if required run, feature, provenance, or quality metadata cannot be represented or exposed alongside the existing records.
+- Reuse the existing RDP `data_points`/`forecasts` contract, API metadata, and services before extending them. Treat fit assessment as an implementation compatibility check: document and test each required model-run, stable-feature, provenance, and quality field against the complete existing contract. Add only the smallest named and versioned metadata/link extension for a demonstrated gap; do not overload unrelated columns or create speculative parallel tables.
 - All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
 - The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. These endpoints remain directly callable in both standalone and integrated modes. Models may add domain-specific endpoints, and legacy endpoints may remain during transition, but the main frontend does not depend on them.
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
@@ -1041,7 +1041,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- Which required model-run, stable-feature, provenance, or quality fields, if any, cannot be represented by the complete existing RDP `data_points`/`forecasts` contract and API metadata?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - For area features with multiple LV components, which grid-assignment rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
 - Which model-specific evidence and assessment rule should the baseline PC6 producer use to assign the agreed qualitative `datacompleetheid` levels, and how should feature-level evidence contribute to the layer-level assessment?
