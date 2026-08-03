@@ -77,6 +77,7 @@ Decisions made so far:
 - After that baseline PR, PV remains the first new standalone model layer to add.
 - Current residential-load behavior can stay in the policy-tool backend during transition, but it is legacy behavior that will be replaced by the independently renewed `consumption-model-service`; do not treat extraction or cleanup of the old calculation code as the target architecture.
 - The intended congestion responsibility associated with the policy tool needs a follow-up `congestion-model-service`, which owns profile aggregation, grid assignment consumption, and congestion indicators. The current checked-in backend does not yet implement transformer-level congestion calculation.
+- The first `congestion-model-service` vertical slice consumes aligned 15-minute model profiles and existing grid-assignment records, aggregates the profiles per transformer, and stores/exposes the resulting transformer profile with stable identifiers, units, source versions, timestamps, provenance, and `datacompleetheid`. It does not yet classify congestion or compare the profile with transformer capacity; those follow after aggregation is reliable.
 - External data/API fetching moves toward shared crawler/data services for integrated RDP, while standalone model development may keep isolated input adapters and caches.
 - GeoServer publishing should use a shared layer-publishing path instead of every model implementing its own publishing logic.
 - The selected spatial publication path is option 3: model services own their output features and metadata, while the shared RDP layer publisher owns validation, PostGIS loading/upserting, GeoServer datastore/layer registration, and publication status.
@@ -134,7 +135,7 @@ Planned services:
 - `pv-map-service`: first publishes model-estimated PV capacity at CBS buurt resolution using `pv_capacity_kwp`; future versions can add PV potential, production profiles, and scenario-derived generation layers.
 - `ev-charger-model-service`: generates public EV charger location layers and charging demand profiles.
 - `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers and owns the API, logic, and persistent records for matching external areas or points to grid components.
-- `congestion-model-service`: consumes model profiles, grid layers, and stored grid-assignment records to aggregate transformer profiles and calculate congestion indicators. This capability is introduced as a separate service rather than extracted from a complete existing transformer-congestion implementation.
+- `congestion-model-service`: first consumes model profiles and stored grid-assignment records to aggregate 15-minute transformer profiles; after that foundation is reliable, it also consumes capacity/headroom data and calculates congestion indicators. This capability is introduced as a separate service rather than extracted from a complete existing transformer-congestion implementation.
 - `other-model-service`: placeholder for later independent model services that publish layers/profiles through the same contract.
 
 If orchestration grows beyond simple scenario coordination, it can later be split out of the policy-tool backend. For the next versions, keeping orchestration in the policy-tool backend gives the frontend one stable API to call.
@@ -1042,9 +1043,9 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 7. Add PR checks for `dev` that validate Docker Compose config, model API, policy-tool backend, dashboard reachability/layer toggle, GeoServer WMS/WFS publication, layer registry metadata, manifest consistency, provenance, and output links.
 8. Inventory current policy-tool backend code into API/orchestration glue, consumption/profile behavior, and data ingestion, and document the missing transformer-level congestion capability; do this as preparation for later splits rather than before the PV layer.
 9. Keep the current policy-tool backend name and legacy profile/orchestration behavior in code until PV is working as the first new model layer.
-10. Start phase 2 by introducing `congestion-model-service` for grid-assignment consumption, transformer profile aggregation, and congestion indicators.
+10. Start phase 2 with the first `congestion-model-service` vertical slice: consume grid assignments and aligned 15-minute model profiles, aggregate them per transformer, and persist/expose the transformer profile with provenance and quality metadata.
 11. Add the first grid-model matching API and grid-assignment records using closest Euclidean LV component, with incremental refresh on layer updates and consumption by the congestion model.
-12. Add transformer-level profile aggregation outputs and metadata links.
+12. Once transformer profile aggregation is reliable, add transformer capacity/headroom comparison and the first congestion indicators as a separate increment.
 13. Start phase 3 by adding scenario sliders/buttons and `POST /scenarios` flow once phase 2 outputs are stable enough.
 14. When phase 3 starts, decide which scenario outputs need GeoServer-visible result layers and which remain database-backed metadata/profile outputs with optional downloads; use PostGIS/Timescale as the canonical store from the first scenario implementation.
 15. Promote shared external API connections into crawler/ingestion services when the data contract stabilizes.
@@ -1052,7 +1053,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- What is the smallest first `congestion-model-service` implementation: start with profile aggregation, a congestion indicator contract, or another narrow vertical slice?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
 - What retention policy should apply to database-resident scenario runs/results and their optional export files?
 - Which required model-run, stable-feature, provenance, or quality fields, if any, cannot be represented by the complete existing RDP `data_points`/`forecasts` contract and API metadata?
