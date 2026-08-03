@@ -29,6 +29,18 @@
             <label for="r-elec">ELEC CONSUMPTION (kWh)</label>
         </div>
     </div>
+    <div class="layer-health" aria-live="polite">
+        <div class="layer-source-row">
+            <span class="source-indicator" aria-hidden="true"></span>
+            <span id="layer-source-status" data-state="loading">Loading layer</span>
+        </div>
+        <div class="quality-row" title="Qualitative data completeness level">
+            <span class="quality-meter quality-level-2" aria-hidden="true">
+                <i></i><i></i><i></i><i></i>
+            </span>
+            <span>Datacompleetheid 2/3</span>
+        </div>
+    </div>
 </div>
 
 
@@ -46,6 +58,7 @@
 </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="map-data.js"></script>
     <script src="script.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>

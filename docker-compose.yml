@@ -251,18 +251,6 @@ services:
       - "traefik.http.services.service-geoserver.loadbalancer.server.port=8080"
   
   ## --------------------------------------------------
-  ## Publishes GeoJSON files to GeoServer.
-  ## --------------------------------------------------
-  geojson-loader:
-    image: curlimages/curl
-    depends_on:
-      - geo
-    entrypoint: ["sh", "-c"]
-    command: ["/scripts/publish-geojson.sh"]
-    volumes:
-      - ./scripts:/scripts
-
-  ## --------------------------------------------------
   ## Pushes layer to  GeoServer through the same network.
   ## --------------------------------------------------
   layer-publisher:
@@ -276,13 +264,20 @@ services:
       POSTGRES_DB: rdp_db
       POSTGRES_USER: ${POSTGRES_ADMIN_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      PUBLISHER_MANIFEST_PATH: /app/layer-manifest.json
+      PC6_SOURCE_PATH: /data/alkmaar_energy_map.geojson
+      GEOSERVER_WORKSPACE: rdp
+      GEOSERVER_DATASTORE: rdp_postgis
+      PUBLISH_INTERVAL_SECONDS: 10
     depends_on:
       - geo
+      - timescale
+      - db-scheme
     networks:
       - default
     volumes:
-      - ./geo:/opt/geoserver/data_dir
-
+      - ./policy-tool-frontend/data/alkmaar_energy_map.geojson:/data/alkmaar_energy_map.geojson:ro
+    restart: unless-stopped
 
   ## ---------------------------------------------------------------------------------
   ## For debugging: use Redis Insight browser to explore the content of redis streams.
