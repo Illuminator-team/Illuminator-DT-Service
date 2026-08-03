@@ -75,7 +75,7 @@ Decisions made so far:
 - The selected phase-1 baseline PR first migrates that existing PC6 energy layer through the shared publisher into PostGIS/GeoServer and makes GeoServer WFS the dashboard's primary layer source while retaining the static GeoJSON as a temporary fallback.
 - The baseline migration must preserve the existing feature selection, sliders, policy-backend profile calculation, and chart workflow. It does not split the policy backend or change model calculations.
 - After that baseline PR, PV remains the first new standalone model layer to add.
-- Current residential-load behavior can stay in the policy-tool backend during transition, but should move into or be wrapped as `consumption-model-service` over time.
+- Current residential-load behavior can stay in the policy-tool backend during transition, but it is legacy behavior that will be replaced by the independently renewed `consumption-model-service`; do not treat extraction or cleanup of the old calculation code as the target architecture.
 - The intended congestion responsibility associated with the policy tool needs a follow-up `congestion-model-service`, which owns profile aggregation, grid assignment consumption, and congestion indicators. The current checked-in backend does not yet implement transformer-level congestion calculation.
 - External data/API fetching moves toward shared crawler/data services for integrated RDP, while standalone model development may keep isolated input adapters and caches.
 - GeoServer publishing should use a shared layer-publishing path instead of every model implementing its own publishing logic.
@@ -129,8 +129,8 @@ The model core should be independent from RDP infrastructure. Input and output a
 
 Planned services:
 
-- `policy-tool-backend`: frontend-facing scenario/orchestration API. It coordinates calls to model APIs and may temporarily keep the current residential-load, electrification, and profile logic during migration.
-- `consumption-model-service`: generates residential, commercial, and industrial demand layers and profiles. The current residential-load logic should move here or be wrapped as this service over time.
+- `policy-tool-backend`: frontend-facing scenario/orchestration API. It coordinates calls to model APIs and may temporarily keep the legacy residential-load, electrification, and profile logic solely to preserve working behavior during migration.
+- `consumption-model-service`: the renewed, independently developed source of truth for residential, commercial, and industrial demand layers and profiles. It replaces rather than wraps the legacy consumption calculation.
 - `pv-map-service`: first publishes model-estimated PV capacity at CBS buurt resolution using `pv_capacity_kwp`; future versions can add PV potential, production profiles, and scenario-derived generation layers.
 - `ev-charger-model-service`: generates public EV charger location layers and charging demand profiles.
 - `grid-map-service`: publishes grid topology, asset, capacity, and headroom layers and owns the API, logic, and persistent records for matching external areas or points to grid components.
@@ -159,7 +159,7 @@ Ownership boundaries:
 
 Migration note:
 
-The current policy-tool backend may keep existing calculations while the MVP is being stabilized. Follow-up work should identify which current code belongs to orchestration and which belongs to `consumption-model-service`. Transformer aggregation and congestion calculation should be introduced behind the separate `congestion-model-service` boundary instead of being added to the legacy backend.
+The current policy-tool backend may keep its legacy calculations while the MVP is being stabilized. The renewed `consumption-model-service` replaces the consumption calculation through its API once its output contract and integration checks are ready; the policy backend then forwards or adapts compatible requests instead of running that domain calculation locally. Existing code still needs to be inventoried to separate reusable API/orchestration behavior and ingestion concerns, but the legacy consumption implementation does not need to be migrated into the renewed service. Transformer aggregation and congestion calculation should be introduced behind the separate `congestion-model-service` boundary instead of being added to the legacy backend.
 
 MVP behavior:
 
@@ -393,7 +393,7 @@ Endpoint meanings:
 - `GET /runs/{run_id}`: returns run status, parameters, timestamps, and links to outputs.
 - `GET /outputs/{output_id}`: returns output metadata plus links to layer resources and database-backed profile/API resources; optional file exports may also be linked when they exist.
 
-The existing residential load behavior can keep `GET /simulate/{pc6}` during transition, but new model APIs should move toward run IDs and output metadata records. That will make it easier for the policy-tool backend to consume multiple model outputs consistently.
+The existing residential load behavior keeps `GET /simulate/{pc6}` during transition. Once the renewed consumption service is integrated, the policy backend should preserve that route as a compatibility adapter until the frontend has migrated, while new model APIs move toward run IDs and output metadata records. This lets the implementation behind the route change without breaking the working dashboard.
 
 Maturity path:
 
@@ -1052,7 +1052,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- Which current policy-tool backend functions belong to API/orchestration, consumption/profile behavior, or data ingestion, and which congestion capabilities must be introduced fresh?
 - What is the smallest first `congestion-model-service` implementation: start with profile aggregation, a congestion indicator contract, or another narrow vertical slice?
 - Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
 - What retention policy should apply to database-resident scenario runs/results and their optional export files?
