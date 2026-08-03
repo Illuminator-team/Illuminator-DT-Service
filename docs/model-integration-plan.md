@@ -39,7 +39,7 @@ Decisions made so far:
 - All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
 - The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. These endpoints remain directly callable in both standalone and integrated modes. Models may add domain-specific endpoints, and legacy endpoints may remain during transition, but the main frontend does not depend on them.
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
-- Scenario execution uses one JSON request to the policy-tool backend, with time settings, layer-native spatial selections, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
+- Scenario execution uses one versioned JSON envelope sent to the policy-tool backend. The backend owns shared time settings, layer-native spatial selections, enabled-model routing, and requested outputs; each model owns and versions the parameters inside its own block and exposes their schema through its API metadata/OpenAPI. The policy backend validates the shared envelope and delegates or schema-validates model-specific parameters without absorbing their domain meaning.
 - There is no single canonical scenario area. Spatial selections use stable layer-native `layer_id` and `feature_id` references, with geometry type, selectable feature type, and CRS supplied by layer metadata. The first types are CBS buurt for PV, an individual public charger for EV, and an individual grid asset or transformer for grid/congestion workflows. The renewed consumption model declares whether its first selectable layer uses PC6 or CBS buurt. Custom geometry and additional types can be added later without changing the common reference shape.
 - The grid model owns the complete grid-connection calculation and its assignment records for points, areas, profiles, and grid components. Its output is authoritative for downstream services; this integration does not prescribe or reimplement the connection algorithm. Integrated records live in a grid-owned table in the existing RDP PostGIS database.
 - In the MVP, the shared layer publisher calls the grid model's assignment-refresh API after successfully publishing a changed source layer. Later this direct call should become a Redis layer-update event without changing assignment ownership.
@@ -444,6 +444,7 @@ MVP request shape:
 
 ```json
 {
+  "contract_version": "1.0",
   "scenario_name": "High PV and EV adoption",
   "spatial_selection": {
     "items": [
@@ -465,26 +466,53 @@ MVP request shape:
     "resolution": "PT15M"
   },
   "models": {
-    "consumption": { "enabled": true },
-    "pv": { "enabled": true },
-    "ev": { "enabled": true },
-    "grid": { "enabled": true }
+    "consumption": {
+      "enabled": true,
+      "parameters_schema_version": "1.0",
+      "parameters": { "electrification_fraction": 0.4 }
+    },
+    "pv": {
+      "enabled": true,
+      "parameters_schema_version": "1.0",
+      "parameters": { "capacity_multiplier": 1.5 }
+    },
+    "ev": {
+      "enabled": true,
+      "parameters_schema_version": "1.0",
+      "parameters": { "charger_utilization": 0.6 }
+    },
+    "grid": {
+      "enabled": true,
+      "parameters_schema_version": "1.0",
+      "parameters": {}
+    }
   },
   "outputs": {
-    "layers": true,
     "profiles": true,
+    "summary": true,
     "data_quality": true
   }
 }
 ```
 
+The model-specific parameter names and values above are illustrative. Each model's advertised schema is authoritative.
+
 Minimum fields:
 
+- `contract_version`: version of the shared orchestration envelope.
 - `scenario_name`: human-readable name for the run.
 - `spatial_selection`: one or more selected feature references, using stable identifiers where possible.
 - `time`: start, end, and resolution, with `PT15M` as the scenario time step for now.
-- `models`: one block per model, each with `enabled` and model-specific scenario parameters.
-- `outputs`: requested result types, such as map layers, profiles, data quality, and later reports.
+- `models`: one block per model containing `enabled`, `parameters_schema_version`, and a model-owned `parameters` object.
+- `outputs`: requested transient result types, initially profiles, summaries, and data quality; durable or map-published scenario outputs require the separate future persistence decision.
+
+Parameter ownership rules:
+
+- the policy-tool backend owns and validates `contract_version`, `scenario_name`, `spatial_selection`, `time`, model enablement/routing, and requested output categories;
+- each model owns its `parameters` names, meanings, defaults, units, constraints, schema version, and validation;
+- model services expose the parameter schema through their OpenAPI and/or `GET /metadata` response;
+- the policy backend may validate against the advertised schema before calling a model, but it does not duplicate the model's domain rules;
+- adding or updating one model's parameters should not require changing the shared envelope or unrelated model blocks.
 
 Spatial selection rules:
 
@@ -771,6 +799,7 @@ Transient MVP response shape:
 ```json
 {
   "run_id": "scenario-local-dev-001",
+  "contract_version": "1.0",
   "scenario_name": "High PV and EV adoption",
   "status": "completed",
   "persistence": "none",
@@ -1041,5 +1070,4 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
 - Which external sources belong in the RDP crawler immediately, and which can remain standalone-only while prototyping?
