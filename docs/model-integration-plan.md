@@ -70,7 +70,7 @@ Decisions made so far:
 - Phase 1 does not include scenario result layers. Scenario output persistence and GeoServer publication remain disabled for the first scenario implementation and require a later explicit decision.
 - The frontend uses a layer registry driven by layer metadata. The MVP uses `GET /layers` on the policy-tool backend as the canonical dashboard contract, with static `layers.json` only as a fallback or seed; later versions should evolve toward catalogue-style discovery.
 - Layer registry records have a mandatory MVP field set: stable ids, title/description, group/model/version, metadata URL, GeoServer publication details, geometry type, selectable feature type, CRS, metrics/units, style status, actions, `datacompleetheid`, freshness state, and lightweight provenance.
-- Model containers should own domain calculations and expose APIs. The policy-tool backend should own frontend-facing orchestration, not long-term model logic.
+- Model containers own domain calculations and expose APIs. The policy-tool backend remains the frontend-facing orchestrator and stable API entry point, with no scheduled extraction into a dedicated orchestration service.
 - The current policy-tool map/profile workflow is treated as the phase-1 reference behavior, but its PC6 energy layer is currently dashboard-visible through static GeoJSON rather than GeoServer-visible.
 - The selected phase-1 baseline PR first migrates that existing PC6 energy layer through the shared publisher into PostGIS/GeoServer and makes GeoServer WFS the dashboard's primary layer source while retaining the static GeoJSON as a temporary fallback.
 - The baseline migration must preserve the existing feature selection, sliders, policy-backend profile calculation, and chart workflow. It does not split the policy backend or change model calculations.
@@ -138,7 +138,7 @@ Planned services:
 - `congestion-model-service`: first consumes model profiles and stored grid-assignment records to aggregate 15-minute transformer profiles; after that foundation is reliable, it also consumes capacity/headroom data and calculates congestion indicators. This capability is introduced as a separate service rather than extracted from a complete existing transformer-congestion implementation.
 - `other-model-service`: placeholder for later independent model services that publish layers/profiles through the same contract.
 
-If orchestration grows beyond simple scenario coordination, it can later be split out of the policy-tool backend. For the next versions, keeping orchestration in the policy-tool backend gives the frontend one stable API to call.
+Keep orchestration in the policy-tool backend unless concrete operational needs justify extraction: multiple independent clients or products need the same workflows, jobs become long-running/asynchronous, retries and event coordination become substantially complex, or orchestration requires independent scaling, security boundaries, ownership, or deployment. If such a trigger occurs, preserve the frontend contract while moving the implementation behind it; architectural neatness alone is not a trigger.
 
 ## Model Ownership And Boundaries
 
@@ -1029,7 +1029,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 5. Add a frontend layer registry backed by `GET /layers` on the policy-tool backend, optionally seeded by static `layers.json`, then use it to render available model layers first and scenario outputs later.
 6. Add mandatory registry fields, including `datacompleetheid`, `last_updated`, `source_last_updated`, CRS, metrics/units, GeoServer service links, style status, actions, and lightweight provenance.
 7. Add PR checks for `dev` that validate Docker Compose config, model API, policy-tool backend, dashboard reachability/layer toggle, GeoServer WMS/WFS publication, layer registry metadata, manifest consistency, provenance, and output links.
-8. Inventory current policy-tool backend code into API/orchestration glue, consumption/profile behavior, and data ingestion, and document the missing transformer-level congestion capability; do this as preparation for later splits rather than before the PV layer.
+8. Inventory current policy-tool backend code into API/orchestration glue, consumption/profile behavior, and data ingestion, and document the missing transformer-level congestion capability; use the inventory to protect boundaries and compatibility, not as a commitment to extract orchestration.
 9. Keep the current policy-tool backend name and legacy profile/orchestration behavior in code until PV is working as the first new model layer.
 10. Start phase 2 with the first `congestion-model-service` vertical slice: consume grid assignments and aligned 15-minute model profiles, aggregate them per transformer, and persist/expose the transformer profile with provenance and quality metadata.
 11. Integrate the grid model's existing grid-connection API/output and authoritative assignment records, with incremental refresh on relevant layer updates and consumption by the congestion model; do not implement a competing matching rule in this repository.
@@ -1041,6 +1041,5 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
 - Which scenario parameters are generic enough for the policy-tool backend contract, and which should stay inside model-specific parameter blocks?
 - Which external sources belong in the RDP crawler immediately, and which can remain standalone-only while prototyping?
