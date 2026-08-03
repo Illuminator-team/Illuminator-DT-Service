@@ -11,6 +11,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let pc6Layer;
 let currentMetric = 'gas';
+let pc6LayerSource = 'loading';
 
 // Unified Color Logic
 function getColor(d, type) {
@@ -106,10 +107,28 @@ function style(feature) {
 }
 
 // Data Loading
+function updateLayerStatus(source, fallbackReason = null) {
+    const status = document.getElementById('layer-source-status');
+    pc6LayerSource = source;
+    status.dataset.state = source;
+    status.textContent = source === 'geoserver_wfs'
+        ? 'Live GeoServer WFS'
+        : source === 'static_geojson'
+            ? 'Static fallback active'
+            : source === 'failed'
+                ? 'Layer unavailable'
+                : 'Loading layer';
+    status.title = fallbackReason || '';
+}
+
 async function loadMap() {
     try {
-        const resp = await fetch('data/alkmaar_energy_map.geojson');
-        const data = await resp.json();
+        const result = await Pc6MapData.loadPc6FeatureCollection(fetch);
+        const data = result.data;
+        updateLayerStatus(result.source, result.fallbackReason);
+        if (result.fallbackReason) {
+            console.warn('GeoServer WFS unavailable; using static fallback:', result.fallbackReason);
+        }
 
         pc6Layer = L.geoJSON(data, {
             style: style,
@@ -136,6 +155,7 @@ async function loadMap() {
 
     } catch (e) {
         console.error("Data load failed:", e);
+        updateLayerStatus('failed', e.message);
     }
 }
 
@@ -223,6 +243,10 @@ function updateSidePanel(prop) {
     
     const formatNum = (val) => Math.round(val).toLocaleString('nl-NL');
     const simActiveClass = s.modified ? "active" : "";
+    const completeness = Number(prop.datacompleetheid ?? 2);
+    const completenessLabel = prop.datacompleetheid_label || 'redelijke betrouwbaarheid';
+    const sourceLabel = pc6LayerSource === 'geoserver_wfs'
+        ? 'GeoServer WFS' : 'Static GeoJSON fallback';
 
     document.getElementById('panel-content').innerHTML = `
         <div class="pc6-header">${pc}</div>
@@ -295,7 +319,13 @@ function updateSidePanel(prop) {
         <div style="margin-top:40px; font-size:9px; color:var(--text-muted); line-height:1.5;">
             <strong>METHODOLOGY</strong><br>
             Geometry: CBS 2021 PC6 Boundaries.<br>
-            Energy: VNG (CBS) Energy Statistics 2023.
+            Energy: VNG (CBS) Energy Statistics 2023.<br>
+            Source: ${sourceLabel}.
+        </div>
+
+        <div class="feature-quality" data-level="${completeness}">
+            <span class="quality-score">${completeness}/3</span>
+            <span><strong>Datacompleetheid</strong><br>${completenessLabel}</span>
         </div>
     `;
 

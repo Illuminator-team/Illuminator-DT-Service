@@ -1,0 +1,68 @@
+name: Dev integration
+
+on:
+  pull_request:
+    branches: [dev]
+
+jobs:
+  pc6-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate PC6 source and publication contract
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Test dashboard WFS fallback behavior
+        run: node --test tests/map-data.test.js
+
+      - name: Create ephemeral integration credentials and certificate
+        shell: bash
+        run: |
+          cp .env.example .env
+          sed -i "s|POSTGRES_ADMIN_PASSWORD=change-me|POSTGRES_ADMIN_PASSWORD=ci-postgres-password|" .env
+          sed -i "s|REDIS_PASSWORD=change-me|REDIS_PASSWORD=ci-redis-password|" .env
+          sed -i "s|GRAFANA_ADMIN_PASSWORD=change-me|GRAFANA_ADMIN_PASSWORD=ci-grafana-password|" .env
+          sed -i "s|GEOSERVER_ADMIN_PASSWORD=change-me|GEOSERVER_ADMIN_PASSWORD=ci-geoserver-password|" .env
+          sed -i "s|POSTGRES_DATA_SOURCE_PASSWORD=change-me|POSTGRES_DATA_SOURCE_PASSWORD=ci-source-password|" .env
+          sed -i "s|POSTGRES_DATA_VIS_PASSWORD=change-me|POSTGRES_DATA_VIS_PASSWORD=ci-vis-password|" .env
+          sed -i "s|POSTGRES_DATA_PUB_VIS_PASSWORD=change-me|POSTGRES_DATA_PUB_VIS_PASSWORD=ci-pub-vis-password|" .env
+          sed -i "s|PATH_TO_CERT_FILE=.*|PATH_TO_CERT_FILE=${GITHUB_WORKSPACE}/certs/ci-local.crt|" .env
+          sed -i "s|PATH_TO_KEY_FILE=.*|PATH_TO_KEY_FILE=${GITHUB_WORKSPACE}/certs/ci-local.key|" .env
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout certs/ci-local.key -out certs/ci-local.crt \
+            -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+      - name: Validate Docker Compose configuration
+        run: docker compose -f docker-compose.yml -f docker-compose.local.yml config --quiet
+
+      - name: Start integrated stack
+        run: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+
+      - name: Run integrated PC6 smoke checks
+        run: python tests/smoke_stack.py --base-url https://localhost
+
+      - name: Verify repeatable publisher execution
+        shell: bash
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.local.yml stop layer-publisher
+          docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm -e PUBLISH_ONCE=true layer-publisher
+          docker compose -f docker-compose.yml -f docker-compose.local.yml up -d layer-publisher
+
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.local.yml logs --tail 200
+
+      - name: Stop integrated stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.local.yml down --volumes

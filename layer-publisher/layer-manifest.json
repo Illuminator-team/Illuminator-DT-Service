@@ -1,0 +1,39 @@
+{
+  "contract_version": "1.0",
+  "workspace": "rdp",
+  "datastore": "rdp_postgis",
+  "layers": [
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/policy-tool/pc6-energy",
+      "local_id": "layer:policy-tool:pc6-energy",
+      "title": "Policy Tool PC6 Energy",
+      "description": "Legacy policy-tool annual gas, electricity consumption, and electricity production by PC6.",
+      "table": "policy_tool_pc6_energy",
+      "geoserver_layer": "policy_tool_pc6_energy",
+      "source": {
+        "type": "geojson",
+        "path": "/data/alkmaar_energy_map.geojson",
+        "crs": "EPSG:4326",
+        "reference_year": 2023
+      },
+      "feature_id_property": "postcode6",
+      "feature_uri_template": "https://reformers01.ewi.tudelft.nl/id/geo-object/pc6/{postcode6}",
+      "geometry_type": "MultiPolygon",
+      "attributes": [
+        {"name": "postcode6", "type": "string"},
+        {"name": "p6_gasm3_2023", "type": "number", "unit": "m3/year"},
+        {"name": "p6_kwh_2023", "type": "number", "unit": "kWh/year"},
+        {"name": "p6_kwh_productie_2023", "type": "number", "unit": "kWh/year"}
+      ],
+      "data_quality": {
+        "datacompleetheid": 2,
+        "datacompleetheid_label": "redelijke betrouwbaarheid",
+        "datacompleetheid_method": "legacy-pc6-layer-qualitative-v1",
+        "evidence_summary": "Combines real/open annual energy and building data with standard load profiles, enrichment, estimates, and assumptions."
+      },
+      "style": {
+        "style_status": "default_geoserver"
+      }
+    }
+  ]
+}
