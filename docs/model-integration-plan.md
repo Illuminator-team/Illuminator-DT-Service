@@ -40,7 +40,7 @@ Decisions made so far:
 - The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. These endpoints remain directly callable in both standalone and integrated modes. Models may add domain-specific endpoints, and legacy endpoints may remain during transition, but the main frontend does not depend on them.
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
 - Scenario execution uses one JSON request to the policy-tool backend, with time settings, layer-native spatial selections, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
-- There is no single canonical scenario area yet. Spatial selections are layer-native feature references: CBS buurt, PC6, public EV charger, grid asset, transformer area, or later custom geometry, depending on the model/layer.
+- There is no single canonical scenario area. Spatial selections use stable layer-native `layer_id` and `feature_id` references, with geometry type, selectable feature type, and CRS supplied by layer metadata. The first types are CBS buurt for PV, an individual public charger for EV, and an individual grid asset or transformer for grid/congestion workflows. The renewed consumption model declares whether its first selectable layer uses PC6 or CBS buurt. Custom geometry and additional types can be added later without changing the common reference shape.
 - The grid model owns the spatial matching calculation and persistent assignment records that link each layer feature/profile to an appropriate grid component. Integrated records live in a grid-owned table in the existing RDP PostGIS database. The first working rule is closest Euclidean LV component.
 - In the MVP, the shared layer publisher calls the grid model's assignment-refresh API after successfully publishing a changed source layer. Later this direct call should become a Redis layer-update event without changing assignment ownership.
 - The congestion model consumes grid-assignment records for profile aggregation and congestion calculations; it does not implement the spatial matching algorithm.
@@ -1041,7 +1041,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
 - For area features with multiple LV components, which grid-assignment rule should be used first: nearest component, centroid distance, spatial overlap, address/building counts, connection data, proportional shares, or another rule?
 - Which model-specific evidence and assessment rule should the baseline PC6 producer use to assign the agreed qualitative `datacompleetheid` levels, and how should feature-level evidence contribute to the layer-level assessment?
 - When should orchestration move out of the policy-tool backend into a dedicated service, if ever?
