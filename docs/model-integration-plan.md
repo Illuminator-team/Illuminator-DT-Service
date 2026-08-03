@@ -37,7 +37,7 @@ Decisions made so far:
 - Model-generated consumption, PV-production, EV, and congestion profiles belong in the existing `forecasts` structure; genuinely observed source values belong in `measurements`. Do not create parallel profile-value tables unless an evidenced requirement cannot fit the RDP contract.
 - Reuse the existing RDP schema and services before extending them. Add only the smallest versioned metadata/link extension if required run, feature, provenance, or quality metadata cannot be represented or exposed alongside the existing records.
 - All model services expose APIs and can be called independently. The policy-tool frontend calls the policy-tool backend, and the policy-tool backend orchestrates calls to consumption, PV, EV, grid, and later model APIs for scenario workflows.
-- The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. Legacy endpoints may remain during transition.
+- The minimum model API contract is `GET /`, `GET /metadata`, `GET /layers`, `POST /runs`, `GET /runs/{run_id}`, and `GET /outputs/{output_id}`. These endpoints remain directly callable in both standalone and integrated modes. Models may add domain-specific endpoints, and legacy endpoints may remain during transition, but the main frontend does not depend on them.
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
 - Scenario execution uses one JSON request to the policy-tool backend, with time settings, layer-native spatial selections, per-model parameter blocks, and requested outputs. The MVP schema should stay simple but map cleanly to OpenAPI and future OGC API Processes inputs/outputs.
 - There is no single canonical scenario area yet. Spatial selections are layer-native feature references: CBS buurt, PC6, public EV charger, grid asset, transformer area, or later custom geometry, depending on the model/layer.
@@ -165,7 +165,7 @@ The current policy-tool backend may keep its legacy calculations while the MVP i
 MVP behavior:
 
 - keep the policy-tool backend as the single API the frontend calls;
-- keep standalone model APIs callable directly for development and debugging;
+- keep the shared minimum model API endpoints directly callable in standalone and integrated modes for development, testing, debugging, and independent use;
 - isolate any direct external data fetches behind input adapters;
 - produce model outputs and metadata from model services, then publish map layers through the shared layer-publishing path;
 - avoid adding new domain calculations to the policy-tool backend unless they are explicitly temporary migration code.
@@ -1053,7 +1053,6 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 
 ## Open Questions
 
-- Which direct model API calls should remain supported for standalone development even though the main frontend uses the policy-tool backend?
 - What retention policy should apply to database-resident scenario runs/results and their optional export files?
 - Which required model-run, stable-feature, provenance, or quality fields, if any, cannot be represented by the complete existing RDP `data_points`/`forecasts` contract and API metadata?
 - Which spatial selection types should each model/layer support first: CBS buurt, PC6, building, EV charger, grid asset, feeder, transformer area, or mixed?
