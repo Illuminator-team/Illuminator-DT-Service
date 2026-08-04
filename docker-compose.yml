@@ -1,5 +1,41 @@
 services:
 
+#  --------------------------------------- PLAYGROUND ---------------------------------------
+  policy-tool-frontend:
+      image: nginx:alpine
+      volumes:
+        # Mount HTML/JS/CSS code
+        - ./policy-tool-frontend:/usr/share/nginx/html/dashboard:ro
+        # Mount the shared volume so Nginx can serve the generated CSVs
+        - policy-tool-data:/usr/share/nginx/html/dashboard/processed
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.dashboard.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/dashboard`)"
+        - "traefik.http.routers.dashboard.entrypoints=web,websecure"
+        - "traefik.http.routers.dashboard.tls=true"
+        - "traefik.http.services.dashboard.loadbalancer.server.port=80"
+      restart: unless-stopped
+
+  policy-tool-backend:
+      build: ./policy-tool-backend
+      volumes:
+        - policy-tool-data:/app/data/processed
+      environment:
+        - REDIS_PASSWORD=${REDIS_PASSWORD}
+      labels:
+        - "traefik.enable=true"
+        # path to /policy-api is needed to out frontend to make calls to the backend
+        - "traefik.http.routers.policy-router.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/policy-api`)"
+        - "traefik.http.routers.policy-router.entrypoints=web,websecure"
+        - "traefik.http.routers.policy-router.tls=true"
+        # middleware needs to strip /policy-api so the Python code sees "/"
+        - "traefik.http.middlewares.policy-strip.stripprefix.prefixes=/policy-api"
+        - "traefik.http.routers.policy-router.middlewares=policy-strip"
+        - "traefik.http.services.policy-service.loadbalancer.server.port=8000"
+
+#  ------------------------------------END OF PLAYGROUND -------------------------------------
+
+
   ## -----------------------------------------------------------------
   ## Use Redis streams for data access of micro-services in real-time.
   ## -----------------------------------------------------------------
@@ -99,7 +135,7 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=HostRegexp(`localhost`) && (Path(`/grafana`) || PathPrefix(`/grafana/`))"
+      - "traefik.http.routers.grafana.rule=HostRegexp(`reformers01.ewi.tudelft.nl`) && (Path(`/grafana`) || PathPrefix(`/grafana/`))"
       - "traefik.http.routers.grafana.service=service-grafana"
       - "traefik.http.services.service-grafana.loadbalancer.server.port=3000"
       - "traefik.http.routers.grafana.entrypoints=web,websecure"
@@ -151,13 +187,18 @@ services:
   ## --------------------------------------------------
   reverse-proxy:
     image: traefik:v3.6
+    user: root
     ports:
       - "80:80"
       - "443:443"
       - "8080:8080"  # expose dashboard port
     volumes:
-      - ./certs:/etc/certs
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs/config.yml:/etc/traefik/dynamic_conf.yml:ro
+      - ${PATH_TO_CERT_FILE}:/etc/traefik/certs/reformers01.ewi.tudelft.nl.crt:ro
+      - ${PATH_TO_KEY_FILE}:/etc/traefik/certs/reformers01.ewi.tudelft.nl.key:ro
+
+  
     restart: on-failure
     command:
       - "--log.level=INFO"
@@ -167,7 +208,8 @@ services:
       - "--entryPoints.websecure.address=:443"
       - "--providers.docker.exposedByDefault=false"
       - "--providers.docker.watch=true"
-      - "--providers.file.directory=/etc/certs"
+      - "--providers.file.filename=/etc/traefik/dynamic_conf.yml"
+      - "--providers.docker=true"
       - "--api.insecure=true"  # enable Traefik dashboard
       - "--api.dashboard=true" # explicitly enable dashboard (safe to add)
 
@@ -203,8 +245,7 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-        #       - "traefik.http.routers.geoserver.rule=Host(`localhost`) && PathPrefix(`/geoserver`)"
-      - "traefik.http.routers.geoserver.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/geoserver`)" 
+      - "traefik.http.routers.geoserver.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/geoserver`)"
       - "traefik.http.routers.geoserver.entrypoints=web,websecure"
       - "traefik.http.routers.geoserver.tls=true"
       - "traefik.http.routers.geoserver.service=service-geoserver"
@@ -256,3 +297,5 @@ volumes:
   redis-data:
   timescale-data:
   grafana-data:
+  volumes:
+  policy-tool-data:

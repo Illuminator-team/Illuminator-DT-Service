@@ -1,0 +1,66 @@
+physics:
+  kWh_per_m3_gas: 9.77  # Source: EnergieConsultant / typical Dutch low-cal gas
+
+time:
+  reference_year: 2026 # Target year for simulation alignment
+  profile_year: 2026   # Year of standard load profiles to use
+  use_dst: false       # Use standard time (winter time) all year for 8760h
+
+climate_normalization:
+  enabled: true
+  # Factor to normalize 2023 gas consumption to "Average Year"
+  # Derived from HDD ratio (Average / 2023). 2023 was a warm year.
+  # Source: Comparison of 2023 HDD (~2441) vs Average (~2800). Ratio ~1.15.
+  # This scales UP the demand to represent a normal year.
+  factor_2023_to_average: 1.15 
+
+assumptions:
+  pv_self_consumption_share: 0.30  # Milieu Centraal
+  eta_boiler: 0.92                 # Typical modern condensing boiler
+  default_cop: 3.0                 # Conservative seasonal average for Air-Water HP
+
+benchmarks:
+  # Fallback values when real annual data is missing (per m2 floor area)
+  residential_gas_m3_per_m2: 12.0
+  residential_elec_kwh_per_m2: 30.0
+  non_residential_gas_m3_per_m2: 10.0
+  non_residential_elec_kwh_per_m2: 50.0
+
+heat:
+  options:
+    # Method for estimating non-gas heat demand: 'benchmark' (old) or 'label_intensity' (new Option A)
+    nongas_estimation_method: "label_intensity"
+    
+    # Delivered Heat Intensity (kWh_th / m2 / year) per Energy Label
+    # Based on EP2 midpoints (NTA 8800)
+    label_intensities:
+      residential:
+        A++++: 0.0
+        A+++: 25.0
+        A++: 62.5
+        A+: 90.0
+        A: 132.5
+        B: 175.0
+        C: 220.0
+        D: 270.0
+        E: 312.5
+        F: 357.5
+        G: 410.0
+      non_residential:
+        # Adjusted based on Office C-label limit (~225 kWh/m2)
+        A++++: 0.0
+        A+++: 25.0
+        A++: 62.5
+        A+: 90.0
+        A: 125.0
+        B: 162.5
+        C: 202.5
+        D: 252.5
+        E: 305.0
+        F: 355.0
+        G: 410.0
+
+    # Fallback intensity if label is missing
+    fallback_intensity:
+      residential: 270.0      # Label D
+      non_residential: 252.5  # Label D (Non-Res)

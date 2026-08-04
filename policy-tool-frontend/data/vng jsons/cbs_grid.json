@@ -1,0 +1,67 @@
+{
+    "attribution": "",
+    "bounds": [
+        3.01,
+        50.45,
+        7.09,
+        54.51
+    ],
+    "center": [
+	52.087,
+        4.308,
+        7
+    ],
+    "format": "pbf",
+    "minzoom": 7,
+    "maxzoom": 13,
+    "name": "cbs",
+    "description": null,
+    "scheme": "xyz",
+    "tilejson": "2.1.0",
+    "tiles": [
+        "https://files.commondatafactory.nl/tiles/cbs_grid_20210512/{z}/{x}/{y}.pbf"
+    ],
+    "grids": [],
+    "data": [],
+    "version": "1.0.0",
+    "template": null,
+    "legend": null,
+    "vector_layers": [
+        {
+            "version": 2,
+            "extent": 4096,
+            "id": "cbs_grid_2020",
+            "name": "cbs_grid_2020",
+            "geometry_type": "polygon",
+            "minzoom": 7,
+            "maxzoom": 13,
+            "tiles": [
+                "https://files.commondatafactory.nl/tiles/cbs_grid_20210512/{z}/{x}/{y}.pbf"
+            ]
+        },
+        {
+            "version": 2,
+            "extent": 4096,
+            "id": "cbs_grid_2019",
+            "name": "cbs_grid_2019",
+            "geometry_type": "polygon",
+            "minzoom": 7,
+            "maxzoom": 13,
+            "tiles": [
+                "https://files.commondatafactory.nl/tiles/cbs_grid_20210512/{z}/{x}/{y}.pbf"
+            ]
+        },
+        {
+            "version": 2,
+            "extent": 4096,
+            "id": "cbs_grid_2018",
+            "name": "cbs_grid_2018",
+            "geometry_type": "polygon",
+            "minzoom": 7,
+            "maxzoom": 13,
+            "tiles": [
+                "https://files.commondatafactory.nl/tiles/cbs_grid_20210512/{z}/{x}/{y}.pbf"
+            ]
+        }
+    ]
+}

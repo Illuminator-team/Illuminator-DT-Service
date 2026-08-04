@@ -1,0 +1,14 @@
+tls:
+  certificates:
+    - certFile: /etc/traefik/certs/reformers01.ewi.tudelft.nl.crt
+      keyFile: /etc/traefik/certs/reformers01.ewi.tudelft.nl.key
+      stores:
+        - default
+
+  # Optional: This forces Traefik to use these certs for any HTTPS request 
+  # that doesn't have a specific cert assigned.
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/reformers01.ewi.tudelft.nl.crt
+        keyFile: /etc/traefik/certs/reformers01.ewi.tudelft.nl.key
