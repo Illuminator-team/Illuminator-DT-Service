@@ -4,6 +4,8 @@
 
 This document sketches how the current policy-tool stack can grow into a set of independent RDP model services that feed shared frontend layers and can later interact through scenario models.
 
+Model developers should use the [model developer integration guide](model-developer-integration-guide.md) as the practical build, test, and handoff checklist for each independent model.
+
 The current `policy-tool-backend` contains early residential-load, electrification, PV, and net grid import/export profile behavior behind a small API. Transformer-level congestion calculation is a target capability rather than a current implementation. The target architecture keeps the backend as the frontend-facing orchestration API while model calculations move into independent services that can also run standalone during development.
 
 ## Current Starting Point
