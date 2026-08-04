@@ -133,7 +133,6 @@ services:
     depends_on:
       db-scheme:
         condition: service_completed_successfully
-          ## restart: unless-stopped
     restart: always
     labels:
       - "traefik.enable=true"
@@ -199,9 +198,6 @@ services:
       - ./certs/config.yml:/etc/traefik/dynamic_conf.yml:ro
       - ${PATH_TO_CERT_FILE}:/etc/traefik/certs/reformers01.ewi.tudelft.nl.crt:ro
       - ${PATH_TO_KEY_FILE}:/etc/traefik/certs/reformers01.ewi.tudelft.nl.key:ro
-
-  
-        ## restart: on-failure
     restart: always
     command:
       - "--log.level=INFO"
