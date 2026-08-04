@@ -14,7 +14,7 @@ services:
         - "traefik.http.routers.dashboard.entrypoints=web,websecure"
         - "traefik.http.routers.dashboard.tls=true"
         - "traefik.http.services.dashboard.loadbalancer.server.port=80"
-      restart: unless-stopped
+      restart: always
 
   policy-tool-backend:
       build: ./policy-tool-backend
@@ -32,6 +32,7 @@ services:
         - "traefik.http.middlewares.policy-strip.stripprefix.prefixes=/policy-api"
         - "traefik.http.routers.policy-router.middlewares=policy-strip"
         - "traefik.http.services.policy-service.loadbalancer.server.port=8000"
+      restart: always
 
 #  ------------------------------------END OF PLAYGROUND -------------------------------------
 
@@ -45,7 +46,7 @@ services:
       --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
-    restart: unless-stopped
+    restart: always
 
   ## -----------------------------------------------
   ## This micro-service retrieves weather forecasts.
@@ -58,7 +59,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     depends_on:
       - redis
-    restart: unless-stopped
+    restart: always
 
   ## ----------------------------------------------------------
   ## Use TimescaleDB for permanent storage of time series data.
@@ -71,7 +72,7 @@ services:
       TIMESCALEDB_TELEMETRY: "off"
     volumes:
       - timescale-data:/var/lib/postgresql/data
-    restart: unless-stopped
+    restart: always
     ports:
       - 5432:5432  # only for debugging
 
@@ -109,7 +110,7 @@ services:
         condition: service_started
       db-scheme:
         condition: service_completed_successfully
-    restart: unless-stopped
+    restart: always
     ## Expose ports only for debugging.
     # ports:
     #  - "5432:5432"
@@ -132,7 +133,8 @@ services:
     depends_on:
       db-scheme:
         condition: service_completed_successfully
-    restart: unless-stopped
+          ## restart: unless-stopped
+    restart: always
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.grafana.rule=HostRegexp(`reformers01.ewi.tudelft.nl`) && (Path(`/grafana`) || PathPrefix(`/grafana/`))"
@@ -152,7 +154,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     depends_on:
       - weather-data-service
-    restart: unless-stopped
+    restart: always
 
   ## -----------------------------------------------
   ## This micro-service retrieves weather forecasts.
@@ -165,7 +167,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     depends_on:
       - redis
-    restart: unless-stopped
+    restart: always
 
   ## ------------------------------------------------------------------------------------
   ## This micro-service uses the latest forecast data for running a illuminator simulation.
@@ -179,7 +181,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     depends_on:
       - weather-data-service
-    restart: unless-stopped
+    restart: always
 
 
   ## --------------------------------------------------
@@ -187,14 +189,20 @@ services:
   ## --------------------------------------------------
   reverse-proxy:
     image: traefik:v3.6
+    user: root
     ports:
       - "80:80"
       - "443:443"
       - "8080:8080"  # expose dashboard port
     volumes:
-      - ./certs:/etc/certs
-      - /var/run/docker.sock:/var/run/docker.sock
-    restart: on-failure
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs/config.yml:/etc/traefik/dynamic_conf.yml:ro
+      - ${PATH_TO_CERT_FILE}:/etc/traefik/certs/reformers01.ewi.tudelft.nl.crt:ro
+      - ${PATH_TO_KEY_FILE}:/etc/traefik/certs/reformers01.ewi.tudelft.nl.key:ro
+
+  
+        ## restart: on-failure
+    restart: always
     command:
       - "--log.level=INFO"
       - "--entryPoints.web.address=:80"
@@ -203,7 +211,8 @@ services:
       - "--entryPoints.websecure.address=:443"
       - "--providers.docker.exposedByDefault=false"
       - "--providers.docker.watch=true"
-      - "--providers.file.directory=/etc/certs"
+      - "--providers.file.filename=/etc/traefik/dynamic_conf.yml"
+      - "--providers.docker=true"
       - "--api.insecure=true"  # enable Traefik dashboard
       - "--api.dashboard=true" # explicitly enable dashboard (safe to add)
 
@@ -236,7 +245,7 @@ services:
       - GEOSERVER_ADMIN_PASSWORD=geoserver # TODO: replace later
     volumes:
       - ./geo:/opt/geoserver/data_dir  # optional: persistent config/data
-    restart: unless-stopped
+    restart: always
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.geoserver.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/geoserver`)"
@@ -275,7 +284,7 @@ services:
   ## ---------------------------------------------------------------------------------
   redis-insight:
     image: redis/redisinsight
-    restart: unless-stopped
+    restart: always
     environment:
       - RI_REDIS_HOST0=redis
       - RI_REDIS_PORT0=6379
