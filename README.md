@@ -47,3 +47,8 @@ With the stack running, execute the integrated smoke test:
 ```shell
 python tests/smoke_stack.py --base-url https://localhost
 ```
+
+## Documentation
+
+- [Future model integration plan](docs/model-integration-plan.md)
+- [Model developer integration guide](docs/model-developer-integration-guide.md)
