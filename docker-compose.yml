@@ -1,5 +1,5 @@
 x-pv-image: &pv-image
-  image: ghcr.io/jortgroen/pv-map-api@sha256:71dec8adb2385b4d12499bd38608006388c25f9aa01488c54419b3cba87f0587
+  image: ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9
 
 services:
 
@@ -48,7 +48,7 @@ services:
     environment:
       PV_RAW_CACHE_DIR: /app/data/raw
       PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
-      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:71dec8adb2385b4d12499bd38608006388c25f9aa01488c54419b3cba87f0587
+      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9
     volumes:
       - pv-raw-cache:/app/data/raw
     restart: "no"
@@ -59,7 +59,7 @@ services:
       PV_RAW_CACHE_DIR: /app/data/raw
       PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
       PV_OUTPUT_DIR: /app/data/processed/pv_capacity
-      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:71dec8adb2385b4d12499bd38608006388c25f9aa01488c54419b3cba87f0587
+      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9
     volumes:
       - pv-raw-cache:/app/data/raw
       - pv-generated-outputs:/app/data/processed/pv_capacity
@@ -319,8 +319,8 @@ services:
       PUBLISHER_MANIFEST_PATH: /app/layer-manifest.json
       PC6_SOURCE_PATH: /data/alkmaar_energy_map.geojson
       PV_API_URL: http://pv-api:8000
-      PV_EXPECTED_RELEASE_COMMIT: b5428f688b6cef0eab9c64613ea87bcdf980886b
-      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:71dec8adb2385b4d12499bd38608006388c25f9aa01488c54419b3cba87f0587
+      PV_EXPECTED_RELEASE_COMMIT: d9cd7920108d76b7d645c22b33d8cf26c35fc040
+      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
