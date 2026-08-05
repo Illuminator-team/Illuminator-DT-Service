@@ -161,6 +161,12 @@ The initialization flow MUST:
 
 - use the same container image and configuration as the API;
 - store reusable data in a documented persistent volume;
+- use explicit connect and read timeouts for every external source;
+- retry only transient failures, such as timeouts, rate limits, and server errors,
+  with a bounded backoff policy; permanent client, schema, and validation errors
+  MUST fail promptly;
+- preserve each completed, validated source artifact so a retry or resumed run does
+  not repeat unaffected downloads;
 - be safe to run more than once;
 - resume safely or restart cleanly after interruption;
 - write temporary files first and publish completed files atomically;
@@ -186,8 +192,12 @@ Container build, process import, API startup, and liveness checks MUST NOT start
 heavy downloads or preprocessing. Readiness checks MUST be quick and MUST NOT
 repair data as a side effect.
 
+Retry logs MUST identify the stable source or component, attempt number, and failure
+class without printing credentials, signed URLs, query payloads, or private paths.
+
 The README MUST state the expected download size, prepared size, initialization
-time range, external hosts contacted, and how to clear or refresh the cache.
+time range, external hosts contacted, timeout and retry policy, and how to clear or
+refresh the cache.
 
 ## 5. Reproducible Container
 
@@ -396,7 +406,7 @@ Tests MUST cover behavior rather than only importing modules.
 | Scientific regression | A small deterministic case that detects unintended model changes |
 | API contract | Every required route, media type, status code, metadata field, and invalid selection |
 | Security | Traversal attempts, unknown IDs, malformed payloads, and sanitized errors |
-| Initialization | Missing, successful, repeated, interrupted/incomplete, incompatible, and concurrent states |
+| Initialization | Missing, successful, repeated, interrupted/incomplete, incompatible, concurrent, transient retry/recovery, retry exhaustion, and permanent-failure states |
 | Live HTTP | Tests connect to a real listening server, not only an in-process test client |
 | Container | Clean build, non-root process, health/readiness, named volume, and no hidden local files |
 | End to end | Initialize, start, run a stable feature, retrieve GeoJSON, and validate its contract |
@@ -431,7 +441,7 @@ integration PR starts:
 - source inventory, licenses, reference periods, and update method;
 - `datacompleetheid` rule and evidence fields;
 - test commands and CI run link;
-- clean initialization and cached rerun evidence;
+- clean initialization, transient-failure recovery, and cached rerun evidence;
 - known limitations and unsupported selections; and
 - maintainer or owning team.
 
@@ -469,6 +479,8 @@ The RDP reviewer runs this gate before accepting the model version:
 - [ ] Liveness succeeds before data initialization and remains cheap.
 - [ ] Readiness returns `503` before initialization.
 - [ ] The explicit initializer completes and validates its state.
+- [ ] Transient source failures are retried within a bound, while permanent
+  failures fail promptly.
 - [ ] Repeating initialization is safe and reuses valid data.
 - [ ] Readiness returns `200` only after initialization is valid.
 - [ ] The stable fixture can be submitted through `POST /runs`.
