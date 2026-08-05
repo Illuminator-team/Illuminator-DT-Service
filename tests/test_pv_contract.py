@@ -240,7 +240,9 @@ class PvContractTest(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "dev-integration.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("packages: read", workflow)
+        self.assertNotIn("packages: read", workflow)
+        self.assertNotIn("secrets.GITHUB_TOKEN", workflow)
+        self.assertIn("secrets.JORT_PRIVATE_DOCKER_IMAGES", workflow)
         self.assertIn("docker login ghcr.io", workflow)
 
 

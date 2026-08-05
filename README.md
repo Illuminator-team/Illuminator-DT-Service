@@ -18,6 +18,9 @@ limited to `read:packages`; do not store that token in this repository:
 echo "$GHCR_TOKEN" | docker login ghcr.io --username <github-user> --password-stdin
 ```
 
+The integration workflow reads the equivalent pull-only credential from the
+encrypted `JORT_PRIVATE_DOCKER_IMAGES` GitHub Actions repository secret.
+
 ## Usage
 
 Create a local `.env` from `.env.example`, replace every `change-me` value, and

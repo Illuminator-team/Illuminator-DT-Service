@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   model-layer-integration:
@@ -37,8 +36,13 @@ jobs:
 
       - name: Authenticate to the private PV model package
         env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "${GHCR_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          GHCR_TOKEN: ${{ secrets.JORT_PRIVATE_DOCKER_IMAGES }}
+        run: |
+          if [ -z "${GHCR_TOKEN}" ]; then
+            echo "::error::The JORT_PRIVATE_DOCKER_IMAGES repository secret is required"
+            exit 1
+          fi
+          echo "${GHCR_TOKEN}" | docker login ghcr.io --username "JortGroen" --password-stdin
 
       - name: Create ephemeral integration credentials and certificate
         shell: bash
