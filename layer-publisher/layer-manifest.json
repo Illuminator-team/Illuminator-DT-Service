@@ -8,17 +8,26 @@
       "local_id": "layer:policy-tool:pc6-energy",
       "title": "Policy Tool PC6 Energy",
       "description": "Legacy policy-tool annual gas, electricity consumption, and electricity production by PC6.",
+      "model": "policy-tool",
+      "group": "consumption",
+      "model_id": "legacy-policy-tool",
+      "model_version": "legacy-pc6-1",
+      "metadata_contract_version": "1.0",
       "table": "policy_tool_pc6_energy",
       "geoserver_layer": "policy_tool_pc6_energy",
       "source": {
         "type": "geojson",
         "path": "/data/alkmaar_energy_map.geojson",
         "crs": "EPSG:4326",
+        "metadata_url": null,
         "reference_year": 2023
       },
       "feature_id_property": "postcode6",
       "feature_uri_template": "https://reformers01.ewi.tudelft.nl/id/geo-object/pc6/{postcode6}",
       "geometry_type": "MultiPolygon",
+      "selectable_feature_type": "pc6",
+      "spatial_resolution": "pc6",
+      "temporal_resolution": "annual",
       "attributes": [
         {"name": "postcode6", "type": "string"},
         {"name": "p6_gasm3_2023", "type": "number", "unit": "m3/year"},
@@ -31,9 +40,87 @@
         "datacompleetheid_method": "legacy-pc6-layer-qualitative-v1",
         "evidence_summary": "Combines real/open annual energy and building data with standard load profiles, enrichment, estimates, and assumptions."
       },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=policy_tool_pc6_energy&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:policy_tool_pc6_energy"
+      },
       "style": {
-        "style_status": "default_geoserver"
-      }
+        "style_status": "default_geoserver",
+        "default_visible": true
+      },
+      "actions": [
+        "inspect_feature",
+        "calculate_profile"
+      ]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/pv-map/capacity",
+      "local_id": "layer:pv-map:capacity",
+      "title": "PV Capacity",
+      "description": "Model-estimated installed PV capacity per CBS buurt in gemeente Alkmaar.",
+      "model": "pv",
+      "group": "pv",
+      "model_id": "pv-capacity-model",
+      "model_version": "0.3.0",
+      "metadata_contract_version": "2.1.0",
+      "table": "pv_capacity",
+      "geoserver_layer": "pv_capacity",
+      "source": {
+        "type": "model_api",
+        "base_url": "http://pv-api:8000",
+        "metadata_url": "/models/pv/metadata",
+        "repository": "https://github.com/JortGroen/PV-MAP",
+        "release_commit": "b4df35bec363bb1a05be35572b0cb84a275ef0bb",
+        "container_image": "pv-map-api:rdp-b4df35bec363",
+        "crs": "EPSG:4326"
+      },
+      "feature_id_property": "feature_id",
+      "source_feature_id_property": "cbs_buurt_code",
+      "feature_uri_template": "https://reformers01.ewi.tudelft.nl/id/{feature_id}",
+      "geometry_type": "MultiPolygon",
+      "selectable_feature_type": "cbs_buurt",
+      "spatial_resolution": "cbs_buurt",
+      "temporal_resolution": "static",
+      "attributes": [
+        {"name": "feature_id", "type": "string"},
+        {"name": "feature_uri", "type": "uri"},
+        {"name": "cbs_buurt_code", "type": "string"},
+        {"name": "buurt_name", "type": "string"},
+        {"name": "pv_capacity_kwp", "type": "number", "unit": "kWp"},
+        {"name": "datacompleetheid", "type": "integer"},
+        {"name": "datacompleetheid_label", "type": "string"},
+        {"name": "datacompleetheid_method_version", "type": "string"},
+        {"name": "last_updated", "type": "datetime"},
+        {"name": "source_last_updated", "type": "datetime", "nullable": true},
+        {"name": "model_version", "type": "string"},
+        {"name": "metadata_contract_version", "type": "string"}
+      ],
+      "data_quality": {
+        "kind": "qualitative_confidence",
+        "is_accuracy_percentage": false,
+        "method_version": "pv-datacompleetheid/1.0.0",
+        "owner": "pv-capacity-model",
+        "scale": {
+          "0": "fully assumption-based",
+          "1": "limited supporting data",
+          "2": "quite accurate",
+          "3": "very accurate"
+        }
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=pv_capacity&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:pv_capacity"
+      },
+      "style": {
+        "style_status": "default_geoserver",
+        "default_visible": false
+      },
+      "actions": [
+        "inspect_feature",
+        "open_model_metadata"
+      ]
     }
   ]
 }

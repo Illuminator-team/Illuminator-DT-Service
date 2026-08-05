@@ -6,6 +6,7 @@
     root.Pc6MapData = api;
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     const WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=policy_tool_pc6_energy&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const PV_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=pv_capacity&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const FALLBACK_URL = 'data/alkmaar_energy_map.geojson';
     const FALLBACK_QUALITY = Object.freeze({
         datacompleetheid: 2,
@@ -55,12 +56,19 @@
         }
     }
 
+    async function loadPvFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, PV_WFS_URL, 'PV capacity GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
     return {
         FALLBACK_QUALITY,
         FALLBACK_URL,
+        PV_WFS_URL,
         WFS_URL,
         addFallbackQuality,
         loadPc6FeatureCollection,
+        loadPvFeatureCollection,
         validateFeatureCollection
     };
 }));

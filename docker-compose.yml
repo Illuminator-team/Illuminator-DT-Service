@@ -1,3 +1,12 @@
+x-pv-image: &pv-image
+  image: pv-map-api:rdp-b4df35bec363
+  build:
+    context: "https://github.com/JortGroen/PV-MAP.git#b4df35bec363bb1a05be35572b0cb84a275ef0bb"
+    dockerfile: Dockerfile
+    args:
+      PV_RELEASE_COMMIT: b4df35bec363bb1a05be35572b0cb84a275ef0bb
+      PV_IMAGE_IDENTITY: pv-map-api:rdp-b4df35bec363
+
 services:
 
 #  --------------------------------------- PLAYGROUND ---------------------------------------
@@ -20,8 +29,10 @@ services:
       build: ./policy-tool-backend
       volumes:
         - policy-tool-data:/app/data/processed
+        - ./layer-publisher/layer-manifest.json:/app/config/layer-manifest.json:ro
       environment:
         - REDIS_PASSWORD=${REDIS_PASSWORD}
+        - LAYER_REGISTRY_PATH=/app/config/layer-manifest.json
       labels:
         - "traefik.enable=true"
         # path to /policy-api is needed to out frontend to make calls to the backend
@@ -32,6 +43,51 @@ services:
         - "traefik.http.middlewares.policy-strip.stripprefix.prefixes=/policy-api"
         - "traefik.http.routers.policy-router.middlewares=policy-strip"
         - "traefik.http.services.policy-service.loadbalancer.server.port=8000"
+
+  ## -----------------------------------------------------------
+  ## Initialize and expose the standalone PV capacity model API.
+  ## -----------------------------------------------------------
+  pv-init:
+    <<: *pv-image
+    command: ["python", "-m", "pv_map.api.initialize"]
+    environment:
+      PV_RAW_CACHE_DIR: /app/data/raw
+      PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
+    volumes:
+      - pv-raw-cache:/app/data/raw
+    restart: "no"
+
+  pv-api:
+    <<: *pv-image
+    environment:
+      PV_RAW_CACHE_DIR: /app/data/raw
+      PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
+      PV_OUTPUT_DIR: /app/data/processed/pv_capacity
+    volumes:
+      - pv-raw-cache:/app/data/raw
+      - pv-generated-outputs:/app/data/processed/pv_capacity
+    depends_on:
+      pv-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/ready', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pv-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/pv`)"
+      - "traefik.http.routers.pv-api.entrypoints=web,websecure"
+      - "traefik.http.routers.pv-api.tls=true"
+      - "traefik.http.middlewares.pv-api-strip.stripprefix.prefixes=/models/pv"
+      - "traefik.http.routers.pv-api.middlewares=pv-api-strip"
+      - "traefik.http.services.pv-api.loadbalancer.server.port=8000"
+    restart: unless-stopped
 
 #  ------------------------------------END OF PLAYGROUND -------------------------------------
 
@@ -267,13 +323,21 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
       PUBLISHER_MANIFEST_PATH: /app/layer-manifest.json
       PC6_SOURCE_PATH: /data/alkmaar_energy_map.geojson
+      PV_API_URL: http://pv-api:8000
+      PV_EXPECTED_RELEASE_COMMIT: b4df35bec363bb1a05be35572b0cb84a275ef0bb
+      PV_EXPECTED_CONTAINER_IMAGE: pv-map-api:rdp-b4df35bec363
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
     depends_on:
-      - geo
-      - timescale
-      - db-scheme
+      geo:
+        condition: service_started
+      timescale:
+        condition: service_started
+      db-scheme:
+        condition: service_completed_successfully
+      pv-api:
+        condition: service_healthy
     networks:
       - default
     volumes:
@@ -303,3 +367,5 @@ volumes:
   grafana-data:
   volumes:
   policy-tool-data:
+  pv-raw-cache:
+  pv-generated-outputs:

@@ -7,6 +7,10 @@ services:
     labels:
       traefik.http.routers.policy-router.rule: Host(`localhost`) && PathPrefix(`/policy-api`)
 
+  pv-api:
+    labels:
+      traefik.http.routers.pv-api.rule: Host(`localhost`) && PathPrefix(`/models/pv`)
+
   grafana:
     environment:
       GF_SERVER_ROOT_URL: https://localhost/grafana
