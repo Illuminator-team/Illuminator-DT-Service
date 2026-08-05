@@ -12,8 +12,8 @@ sys.path.insert(0, str(ROOT / "layer-publisher"))
 from pc6 import get_layer_config, load_manifest  # noqa: E402
 from pv import fetch_pv_artifact, load_pv_records  # noqa: E402
 
-RELEASE_COMMIT = "b4df35bec363bb1a05be35572b0cb84a275ef0bb"
-IMAGE_IDENTITY = "pv-map-api:rdp-b4df35bec363"
+RELEASE_COMMIT = "b5428f688b6cef0eab9c64613ea87bcdf980886b"
+IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-api@sha256:71dec8adb2385b4d12499bd38608006388c25f9aa01488c54419b3cba87f0587"
 QUALITY_METHOD = "pv-datacompleetheid/1.0.0"
 MODEL_VERSION = "0.3.0"
 METADATA_CONTRACT_VERSION = "2.1.0"
@@ -232,8 +232,16 @@ class PvContractTest(unittest.TestCase):
         pv_service = compose.split("  pv-api:", 1)[1].split("  ##", 1)[0]
         self.assertNotIn("GEOSERVER_ADMIN", pv_service)
         self.assertNotIn("POSTGRES_PASSWORD", pv_service)
+        self.assertNotIn("PV-MAP.git", compose)
+        self.assertIn("ghcr.io/jortgroen/pv-map-api@sha256:", compose)
+        self.assertIn("PV_IMAGE_IDENTITY", pv_service)
         self.assertIn(RELEASE_COMMIT, compose)
         self.assertIn("service_completed_successfully", pv_service)
+        workflow = (ROOT / ".github" / "workflows" / "dev-integration.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("packages: read", workflow)
+        self.assertIn("docker login ghcr.io", workflow)
 
 
 if __name__ == "__main__":
