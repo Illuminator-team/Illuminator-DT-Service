@@ -12,8 +12,8 @@ sys.path.insert(0, str(ROOT / "layer-publisher"))
 from pc6 import get_layer_config, load_manifest  # noqa: E402
 from pv import fetch_pv_artifact, load_pv_records  # noqa: E402
 
-RELEASE_COMMIT = "b5428f688b6cef0eab9c64613ea87bcdf980886b"
-IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-api@sha256:71dec8adb2385b4d12499bd38608006388c25f9aa01488c54419b3cba87f0587"
+RELEASE_COMMIT = "d9cd7920108d76b7d645c22b33d8cf26c35fc040"
+IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9"
 QUALITY_METHOD = "pv-datacompleetheid/1.0.0"
 MODEL_VERSION = "0.3.0"
 METADATA_CONTRACT_VERSION = "2.1.0"
