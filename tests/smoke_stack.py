@@ -13,7 +13,8 @@ import urllib.request
 PC6_LAYER = "policy_tool_pc6_energy"
 PV_LAYER = "pv_capacity"
 PV_FIXTURE = "BU03610302"
-PV_RELEASE_COMMIT = "b4df35bec363bb1a05be35572b0cb84a275ef0bb"
+PV_RELEASE_COMMIT = "b5428f688b6cef0eab9c64613ea87bcdf980886b"
+PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:71dec8adb2385b4d12499bd38608006388c25f9aa01488c54419b3cba87f0587"
 FIXTURE = "1842EM"
 
 
@@ -185,6 +186,10 @@ def check_pv_model_api(client: SmokeClient) -> None:
     require(
         metadata.get("release_commit") == PV_RELEASE_COMMIT,
         "PV release identity drift",
+    )
+    require(
+        metadata.get("container_image") == PV_CONTAINER_IMAGE,
+        "PV container image identity drift",
     )
     require(metadata.get("capacity_method") == "model_estimated", "PV method drift")
 

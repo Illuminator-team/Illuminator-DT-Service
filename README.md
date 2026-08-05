@@ -10,6 +10,14 @@ This repository is based on the step-by-step tutorial for the [Rapid Deployment 
 
 You need to have [Docker](https://docs.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) installed.
 
+The pinned PV model image is a private GitHub Container Registry package. Before
+a local first start, authenticate Docker with a separately managed GitHub token
+limited to `read:packages`; do not store that token in this repository:
+
+```shell
+echo "$GHCR_TOKEN" | docker login ghcr.io --username <github-user> --password-stdin
+```
+
 ## Usage
 
 Create a local `.env` from `.env.example`, replace every `change-me` value, and
@@ -22,9 +30,10 @@ Start the local stack with isolated GeoServer and Illuminator output volumes:
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
-The first start builds the PV model from its pinned Git commit and runs its
-one-shot public-source initializer. This can download substantial source data
-and take more than ten minutes. The `pv-raw-cache` volume is reused on later starts.
+The first start pulls the PV model by its verified immutable GHCR digest and runs
+its one-shot public-source initializer. This can download substantial source
+data and take more than ten minutes. The `pv-raw-cache` volume is reused on
+later starts.
 
 Local endpoints:
 
