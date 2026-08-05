@@ -1,20 +1,29 @@
 # Updated main.py for PostGIS integration using latest p_forecast
 import os, time, requests, sys, psycopg2
 
+def required_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
 # GeoServer config
-REST = "http://geo:8080/geoserver/rest"
-AUTH = ("admin", "geoserver")
+REST = os.getenv("GEOSERVER_REST_URL", "http://geo:8080/geoserver/rest")
+AUTH = (
+    required_env("GEOSERVER_ADMIN_USER"),
+    required_env("GEOSERVER_ADMIN_PASSWORD"),
+)
 WS = "rdp"
 STORE = "pv_generation_data"
 NAME = "solar_panel_layer"
 
 # DB config
 DB_CONN = {
-    "host": "timescale",
-    "port": 5432,
-    "dbname": "rdp_db",
-    "user": "postgres",
-    "password": "iGj88603I4bd"
+    "host": os.getenv("POSTGRES_HOST", "timescale"),
+    "port": int(os.getenv("POSTGRES_PORT", "5432")),
+    "dbname": os.getenv("POSTGRES_DB", "rdp_db"),
+    "user": required_env("POSTGRES_USER"),
+    "password": required_env("POSTGRES_PASSWORD"),
 }
 
 # Logging helper

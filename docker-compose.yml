@@ -237,8 +237,8 @@ services:
     image: kartoza/geoserver:latest
     environment:
       - STABLE_EXTENSIONS=postgis-plugin
-      - GEOSERVER_ADMIN_USER=admin # TODO: replace later
-      - GEOSERVER_ADMIN_PASSWORD=geoserver # TODO: replace later
+      - GEOSERVER_ADMIN_USER=${GEOSERVER_ADMIN_USER:?set GEOSERVER_ADMIN_USER in .env}
+      - GEOSERVER_ADMIN_PASSWORD=${GEOSERVER_ADMIN_PASSWORD:?set GEOSERVER_ADMIN_PASSWORD in .env}
     volumes:
       - ./geo:/opt/geoserver/data_dir  # optional: persistent config/data
     restart: always
@@ -267,6 +267,15 @@ services:
   ## --------------------------------------------------
   layer-publisher:
     build: ./layer-publisher
+    environment:
+      GEOSERVER_REST_URL: http://geo:8080/geoserver/rest
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_ADMIN_USER:?set GEOSERVER_ADMIN_USER in .env}
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD:?set GEOSERVER_ADMIN_PASSWORD in .env}
+      POSTGRES_HOST: timescale
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: rdp_db
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
     depends_on:
       - geo
     networks:
