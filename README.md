@@ -22,10 +22,15 @@ Start the local stack with isolated GeoServer and Illuminator output volumes:
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
+The first start builds the PV model from its pinned Git commit and runs its
+one-shot public-source initializer. This can download substantial source data
+and take more than ten minutes. The `pv-raw-cache` volume is reused on later starts.
+
 Local endpoints:
 
 - dashboard: https://localhost/dashboard/
 - GeoServer: https://localhost/geoserver/web/
+- PV model API: https://localhost/models/pv/docs
 - Grafana: https://localhost/grafana/
 - Redis Insight: http://localhost:5540/
 - Traefik dashboard: http://localhost:8080/dashboard/
@@ -33,12 +38,14 @@ Local endpoints:
 The browser may require one-time acceptance of a self-signed development
 certificate. The dashboard loads `rdp:policy_tool_pc6_energy` from GeoServer
 WFS and automatically falls back to the checked-in GeoJSON if WFS is
-temporarily unavailable.
+temporarily unavailable. The independent `rdp:pv_capacity` layer is loaded
+from GeoServer WFS without substituting consumption data when it is unavailable.
 
-Run the source-contract and frontend fallback tests:
+Run the model publication contracts and frontend layer-adapter tests:
 
 ```shell
 python -m unittest discover -s tests -p "test_*.py"
+node --check policy-tool-frontend/script.js
 node --test tests/map-data.test.js
 ```
 

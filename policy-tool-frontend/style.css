@@ -170,6 +170,30 @@ input[type="range"].side-slider {
 .quality-meter i:nth-child(4) { height: 12px; }
 .quality-meter.quality-level-2 i:nth-child(-n+3) { background: #c47a12; }
 
+.feature-identifier {
+    margin-top: -10px;
+    margin-bottom: 18px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.pv-capacity-grid {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.pv-provenance {
+    margin-top: 24px;
+    color: var(--text-muted);
+    font-size: 9px;
+    line-height: 1.6;
+}
+
+.pv-provenance a {
+    color: var(--primary-dark);
+    font-weight: 700;
+}
+
 .feature-quality {
     display: flex;
     align-items: center;
