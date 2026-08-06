@@ -11,9 +11,11 @@ Evidence:
 
 - Illuminator draft PR: <https://github.com/Illuminator-team/Illuminator-DT-Service/pull/14>
 - PV resilience PR: <https://github.com/JortGroen/PV-MAP/pull/10>
+- PV cache-bootstrap PR: <https://github.com/JortGroen/PV-MAP/pull/12>
 - failed full-stack run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31024373154>
-- PV source commit: `d9cd7920108d76b7d645c22b33d8cf26c35fc040`
-- PV image: `ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9`
+- PV source commit: `bd29351e108d9db002b9e54d5c7fb2356416a306`
+- PV API image: `ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710`
+- PV source-cache image: `ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b`
 
 PR 14 remained draft and was not merged or deployed because its complete gate
 did not pass.
@@ -40,8 +42,21 @@ The supported WFS endpoint `https://data.3dbag.nl/api/BAG3D/wfs` was also
 unreachable from the developer environment. The responding experimental API
 uses a different CityJSON data path and is not a safe transport-only
 substitution because it could change scientific outputs. The selected follow-up
-is a model-owned, immutable, provenance-checked source-cache bootstrap. It is
-not yet complete or verified.
+is a model-owned, immutable, provenance-checked source-cache bootstrap.
+
+PV-MAP PR 12 implemented that bootstrap. On 6 August 2026, the existing
+release-bound public-source snapshot was exported into an allow-listed bundle,
+validated, built as a separate private cache image, pulled back by digest, and
+used with networking disabled. The ordinary initializer produced 66 Alkmaar
+buurt features with a total of 108,327.8 kWp for source period `2025JJ00`.
+The exact API image then passed real HTTP acceptance against the reconstructed
+cache. The bundle contains 228 files (995,731,099 bytes) with fingerprint
+`775c9ee5868ef15b1139f4739add58b4d7a376faeefbcf18cfccd88f5a95cf0b`.
+
+This first cache adopts a previously successful July 2026 real-source cache;
+it was not produced by a new live-source download on 6 August. That limitation
+is recorded rather than hidden. A future routine refresh should create the next
+cache image from a clean trusted-network run and repeat the same acceptance.
 
 ## Durable Lessons
 
@@ -102,9 +117,7 @@ A source-cache bundle or cache image must:
 
 ## Open Follow-Up
 
-- Complete and review the PV-MAP source-cache bootstrap PR.
-- Produce the first cache artifact from a successful real-source run.
-- Publish and pin a new verified PV image and cache identity.
-- Rerun the complete Illuminator PR 14 gate.
+- Rerun the complete Illuminator PR 14 gate with both immutable image digests.
+- Produce the next cache artifact from a fresh clean run on a trusted network.
 - Add an outer CI startup deadline after measuring valid clean and cached runs.
 - Keep PR 14 draft and undeployed until the complete gate passes.
