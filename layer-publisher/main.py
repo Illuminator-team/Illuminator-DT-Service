@@ -9,6 +9,7 @@ from xml.sax.saxutils import escape
 import psycopg2
 import requests
 from pc6 import Pc6Record, get_layer_config, load_manifest, load_pc6_records
+from postgis_sql import values_template
 from psycopg2.extras import execute_values
 from pv import (
     PV_PROPERTY_FIELDS,
@@ -314,11 +315,7 @@ def sync_pc6_records(records: list[Pc6Record]) -> dict[str, int]:
                 ) VALUES %s
                 """,
                 [record_values(record, published_at) for record in records],
-                template=(
-                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
-                    "ST_Multi(ST_CollectionExtract(ST_MakeValid("
-                    "ST_SetSRID(ST_GeomFromGeoJSON(%s),4326)),3)))"
-                ),
+                template=values_template(11),
                 page_size=250,
             )
             cursor.execute(
@@ -446,13 +443,7 @@ def sync_pv_records(artifact: PvArtifact) -> dict[str, int]:
     update_clause = ",\n                    ".join(
         f"{name} = EXCLUDED.{name}" for name in update_columns
     )
-    placeholder_count = len(columns) - 1
-    template = (
-        "(" + ",".join(["%s"] * placeholder_count) + ","
-        "ST_Multi(ST_CollectionExtract(ST_MakeValid("
-        "ST_SetSRID(ST_GeomFromGeoJSON(%s),4326)),3)))"
-        ")"
-    )
+    template = values_template(len(columns) - 1)
 
     with psycopg2.connect(**DB_CONN) as connection:
         with connection.cursor() as cursor:
