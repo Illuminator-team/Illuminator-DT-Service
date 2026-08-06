@@ -20,6 +20,10 @@ echo "$GHCR_TOKEN" | docker login ghcr.io --username <github-user> --password-st
 
 The integration workflow reads the equivalent pull-only credential from the
 encrypted `JORT_PRIVATE_DOCKER_IMAGES` GitHub Actions repository secret.
+The same secret is the shared pull credential for future private model images
+that the `JortGroen` account can read; one GHCR login can authenticate all such
+pulls in the Illuminator workflow. The secret is scoped to this repository and
+does not publish images from the individual model repositories.
 
 ## Usage
 
