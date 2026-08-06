@@ -10,6 +10,11 @@ from postgis_sql import values_template  # noqa: E402
 
 
 class PublisherSqlTest(unittest.TestCase):
+    def test_publisher_image_includes_sql_helper(self):
+        dockerfile = (ROOT / "layer-publisher" / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("postgis_sql.py", dockerfile)
     def test_multipolygon_values_template_is_balanced(self):
         template = values_template(2)
 
