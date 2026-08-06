@@ -271,6 +271,13 @@ layers, PR text, artifacts, or logs. The workflow SHOULD validate the secret is
 configured, authenticate, and pull the immutable image before starting expensive
 data initialization so access failures are fast and unambiguous.
 
+One deployment pull credential MAY be reused for multiple private model
+packages when its GitHub identity has read permission to every package. Prefer
+that shared, read-only deployment secret over duplicate per-model pull tokens.
+Document its repository or environment scope and coordinate rotation because a
+rotated or revoked shared credential affects every private model pull. Model
+repositories still own their separate image-publication permissions.
+
 ## 6. Geospatial Output Contract
 
 The first RDP transfer format is a GeoJSON `FeatureCollection` returned over

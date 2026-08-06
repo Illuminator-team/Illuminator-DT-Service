@@ -58,8 +58,9 @@ not yet complete or verified.
    digests separately.
 5. **Private package access must be designed explicitly.** Do not assume an
    integration repository's automatic `GITHUB_TOKEN` can pull a private package
-   owned elsewhere. Use the minimum scope and never copy a token into Compose,
-   an image, PR text, or logs.
+   owned elsewhere. One read-only deployment credential may cover multiple
+   packages its identity can access; use the minimum scope and never copy the
+   token into Compose, an image, PR text, or logs.
 6. **One immutable identity flows through every boundary.** The reviewed commit,
    OCI digest, runtime identity, model metadata, layer manifest, and test
    expectations must agree.
