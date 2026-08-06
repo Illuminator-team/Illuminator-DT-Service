@@ -12,8 +12,9 @@ sys.path.insert(0, str(ROOT / "layer-publisher"))
 from pc6 import get_layer_config, load_manifest  # noqa: E402
 from pv import fetch_pv_artifact, load_pv_records  # noqa: E402
 
-RELEASE_COMMIT = "d9cd7920108d76b7d645c22b33d8cf26c35fc040"
-IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9"
+RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
+IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
+CACHE_IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b"
 QUALITY_METHOD = "pv-datacompleetheid/1.0.0"
 MODEL_VERSION = "0.3.0"
 METADATA_CONTRACT_VERSION = "2.1.0"
@@ -229,14 +230,21 @@ class PvContractTest(unittest.TestCase):
 
     def test_compose_keeps_shared_credentials_out_of_the_model(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        init_service = compose.split("  pv-init:", 1)[1].split("  pv-api:", 1)[0]
         pv_service = compose.split("  pv-api:", 1)[1].split("  ##", 1)[0]
         self.assertNotIn("GEOSERVER_ADMIN", pv_service)
         self.assertNotIn("POSTGRES_PASSWORD", pv_service)
         self.assertNotIn("PV-MAP.git", compose)
-        self.assertIn("ghcr.io/jortgroen/pv-map-api@sha256:", compose)
+        self.assertIn(IMAGE_IDENTITY, compose)
+        self.assertIn(CACHE_IMAGE_IDENTITY, compose)
         self.assertIn("PV_IMAGE_IDENTITY", pv_service)
         self.assertIn(RELEASE_COMMIT, compose)
         self.assertIn("service_completed_successfully", pv_service)
+        self.assertIn("<<: *pv-cache-image", init_service)
+        self.assertNotIn("command:", init_service)
+        self.assertNotIn("PV_MODEL_CONFIG_PATH", init_service)
+        self.assertNotIn("GEOSERVER_ADMIN", init_service)
+        self.assertNotIn("POSTGRES_PASSWORD", init_service)
         workflow = (ROOT / ".github" / "workflows" / "dev-integration.yml").read_text(
             encoding="utf-8"
         )

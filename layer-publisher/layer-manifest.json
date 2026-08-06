@@ -71,8 +71,8 @@
         "base_url": "http://pv-api:8000",
         "metadata_url": "/models/pv/metadata",
         "repository": "https://github.com/JortGroen/PV-MAP",
-        "release_commit": "d9cd7920108d76b7d645c22b33d8cf26c35fc040",
-        "container_image": "ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9",
+        "release_commit": "bd29351e108d9db002b9e54d5c7fb2356416a306",
+        "container_image": "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710",
         "crs": "EPSG:4326"
       },
       "feature_id_property": "feature_id",

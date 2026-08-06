@@ -13,8 +13,8 @@ import urllib.request
 PC6_LAYER = "policy_tool_pc6_energy"
 PV_LAYER = "pv_capacity"
 PV_FIXTURE = "BU03610302"
-PV_RELEASE_COMMIT = "d9cd7920108d76b7d645c22b33d8cf26c35fc040"
-PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9"
+PV_RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
+PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
 FIXTURE = "1842EM"
 
 

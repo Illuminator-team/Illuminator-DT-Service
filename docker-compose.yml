@@ -1,5 +1,8 @@
 x-pv-image: &pv-image
-  image: ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9
+  image: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
+
+x-pv-cache-image: &pv-cache-image
+  image: ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b
 
 services:
 
@@ -43,12 +46,7 @@ services:
   ## Initialize and expose the standalone PV capacity model API.
   ## -----------------------------------------------------------
   pv-init:
-    <<: *pv-image
-    command: ["python", "-m", "pv_map.api.initialize"]
-    environment:
-      PV_RAW_CACHE_DIR: /app/data/raw
-      PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
-      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9
+    <<: *pv-cache-image
     volumes:
       - pv-raw-cache:/app/data/raw
     restart: "no"
@@ -59,7 +57,7 @@ services:
       PV_RAW_CACHE_DIR: /app/data/raw
       PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
       PV_OUTPUT_DIR: /app/data/processed/pv_capacity
-      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9
+      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
     volumes:
       - pv-raw-cache:/app/data/raw
       - pv-generated-outputs:/app/data/processed/pv_capacity
@@ -319,8 +317,8 @@ services:
       PUBLISHER_MANIFEST_PATH: /app/layer-manifest.json
       PC6_SOURCE_PATH: /data/alkmaar_energy_map.geojson
       PV_API_URL: http://pv-api:8000
-      PV_EXPECTED_RELEASE_COMMIT: d9cd7920108d76b7d645c22b33d8cf26c35fc040
-      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:d561cb0defef3872c97e348f3c7490cbbdf6f6b810675f7dfa01495ce980feb9
+      PV_EXPECTED_RELEASE_COMMIT: bd29351e108d9db002b9e54d5c7fb2356416a306
+      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
