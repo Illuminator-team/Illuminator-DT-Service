@@ -67,6 +67,12 @@ model that already satisfies a step does not need an artificial PR for it.
 Every merged step MUST leave the model working. Do not defer basic tests until
 the final integration PR.
 
+Model release and RDP acceptance are separate promotion steps. The model PR
+MUST merge and its tests MUST pass before an image is published. The RDP MUST
+then pin the published image by digest and independently prove the complete
+deployment path. A passing model fixture or image test does not make an RDP
+integration mergeable.
+
 ## 1. Repository And Workflow
 
 The model repository MUST:
@@ -199,6 +205,34 @@ The README MUST state the expected download size, prepared size, initialization
 time range, external hosts contacted, timeout and retry policy, and how to clear or
 refresh the cache.
 
+Retries improve resilience but do not solve persistent source unreachability.
+When all bounded attempts against a required source are exhausted, the model
+MUST fail closed and identify the stable source and failure class. It MUST NOT
+substitute fixture data or a scientifically different API merely to make CI
+pass.
+
+If a supported live source cannot be reached reliably from the deployment
+network, the model MAY provide a verified source-cache bundle or cache image.
+That bootstrap artifact MUST:
+
+- be produced by a documented successful real-source initialization on a
+  trusted network;
+- remain outside the code repository and normal API image;
+- be addressed and deployed by immutable digest or checksum;
+- carry model version, configuration fingerprint, source-contract version,
+  source provenance, producer identity, retrieval times, and per-file checksums;
+- exclude credentials, readiness markers, locks, temporary files, generated
+  model outputs, and unrelated local caches;
+- reject traversal, links, tampering, incompatible configuration, source drift,
+  and conflicting existing cache files before publishing imported bytes; and
+- invoke the ordinary initializer after import so only the model's normal
+  structural and scientific validation can create readiness.
+
+The live-download and bootstrap paths MUST use the same cache contract and
+scientific calculation. The handoff MUST document how the artifact is produced,
+refreshed, retained, and revoked. Code-image and cache-artifact identities MUST
+be recorded separately.
+
 ## 5. Reproducible Container
 
 The integration release MUST include a production-oriented Dockerfile. It MUST:
@@ -221,6 +255,21 @@ built image and prove that generated artifacts are absent.
 A Compose example SHOULD show the API and, when needed, a one-shot initializer
 using the same image and named data volume. A fresh build and API startup MUST
 work without access to a developer's home directory.
+
+### Private Image Distribution
+
+When an integration image is private, the handoff MUST document its registry
+owner, package name, immutable digest, login username, and minimum pull
+permission. Do not assume an integration repository's automatic
+`GITHUB_TOKEN` can read a package owned by another repository, organization,
+or personal account.
+
+When a separate credential is required, it MUST be pull-only, stored as an
+encrypted repository or deployment-environment secret, and used only for
+registry login. The token value MUST NOT enter Git, `.env`, Compose, image
+layers, PR text, artifacts, or logs. The workflow SHOULD validate the secret is
+configured, authenticate, and pull the immutable image before starting expensive
+data initialization so access failures are fast and unambiguous.
 
 ## 6. Geospatial Output Contract
 
@@ -424,6 +473,19 @@ When heavy external data makes the full case unsuitable for every PR, CI MUST
 still run a deterministic lightweight fixture. The handoff MUST also include a
 dated result from the real clean-data workflow and its second cached run.
 
+Treat acceptance as three cumulative evidence lanes:
+
+1. the deterministic model lane proves calculation, API, security, and
+   container contracts without depending on public-source availability;
+2. the real-source model lane proves clean initialization, provenance, the
+   stable fixture, and a cached rerun against authoritative data; and
+3. the RDP lane proves private image retrieval where applicable, initialization,
+   API readiness, shared PostGIS/GeoServer publication, registry/dashboard
+   behavior, and repeatable publication in one full-stack run.
+
+Evidence from one lane MUST NOT be described as evidence for another. Fixture
+data MUST NOT be silently used in the real-source or RDP lane.
+
 ## 12. Handoff Package
 
 The model developer MUST provide all of the following before an Illuminator
@@ -431,6 +493,7 @@ integration PR starts:
 
 - repository URL and immutable Git commit or tag;
 - container image name and digest, or exact clean build command;
+- source-cache artifact digest and provenance, when a bootstrap is required;
 - supported architecture and minimum CPU, memory, disk, and expected runtime;
 - initialization command and cache volume details;
 - API start command, internal port, liveness URL, and readiness URL;
@@ -442,6 +505,7 @@ integration PR starts:
 - `datacompleetheid` rule and evidence fields;
 - test commands and CI run link;
 - clean initialization, transient-failure recovery, and cached rerun evidence;
+- separate deterministic, real-source, and RDP evidence status;
 - known limitations and unsupported selections; and
 - maintainer or owning team.
 
@@ -451,6 +515,7 @@ Use this compact handoff record in the model PR or release notes:
 Model:
 Release commit/tag:
 Container image/digest:
+Source-cache artifact/digest (if used):
 Initialization command:
 API start command:
 Liveness URL:
@@ -481,6 +546,11 @@ The RDP reviewer runs this gate before accepting the model version:
 - [ ] The explicit initializer completes and validates its state.
 - [ ] Transient source failures are retried within a bound, while permanent
   failures fail promptly.
+- [ ] Exhausted live-source retries fail closed without fixture substitution.
+- [ ] Any bootstrap artifact is immutable, provenance-bound, checksum-verified,
+  and revalidated by the ordinary initializer before readiness.
+- [ ] Private registry access is proven with the documented minimum-scope
+  credential before expensive initialization begins.
 - [ ] Repeating initialization is safe and reuses valid data.
 - [ ] Readiness returns `200` only after initialization is valid.
 - [ ] The stable fixture can be submitted through `POST /runs`.
@@ -490,11 +560,19 @@ The RDP reviewer runs this gate before accepting the model version:
 - [ ] Unsupported selections fail explicitly rather than expanding scope.
 - [ ] `datacompleetheid` is in range and its rule is documented.
 - [ ] API, security, container, and end-to-end tests pass in CI.
+- [ ] Deterministic model, real-source model, and full RDP evidence are reported
+  separately, and all required lanes pass.
+- [ ] Full-stack startup has an outer CI deadline based on measured valid clean
+  and cached initialization times; source-level timeout and retry bounds remain
+  model-owned.
 - [ ] The handoff package is complete enough for integration without reading model internals.
 
 Only after this gate passes should the Illuminator integration pin the model
 version, add its service to Compose, configure the shared publisher, register
 the GeoServer/frontend layer, and add full-stack smoke tests.
+
+For the concrete evidence behind these requirements, see the
+[PV integration lessons learned](pv-integration-lessons-learned.md).
 
 ## Standards Path Without Overengineering
 

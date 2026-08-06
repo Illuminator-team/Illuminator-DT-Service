@@ -71,3 +71,4 @@ python tests/smoke_stack.py --base-url https://localhost
 
 - [Future model integration plan](docs/model-integration-plan.md)
 - [Model developer integration guide](docs/model-developer-integration-guide.md)
+- [PV integration lessons learned](docs/pv-integration-lessons-learned.md)
