@@ -10,8 +10,10 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 let pc6Layer;
+let pvLayer;
 let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
+let pvLayerSource = 'loading';
 
 // Unified Color Logic
 function getColor(d, type) {
@@ -22,6 +24,12 @@ function getColor(d, type) {
         return d > 4000 ? '#084594' : d > 3500 ? '#2171b5' : d > 3000 ? '#4292c6' :
                d > 2500 ? '#6baed6' : d > 2000 ? '#9ecae1' : d > 1500 ? '#c6dbef' : '#deebf7';
     }
+}
+
+function getPvColor(value) {
+    return value > 25000 ? '#005a32' : value > 15000 ? '#238b45' :
+           value > 7500 ? '#41ab5d' : value > 3000 ? '#78c679' :
+           value > 1000 ? '#addd8e' : value > 0 ? '#d9f0a3' : '#f0f0f0';
 }
 
 // // Styling Function
@@ -106,10 +114,26 @@ function style(feature) {
     return styleObj;
 }
 
+function pvStyle(feature) {
+    return {
+        fillColor: getPvColor(Number(feature.properties.pv_capacity_kwp || 0)),
+        weight: 0.9,
+        opacity: 0.75,
+        color: '#ffffff',
+        fillOpacity: 0.72
+    };
+}
+
 // Data Loading
-function updateLayerStatus(source, fallbackReason = null) {
+function updateLayerStatus(layerName, source, fallbackReason = null) {
+    if (layerName === 'pv_capacity') {
+        pvLayerSource = source;
+    } else {
+        pc6LayerSource = source;
+    }
+    if ((currentMetric === 'pv_capacity') !== (layerName === 'pv_capacity')) return;
+
     const status = document.getElementById('layer-source-status');
-    pc6LayerSource = source;
     status.dataset.state = source;
     status.textContent = source === 'geoserver_wfs'
         ? 'Live GeoServer WFS'
@@ -121,11 +145,41 @@ function updateLayerStatus(source, fallbackReason = null) {
     status.title = fallbackReason || '';
 }
 
+function refreshLayerStatus() {
+    const source = currentMetric === 'pv_capacity' ? pvLayerSource : pc6LayerSource;
+    updateLayerStatus(currentMetric === 'pv_capacity' ? 'pv_capacity' : 'pc6', source);
+}
+
+function updateLayerQualitySummary() {
+    const label = document.getElementById('layer-quality-label');
+    const meter = document.getElementById('layer-quality-meter');
+    const isPvCapacity = currentMetric === 'pv_capacity';
+    label.textContent = isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
+    meter.title = isPvCapacity ? 'Feature-level confidence varies by CBS buurt' : 'Layer-level confidence';
+}
+
+function setActiveMapLayer() {
+    if (currentMetric === 'pv_capacity') {
+        if (pc6Layer && map.hasLayer(pc6Layer)) map.removeLayer(pc6Layer);
+        if (pvLayer && !map.hasLayer(pvLayer)) {
+            pvLayer.addTo(map);
+            map.fitBounds(pvLayer.getBounds());
+        }
+    } else {
+        if (pvLayer && map.hasLayer(pvLayer)) map.removeLayer(pvLayer);
+        if (pc6Layer && !map.hasLayer(pc6Layer)) pc6Layer.addTo(map);
+        if (pc6Layer) pc6Layer.setStyle(style);
+    }
+    refreshLayerStatus();
+    updateLayerQualitySummary();
+    updateLegend();
+}
+
 async function loadMap() {
     try {
         const result = await Pc6MapData.loadPc6FeatureCollection(fetch);
         const data = result.data;
-        updateLayerStatus(result.source, result.fallbackReason);
+        updateLayerStatus('pc6', result.source, result.fallbackReason);
         if (result.fallbackReason) {
             console.warn('GeoServer WFS unavailable; using static fallback:', result.fallbackReason);
         }
@@ -146,17 +200,46 @@ async function loadMap() {
                     }
                 });
             }
-        }).addTo(map);
+        });
+        pc6Layer.addTo(map);
 
         if (data.features.length > 0) {
             map.fitBounds(pc6Layer.getBounds());
         }
-        updateLegend();
-
     } catch (e) {
-        console.error("Data load failed:", e);
-        updateLayerStatus('failed', e.message);
+        console.error('PC6 data load failed:', e);
+        updateLayerStatus('pc6', 'failed', e.message);
     }
+
+    try {
+        const result = await Pc6MapData.loadPvFeatureCollection(fetch);
+        pvLayer = L.geoJSON(result.data, {
+            style: pvStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (e) => {
+                        e.target.setStyle({ weight: 2, color: '#2f3640', fillOpacity: 0.82 });
+                    },
+                    mouseout: (e) => {
+                        pvLayer.resetStyle(e.target);
+                    },
+                    click: (e) => {
+                        updatePvSidePanel(feature.properties);
+                        map.fitBounds(e.target.getBounds(), { padding: [40, 40], maxZoom: 16 });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('pv_capacity', result.source);
+    } catch (e) {
+        console.error('PV capacity data load failed:', e);
+        updateLayerStatus('pv_capacity', 'failed', e.message);
+        const pvControl = document.getElementById('r-pv-capacity');
+        pvControl.disabled = true;
+        pvControl.parentElement.title = 'PV capacity layer is unavailable';
+    }
+
+    setActiveMapLayer();
 }
 
 // Search Logic
@@ -188,13 +271,18 @@ function updateLegend() {
 
     legend.onAdd = function () {
         const div = L.DomUtil.create('div', 'info legend');
-        const grades = currentMetric === 'gas' ? [0, 400, 600, 800, 1000, 1200, 1500] : [0, 1500, 2000, 2500, 3000, 3500, 4000];
-        const title = currentMetric === 'gas' ? 'GAS (m³)' : 'ELEC (kWh)';
+        const isPvCapacity = currentMetric === 'pv_capacity';
+        const grades = isPvCapacity ? [0, 1000, 3000, 7500, 15000, 25000] :
+            currentMetric === 'gas' ? [0, 400, 600, 800, 1000, 1200, 1500] :
+            [0, 1500, 2000, 2500, 3000, 3500, 4000];
+        const title = isPvCapacity ? 'PV CAPACITY (kWp)' :
+            currentMetric === 'gas' ? 'GAS (m³)' : 'ELEC (kWh)';
         
         div.innerHTML = `<div style="margin-bottom:8px; font-weight:700; font-size:9px;">${title}</div>`;
         
         grades.forEach((g, i) => {
-            div.innerHTML += `<i style="background:${getColor(g + 1, currentMetric)}"></i> ${g}${grades[i+1] ? '&ndash;'+grades[i+1] : '+'}<br>`;
+            const color = isPvCapacity ? getPvColor(g + 1) : getColor(g + 1, currentMetric);
+            div.innerHTML += `<i style="background:${color}"></i> ${g}${grades[i+1] ? '&ndash;'+grades[i+1] : '+'}<br>`;
         });
         return div;
     };
@@ -349,6 +437,60 @@ function updateSidePanel(prop) {
     });
 }
 
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    })[character]);
+}
+
+function updatePvSidePanel(prop) {
+    const formatNum = (value) => Number(value || 0).toLocaleString('nl-NL', {
+        maximumFractionDigits: 1
+    });
+    const completeness = Number(prop.datacompleetheid ?? 0);
+    const label = escapeHtml(prop.datacompleetheid_label || 'not assessed');
+    const reason = escapeHtml(prop.completeness_reason || 'No quality explanation available.');
+
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">${escapeHtml(prop.buurt_name)}</div>
+        <div class="feature-identifier">${escapeHtml(prop.cbs_buurt_code)}</div>
+
+        <div class="data-grid pv-capacity-grid">
+            <div class="data-column">
+                <div class="column-header">Installed capacity</div>
+                <div class="data-group">
+                    <div class="data-label">Combined estimate</div>
+                    <div class="data-value">${formatNum(prop.pv_capacity_kwp)} kWp</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Residential</div>
+                    <div class="data-value">${formatNum(prop.residential_kwp_real)} kWp</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Commercial</div>
+                    <div class="data-value">${formatNum(prop.commercial_kwp_derived)} kWp</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="feature-quality" data-level="${completeness}" title="${reason}">
+            <span class="quality-score">${completeness}/3</span>
+            <span><strong>Datacompleetheid</strong><br>${label}</span>
+        </div>
+
+        <div class="pv-provenance">
+            <strong>MODEL-ESTIMATED PV CAPACITY</strong><br>
+            Source period: ${escapeHtml(prop.source_reference_period)}<br>
+            Model version: ${escapeHtml(prop.model_version)}<br>
+            <a href="/models/pv/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
 function refreshVisuals(originalProps) {
     // This forces Leaflet to re-calculate the styles and patterns
     pc6Layer.setStyle(style); 
@@ -376,8 +518,7 @@ document.getElementById('search-input').addEventListener('keypress', (e) => {
 document.querySelectorAll('input[name="layer"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
         currentMetric = e.target.value;
-        if (pc6Layer) pc6Layer.setStyle(style);
-        updateLegend();
+        setActiveMapLayer();
     });
 });
 

@@ -4,10 +4,13 @@ on:
   pull_request:
     branches: [dev]
 
+permissions:
+  contents: read
+
 jobs:
-  pc6-baseline:
+  model-layer-integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -16,15 +19,30 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install publisher test dependencies
+        run: python -m pip install -r layer-publisher/requirements.txt
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Validate PC6 source and publication contract
+      - name: Validate PC6 and PV publication contracts
         run: python -m unittest discover -s tests -p "test_*.py"
 
-      - name: Test dashboard WFS fallback behavior
-        run: node --test tests/map-data.test.js
+      - name: Test dashboard layer adapters
+        run: |
+          node --check policy-tool-frontend/script.js
+          node --test tests/map-data.test.js
+
+      - name: Authenticate to the private PV model package
+        env:
+          GHCR_TOKEN: ${{ secrets.JORT_PRIVATE_DOCKER_IMAGES }}
+        run: |
+          if [ -z "${GHCR_TOKEN}" ]; then
+            echo "::error::The JORT_PRIVATE_DOCKER_IMAGES repository secret is required"
+            exit 1
+          fi
+          echo "${GHCR_TOKEN}" | docker login ghcr.io --username "JortGroen" --password-stdin
 
       - name: Create ephemeral integration credentials and certificate
         shell: bash
@@ -49,7 +67,7 @@ jobs:
       - name: Start integrated stack
         run: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 
-      - name: Run integrated PC6 smoke checks
+      - name: Run integrated PC6 and PV smoke checks
         run: python tests/smoke_stack.py --base-url https://localhost
 
       - name: Verify repeatable publisher execution

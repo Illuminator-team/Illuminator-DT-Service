@@ -62,6 +62,33 @@ test('falls back to the checked-in GeoJSON and adds quality metadata', async () 
     );
 });
 
+test('loads PV capacity as an independent GeoServer WFS layer', async () => {
+    const calls = [];
+    const payload = collection({
+        cbs_buurt_code: 'BU03610302',
+        buurt_name: 'Overdie-Oost',
+        pv_capacity_kwp: 42.5,
+        datacompleetheid: 2
+    });
+    const fetchImpl = async (url) => {
+        calls.push(url);
+        return response(true, 200, payload);
+    };
+
+    const result = await mapData.loadPvFeatureCollection(fetchImpl);
+
+    assert.equal(result.source, 'geoserver_wfs');
+    assert.equal(result.data.features[0].properties.pv_capacity_kwp, 42.5);
+    assert.deepEqual(calls, [mapData.PV_WFS_URL]);
+});
+
+test('does not substitute consumption GeoJSON when PV WFS fails', async () => {
+    await assert.rejects(
+        () => mapData.loadPvFeatureCollection(async () => response(false, 503, {})),
+        /HTTP 503/
+    );
+});
+
 test('rejects empty feature collections', () => {
     assert.throws(
         () => mapData.validateFeatureCollection(
