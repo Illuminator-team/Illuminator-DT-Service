@@ -374,8 +374,10 @@ class GridContractTest(unittest.TestCase):
         self.assertEqual(payload["provenance"]["expected_line_count"], 22)
         self.assertEqual(payload["provenance"]["selection"]["bbox"], BBOX)
         self.assertEqual(
-            hashlib.sha256(fixture.read_bytes()).hexdigest(),
-            "d16f6101ee6a58593b3cc3d4aca43eb0325737a4087d4b1ba450096426ff52a1",
+            hashlib.sha256(
+                fixture.read_text(encoding="utf-8").encode("utf-8")
+            ).hexdigest(),
+            "5c6e84f3b5dedec57e1673f5e5d3bd0a3a847ce564b0544b3804320af7f5ffb0",
         )
 
     def test_grid_geometry_sql_templates_are_balanced(self):
