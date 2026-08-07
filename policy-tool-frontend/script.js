@@ -11,9 +11,13 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let pc6Layer;
 let pvLayer;
+let gridLinesLayer;
+let gridTransformersLayer;
 let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
 let pvLayerSource = 'loading';
+let gridLinesLayerSource = 'loading';
+let gridTransformersLayerSource = 'loading';
 
 // Unified Color Logic
 function getColor(d, type) {
@@ -124,14 +128,47 @@ function pvStyle(feature) {
     };
 }
 
+function getGridLineColor(voltageLevel) {
+    return {
+        lv: '#c43d4f',
+        mv: '#2378a7',
+        hv: '#24292e',
+        unknown: '#7f8c8d'
+    }[voltageLevel] || '#7f8c8d';
+}
+
+function gridLineStyle(feature) {
+    return {
+        color: getGridLineColor(feature.properties.voltage_level),
+        weight: feature.properties.voltage_level === 'lv' ? 3 : 4,
+        opacity: 0.9
+    };
+}
+
+function gridTransformerStyle(feature) {
+    const isHighVoltage = feature.properties.transformer_type === 'mv_hv';
+    return {
+        radius: isHighVoltage ? 8 : 6,
+        color: '#ffffff',
+        weight: 2,
+        fillColor: isHighVoltage ? '#e58c2c' : '#7651a8',
+        fillOpacity: 0.95
+    };
+}
+
 // Data Loading
 function updateLayerStatus(layerName, source, fallbackReason = null) {
     if (layerName === 'pv_capacity') {
         pvLayerSource = source;
+    } else if (layerName === 'grid_lines') {
+        gridLinesLayerSource = source;
+    } else if (layerName === 'grid_transformers') {
+        gridTransformersLayerSource = source;
     } else {
         pc6LayerSource = source;
     }
-    if ((currentMetric === 'pv_capacity') !== (layerName === 'pv_capacity')) return;
+    const activeLayer = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
+    if (activeLayer !== layerName) return;
 
     const status = document.getElementById('layer-source-status');
     status.dataset.state = source;
@@ -146,30 +183,48 @@ function updateLayerStatus(layerName, source, fallbackReason = null) {
 }
 
 function refreshLayerStatus() {
-    const source = currentMetric === 'pv_capacity' ? pvLayerSource : pc6LayerSource;
-    updateLayerStatus(currentMetric === 'pv_capacity' ? 'pv_capacity' : 'pc6', source);
+    const activeLayer = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
+    const sources = {
+        pc6: pc6LayerSource,
+        pv_capacity: pvLayerSource,
+        grid_lines: gridLinesLayerSource,
+        grid_transformers: gridTransformersLayerSource
+    };
+    updateLayerStatus(activeLayer, sources[activeLayer]);
 }
 
 function updateLayerQualitySummary() {
     const label = document.getElementById('layer-quality-label');
     const meter = document.getElementById('layer-quality-meter');
     const isPvCapacity = currentMetric === 'pv_capacity';
-    label.textContent = isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
-    meter.title = isPvCapacity ? 'Feature-level confidence varies by CBS buurt' : 'Layer-level confidence';
+    const isGrid = currentMetric.startsWith('grid_');
+    label.textContent = isGrid
+        ? 'Datacompleetheid per component'
+        : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
+    meter.title = (isPvCapacity || isGrid)
+        ? 'Feature-level confidence varies across this layer'
+        : 'Layer-level confidence';
 }
 
 function setActiveMapLayer() {
-    if (currentMetric === 'pv_capacity') {
-        if (pc6Layer && map.hasLayer(pc6Layer)) map.removeLayer(pc6Layer);
-        if (pvLayer && !map.hasLayer(pvLayer)) {
-            pvLayer.addTo(map);
-            map.fitBounds(pvLayer.getBounds());
+    const layers = {
+        pc6: pc6Layer,
+        pv_capacity: pvLayer,
+        grid_lines: gridLinesLayer,
+        grid_transformers: gridTransformersLayer
+    };
+    const activeLayerName = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
+    Object.entries(layers).forEach(([layerName, layer]) => {
+        if (layer && layerName !== activeLayerName && map.hasLayer(layer)) {
+            map.removeLayer(layer);
         }
-    } else {
-        if (pvLayer && map.hasLayer(pvLayer)) map.removeLayer(pvLayer);
-        if (pc6Layer && !map.hasLayer(pc6Layer)) pc6Layer.addTo(map);
-        if (pc6Layer) pc6Layer.setStyle(style);
+    });
+    const activeLayer = layers[activeLayerName];
+    if (activeLayer && !map.hasLayer(activeLayer)) {
+        activeLayer.addTo(map);
+        if (activeLayerName !== 'pc6') map.fitBounds(activeLayer.getBounds());
     }
+    if (activeLayerName === 'pc6' && pc6Layer) pc6Layer.setStyle(style);
     refreshLayerStatus();
     updateLayerQualitySummary();
     updateLegend();
@@ -239,6 +294,57 @@ async function loadMap() {
         pvControl.parentElement.title = 'PV capacity layer is unavailable';
     }
 
+    try {
+        const result = await Pc6MapData.loadGridLinesFeatureCollection(fetch);
+        gridLinesLayer = L.geoJSON(result.data, {
+            style: gridLineStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 6 }),
+                    mouseout: (event) => gridLinesLayer.resetStyle(event.target),
+                    click: (event) => {
+                        updateGridLineSidePanel(feature.properties);
+                        map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 18 });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('grid_lines', result.source);
+    } catch (error) {
+        console.error('Grid lines data load failed:', error);
+        updateLayerStatus('grid_lines', 'failed', error.message);
+        const control = document.getElementById('r-grid-lines');
+        control.disabled = true;
+        control.parentElement.title = 'Grid lines layer is unavailable';
+    }
+
+    try {
+        const result = await Pc6MapData.loadGridTransformersFeatureCollection(fetch);
+        gridTransformersLayer = L.geoJSON(result.data, {
+            pointToLayer: (feature, latlng) => L.circleMarker(
+                latlng,
+                gridTransformerStyle(feature)
+            ),
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 4 }),
+                    mouseout: (event) => event.target.setStyle(gridTransformerStyle(feature)),
+                    click: (event) => {
+                        updateGridTransformerSidePanel(feature.properties);
+                        map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 17));
+                    }
+                });
+            }
+        });
+        updateLayerStatus('grid_transformers', result.source);
+    } catch (error) {
+        console.error('Grid transformer data load failed:', error);
+        updateLayerStatus('grid_transformers', 'failed', error.message);
+        const control = document.getElementById('r-grid-transformers');
+        control.disabled = true;
+        control.parentElement.title = 'Grid transformer layer is unavailable';
+    }
+
     setActiveMapLayer();
 }
 
@@ -271,6 +377,24 @@ function updateLegend() {
 
     legend.onAdd = function () {
         const div = L.DomUtil.create('div', 'info legend');
+        if (currentMetric === 'grid_lines') {
+            div.innerHTML = '<div class="legend-title">GRID VOLTAGE</div>';
+            [
+                ['lv', 'Low voltage'],
+                ['mv', 'Medium voltage'],
+                ['hv', 'High voltage'],
+                ['unknown', 'Unknown']
+            ].forEach(([level, label]) => {
+                div.innerHTML += `<i style="background:${getGridLineColor(level)}"></i> ${label}<br>`;
+            });
+            return div;
+        }
+        if (currentMetric === 'grid_transformers') {
+            div.innerHTML = '<div class="legend-title">TRANSFORMER TYPE</div>';
+            div.innerHTML += '<i style="background:#7651a8"></i> LV / MV<br>';
+            div.innerHTML += '<i style="background:#e58c2c"></i> MV / HV<br>';
+            return div;
+        }
         const isPvCapacity = currentMetric === 'pv_capacity';
         const grades = isPvCapacity ? [0, 1000, 3000, 7500, 15000, 25000] :
             currentMetric === 'gas' ? [0, 400, 600, 800, 1000, 1200, 1500] :
@@ -503,6 +627,89 @@ function updatePvSidePanel(prop) {
             Source period: ${escapeHtml(prop.source_reference_period)}<br>
             Model version: ${escapeHtml(prop.model_version)}<br>
             <a href="/models/pv/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function qualityMarkup(prop) {
+    const completeness = Number(prop.datacompleetheid ?? 0);
+    const label = escapeHtml(prop.datacompleetheid_label || 'not assessed');
+    const summary = escapeHtml(
+        prop.datacompleetheid_summary || 'No quality explanation available.'
+    );
+    return `
+        <div class="feature-quality" data-level="${completeness}" title="${summary}">
+            <span class="quality-score">${completeness}/3</span>
+            <span><strong>Datacompleetheid</strong><br>${label}</span>
+        </div>
+    `;
+}
+
+function updateGridLineSidePanel(prop) {
+    const length = prop.length_km == null
+        ? 'Unknown'
+        : `${Number(prop.length_km).toLocaleString('nl-NL', { maximumFractionDigits: 3 })} km`;
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">Grid line</div>
+        <div class="feature-identifier">${escapeHtml(prop.component_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Voltage level</div>
+                    <div class="data-value">${escapeHtml(String(prop.voltage_level).toUpperCase())}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Component type</div>
+                    <div class="data-value">${escapeHtml(prop.component_type)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Length</div>
+                    <div class="data-value">${escapeHtml(length)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Serving transformer</div>
+                    <div class="data-value compact-value">${escapeHtml(prop.serving_transformer_id || 'Not uniquely assigned')}</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>GRID TOPOLOGY SNAPSHOT</strong><br>
+            Evidence: ${escapeHtml(prop.evidence_status)}<br>
+            Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+            <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function updateGridTransformerSidePanel(prop) {
+    const rating = prop.rated_power_kva == null
+        ? 'Unknown'
+        : `${Number(prop.rated_power_kva).toLocaleString('nl-NL')} kVA`;
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">Grid transformer</div>
+        <div class="feature-identifier">${escapeHtml(prop.component_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Transformer type</div>
+                    <div class="data-value">${escapeHtml(String(prop.transformer_type).toUpperCase())}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Rated power</div>
+                    <div class="data-value">${escapeHtml(rating)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Primary / secondary</div>
+                    <div class="data-value">${escapeHtml(prop.primary_nominal_voltage_kv ?? '?')} / ${escapeHtml(prop.secondary_nominal_voltage_kv ?? '?')} kV</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>GRID TOPOLOGY SNAPSHOT</strong><br>
+            Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+            <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
         </div>
     `;
 }

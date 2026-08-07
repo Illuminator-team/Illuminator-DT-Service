@@ -126,3 +126,47 @@ test('keeps congestion controls outside layer-specific details', () => {
     assert.match(script, /function initializeScenarioControls\(\)/);
     assert.match(script, /function updatePvSidePanel\(prop\)/);
 });
+
+test('loads grid lines and transformers as independent GeoServer layers', async () => {
+    const calls = [];
+    const payload = collection({
+        component_id: 'grid-line-test',
+        datacompleetheid: 2
+    });
+    const fetchImpl = async (url) => {
+        calls.push(url);
+        return response(true, 200, payload);
+    };
+
+    const lines = await mapData.loadGridLinesFeatureCollection(fetchImpl);
+    const transformers = await mapData.loadGridTransformersFeatureCollection(fetchImpl);
+
+    assert.equal(lines.source, 'geoserver_wfs');
+    assert.equal(transformers.source, 'geoserver_wfs');
+    assert.deepEqual(calls, [
+        mapData.GRID_LINES_WFS_URL,
+        mapData.GRID_TRANSFORMERS_WFS_URL
+    ]);
+});
+
+test('does not substitute another layer when a grid WFS request fails', async () => {
+    await assert.rejects(
+        () => mapData.loadGridLinesFeatureCollection(
+            async () => response(false, 503, {})
+        ),
+        /HTTP 503/
+    );
+});
+
+test('grid details leave the persistent congestion controls in place', () => {
+    const frontendDirectory = path.join(__dirname, '..', 'policy-tool-frontend');
+    const html = fs.readFileSync(path.join(frontendDirectory, 'index.html'), 'utf8');
+    const script = fs.readFileSync(path.join(frontendDirectory, 'script.js'), 'utf8');
+
+    assert.match(html, /id="r-grid-lines"/);
+    assert.match(html, /id="r-grid-transformers"/);
+    assert.match(script, /function updateGridLineSidePanel\(prop\)/);
+    assert.match(script, /function updateGridTransformerSidePanel\(prop\)/);
+    assert.equal((html.match(/id="run-sim-btn"/g) || []).length, 1);
+    assert.doesNotMatch(script, /updateGridLineSidePanel[\s\S]{0,200}selectScenarioTarget/);
+});

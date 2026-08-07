@@ -436,3 +436,60 @@ button {
 .expand-btn {
     font-size: 10px; color: var(--primary-dark); cursor: pointer; margin-top: 5px; display: inline-block;
 }
+.grid-component-grid {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.compact-value {
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.legend-title {
+    margin-bottom: 8px;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+@media (max-width: 760px) {
+    #side-panel {
+        width: min(42vw, 320px);
+        padding: 18px;
+    }
+
+    #search-box {
+        left: 16px;
+        display: block;
+        width: min(260px, calc(58vw - 32px));
+        padding: 8px;
+        box-sizing: border-box;
+    }
+
+    #search-box .search-flex {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px;
+        width: 100%;
+        min-width: 0;
+    }
+
+    #search-box input[type="text"] {
+        width: 100%;
+        min-width: 0;
+        padding-right: 6px;
+        padding-left: 6px;
+        box-sizing: border-box;
+    }
+
+    #search-box button {
+        padding-right: 8px;
+        padding-left: 8px;
+        letter-spacing: 0;
+    }
+
+    #controls {
+        left: 16px;
+        max-width: calc(58vw - 32px);
+    }
+}
