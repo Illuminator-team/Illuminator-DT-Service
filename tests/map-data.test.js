@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const mapData = require('../policy-tool-frontend/map-data.js');
@@ -97,4 +99,30 @@ test('rejects empty feature collections', () => {
         ),
         /non-empty/
     );
+});
+
+test('keeps congestion controls outside layer-specific details', () => {
+    const frontendDirectory = path.join(__dirname, '..', 'policy-tool-frontend');
+    const html = fs.readFileSync(path.join(frontendDirectory, 'index.html'), 'utf8');
+    const script = fs.readFileSync(path.join(frontendDirectory, 'script.js'), 'utf8');
+    const featurePanelMatch = html.match(
+        /<section id="feature-panel"[\s\S]*?<\/section>/
+    );
+    const scenarioPanelMatch = html.match(
+        /<section id="scenario-panel"[\s\S]*?<\/section>/
+    );
+    const featurePanel = featurePanelMatch && featurePanelMatch[0];
+    const scenarioPanel = scenarioPanelMatch && scenarioPanelMatch[0];
+
+    assert.ok(featurePanel, 'feature panel is present');
+    assert.ok(scenarioPanel, 'scenario panel is present');
+    assert.doesNotMatch(featurePanel, /id="run-sim-btn"/);
+    assert.match(scenarioPanel, /id="input-gas"/);
+    assert.match(scenarioPanel, /id="input-pv"/);
+    assert.match(scenarioPanel, /id="run-sim-btn"/);
+    assert.match(scenarioPanel, /id="simulation-output"/);
+    assert.equal((html.match(/id="run-sim-btn"/g) || []).length, 1);
+    assert.doesNotMatch(script, /id="run-sim-btn"/);
+    assert.match(script, /function initializeScenarioControls\(\)/);
+    assert.match(script, /function updatePvSidePanel\(prop\)/);
 });
