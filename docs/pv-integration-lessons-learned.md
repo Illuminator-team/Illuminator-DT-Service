@@ -12,13 +12,17 @@ Evidence:
 - Illuminator draft PR: <https://github.com/Illuminator-team/Illuminator-DT-Service/pull/14>
 - PV resilience PR: <https://github.com/JortGroen/PV-MAP/pull/10>
 - PV cache-bootstrap PR: <https://github.com/JortGroen/PV-MAP/pull/12>
-- failed full-stack run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31024373154>
+- failed live-source run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31024373154>
+- failed publisher-SQL run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31107449535>
+- failed publisher-packaging run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31109126622>
+- successful full-stack run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31110105407>
 - PV source commit: `bd29351e108d9db002b9e54d5c7fb2356416a306`
 - PV API image: `ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710`
 - PV source-cache image: `ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b`
 
-PR 14 remained draft and was not merged or deployed because its complete gate
-did not pass.
+PR 14 remained draft and undeployed while its complete gate was failing. The
+final full-stack run passed; the PR can now leave draft state for review, but
+it is not merged or deployed by this evidence update.
 
 ## What Happened
 
@@ -58,6 +62,15 @@ it was not produced by a new live-source download on 6 August. That limitation
 is recorded rather than hidden. A future routine refresh should create the next
 cache image from a clean trusted-network run and repeat the same acceptance.
 
+The first cache-backed Illuminator run reached the publisher but exposed an
+extra closing parenthesis in the PostGIS bulk-insert template. The next run
+showed that the corrected SQL helper passed host tests but had not been copied
+into the publisher image. The SQL expression was made explicit and shared,
+tests now pin its balanced shape, and the publisher Dockerfile test requires
+the helper to be packaged. The final run passed model initialization, PC6 and
+PV WMS/WFS smoke checks, artifact integrity, GeoServer publication, repeatable
+publisher execution, and cleanup.
+
 ## Durable Lessons
 
 1. **Model CI and RDP acceptance prove different things.** A deterministic
@@ -81,6 +94,12 @@ cache image from a clean trusted-network run and repeat the same acceptance.
    expectations must agree.
 7. **A strict failed gate is useful evidence.** Never substitute fixture data,
    ignore initializer failure, or publish a partial layer to make CI green.
+8. **Exercise real geometry through the database.** Parser and API fixtures do
+   not validate a bulk PostGIS expression. Keep the SQL template test and the
+   full publication smoke check.
+9. **Test the built image, not only the checkout.** Explicit Dockerfile copy
+   lists can omit a new imported module even when host tests pass. Container
+   gates must import or start the packaged application.
 
 ## Required Promotion Lanes
 
@@ -117,7 +136,6 @@ A source-cache bundle or cache image must:
 
 ## Open Follow-Up
 
-- Rerun the complete Illuminator PR 14 gate with both immutable image digests.
 - Produce the next cache artifact from a fresh clean run on a trusted network.
 - Add an outer CI startup deadline after measuring valid clean and cached runs.
-- Keep PR 14 draft and undeployed until the complete gate passes.
+- Keep promotion to `main` and deployment as separate explicit decisions.
