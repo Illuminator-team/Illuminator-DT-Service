@@ -1,3 +1,12 @@
+x-pv-image: &pv-image
+  image: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
+
+x-grid-image: &grid-image
+  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2
+
+x-pv-cache-image: &pv-cache-image
+  image: ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b
+
 services:
 
 #  --------------------------------------- PLAYGROUND ---------------------------------------
@@ -20,8 +29,10 @@ services:
       build: ./policy-tool-backend
       volumes:
         - policy-tool-data:/app/data/processed
+        - ./layer-publisher/layer-manifest.json:/app/config/layer-manifest.json:ro
       environment:
         - REDIS_PASSWORD=${REDIS_PASSWORD}
+        - LAYER_REGISTRY_PATH=/app/config/layer-manifest.json
       labels:
         - "traefik.enable=true"
         # path to /policy-api is needed to out frontend to make calls to the backend
@@ -33,6 +44,96 @@ services:
         - "traefik.http.routers.policy-router.middlewares=policy-strip"
         - "traefik.http.services.policy-service.loadbalancer.server.port=8000"
       restart: always
+
+  ## -----------------------------------------------------------
+  ## Initialize and expose the standalone PV capacity model API.
+  ## -----------------------------------------------------------
+  pv-init:
+    <<: *pv-cache-image
+    volumes:
+      - pv-raw-cache:/app/data/raw
+    restart: "no"
+
+  pv-api:
+    <<: *pv-image
+    environment:
+      PV_RAW_CACHE_DIR: /app/data/raw
+      PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
+      PV_OUTPUT_DIR: /app/data/processed/pv_capacity
+      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
+    volumes:
+      - pv-raw-cache:/app/data/raw
+      - pv-generated-outputs:/app/data/processed/pv_capacity
+    depends_on:
+      pv-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/ready', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pv-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/pv`)"
+      - "traefik.http.routers.pv-api.entrypoints=web,websecure"
+      - "traefik.http.routers.pv-api.tls=true"
+      - "traefik.http.middlewares.pv-api-strip.stripprefix.prefixes=/models/pv"
+      - "traefik.http.routers.pv-api.middlewares=pv-api-strip"
+      - "traefik.http.services.pv-api.loadbalancer.server.port=8000"
+    restart: unless-stopped
+
+  ## -------------------------------------------------------------
+  ## Initialize and expose the standalone Liander grid model API.
+  ## -------------------------------------------------------------
+  grid-init:
+    <<: *grid-image
+    command:
+      - python
+      - -m
+      - grid_api
+      - initialize
+      - --fetch-region
+      - north-holland-towns
+    environment:
+      GRID_API_DATA_DIR: /data
+    volumes:
+      - grid-model-data:/data
+    restart: "no"
+
+  grid-api:
+    <<: *grid-image
+    environment:
+      GRID_API_DATA_DIR: /data
+      GRID_API_CONTAINER_DIGEST: sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2
+    volumes:
+      - grid-model-data:/data
+    depends_on:
+      grid-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8080/ready', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grid-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/grid`)"
+      - "traefik.http.routers.grid-api.entrypoints=web,websecure"
+      - "traefik.http.routers.grid-api.tls=true"
+      - "traefik.http.middlewares.grid-api-strip.stripprefix.prefixes=/models/grid"
+      - "traefik.http.routers.grid-api.middlewares=grid-api-strip"
+      - "traefik.http.services.grid-api.loadbalancer.server.port=8080"
+    restart: unless-stopped
 
 #  ------------------------------------END OF PLAYGROUND -------------------------------------
 
@@ -251,18 +352,6 @@ services:
       - "traefik.http.services.service-geoserver.loadbalancer.server.port=8080"
   
   ## --------------------------------------------------
-  ## Publishes GeoJSON files to GeoServer.
-  ## --------------------------------------------------
-  geojson-loader:
-    image: curlimages/curl
-    depends_on:
-      - geo
-    entrypoint: ["sh", "-c"]
-    command: ["/scripts/publish-geojson.sh"]
-    volumes:
-      - ./scripts:/scripts
-
-  ## --------------------------------------------------
   ## Pushes layer to  GeoServer through the same network.
   ## --------------------------------------------------
   layer-publisher:
@@ -276,13 +365,35 @@ services:
       POSTGRES_DB: rdp_db
       POSTGRES_USER: ${POSTGRES_ADMIN_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      PUBLISHER_MANIFEST_PATH: /app/layer-manifest.json
+      PC6_SOURCE_PATH: /data/alkmaar_energy_map.geojson
+      PV_API_URL: http://pv-api:8000
+      PV_EXPECTED_RELEASE_COMMIT: bd29351e108d9db002b9e54d5c7fb2356416a306
+      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
+      GRID_API_URL: http://grid-api:8080
+      GRID_EXPECTED_RELEASE_COMMIT: 36bfcfbdca4030068a2ec1e2677bf2b334bb4a46
+      GRID_EXPECTED_CONTAINER_DIGEST: sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2
+      GRID_EXPECTED_DATA_MODE: real_source
+      GRID_EXPORT_BBOX: 4.65,52.55,4.95,52.75
+      GEOSERVER_WORKSPACE: rdp
+      GEOSERVER_DATASTORE: rdp_postgis
+      PUBLISH_INTERVAL_SECONDS: 10
     depends_on:
-      - geo
+      geo:
+        condition: service_started
+      timescale:
+        condition: service_started
+      db-scheme:
+        condition: service_completed_successfully
+      pv-api:
+        condition: service_healthy
+      grid-api:
+        condition: service_healthy
     networks:
       - default
     volumes:
-      - ./geo:/opt/geoserver/data_dir
-
+      - ./policy-tool-frontend/data/alkmaar_energy_map.geojson:/data/alkmaar_energy_map.geojson:ro
+    restart: unless-stopped
 
   ## ---------------------------------------------------------------------------------
   ## For debugging: use Redis Insight browser to explore the content of redis streams.
@@ -307,3 +418,6 @@ volumes:
   grafana-data:
   volumes:
   policy-tool-data:
+  pv-raw-cache:
+  pv-generated-outputs:
+  grid-model-data:

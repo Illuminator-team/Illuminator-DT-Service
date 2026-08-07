@@ -1,0 +1,274 @@
+{
+  "contract_version": "1.0",
+  "workspace": "rdp",
+  "datastore": "rdp_postgis",
+  "layers": [
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/policy-tool/pc6-energy",
+      "local_id": "layer:policy-tool:pc6-energy",
+      "title": "Policy Tool PC6 Energy",
+      "description": "Legacy policy-tool annual gas, electricity consumption, and electricity production by PC6.",
+      "model": "policy-tool",
+      "group": "consumption",
+      "model_id": "legacy-policy-tool",
+      "model_version": "legacy-pc6-1",
+      "metadata_contract_version": "1.0",
+      "table": "policy_tool_pc6_energy",
+      "geoserver_layer": "policy_tool_pc6_energy",
+      "source": {
+        "type": "geojson",
+        "path": "/data/alkmaar_energy_map.geojson",
+        "crs": "EPSG:4326",
+        "metadata_url": null,
+        "reference_year": 2023
+      },
+      "feature_id_property": "postcode6",
+      "feature_uri_template": "https://reformers01.ewi.tudelft.nl/id/geo-object/pc6/{postcode6}",
+      "geometry_type": "MultiPolygon",
+      "selectable_feature_type": "pc6",
+      "spatial_resolution": "pc6",
+      "temporal_resolution": "annual",
+      "attributes": [
+        {"name": "postcode6", "type": "string"},
+        {"name": "p6_gasm3_2023", "type": "number", "unit": "m3/year"},
+        {"name": "p6_kwh_2023", "type": "number", "unit": "kWh/year"},
+        {"name": "p6_kwh_productie_2023", "type": "number", "unit": "kWh/year"}
+      ],
+      "data_quality": {
+        "datacompleetheid": 2,
+        "datacompleetheid_label": "redelijke betrouwbaarheid",
+        "datacompleetheid_method": "legacy-pc6-layer-qualitative-v1",
+        "evidence_summary": "Combines real/open annual energy and building data with standard load profiles, enrichment, estimates, and assumptions."
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=policy_tool_pc6_energy&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:policy_tool_pc6_energy"
+      },
+      "style": {
+        "style_status": "default_geoserver",
+        "default_visible": true
+      },
+      "actions": [
+        "inspect_feature",
+        "calculate_profile"
+      ]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/pv-map/capacity",
+      "local_id": "layer:pv-map:capacity",
+      "title": "PV Capacity",
+      "description": "Model-estimated installed PV capacity per CBS buurt in gemeente Alkmaar.",
+      "model": "pv",
+      "group": "pv",
+      "model_id": "pv-capacity-model",
+      "model_version": "0.3.0",
+      "metadata_contract_version": "2.1.0",
+      "table": "pv_capacity",
+      "geoserver_layer": "pv_capacity",
+      "source": {
+        "type": "model_api",
+        "base_url": "http://pv-api:8000",
+        "metadata_url": "/models/pv/metadata",
+        "repository": "https://github.com/JortGroen/PV-MAP",
+        "release_commit": "bd29351e108d9db002b9e54d5c7fb2356416a306",
+        "container_image": "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710",
+        "crs": "EPSG:4326"
+      },
+      "feature_id_property": "feature_id",
+      "source_feature_id_property": "cbs_buurt_code",
+      "feature_uri_template": "https://reformers01.ewi.tudelft.nl/id/{feature_id}",
+      "geometry_type": "MultiPolygon",
+      "selectable_feature_type": "cbs_buurt",
+      "spatial_resolution": "cbs_buurt",
+      "temporal_resolution": "static",
+      "attributes": [
+        {"name": "feature_id", "type": "string"},
+        {"name": "feature_uri", "type": "uri"},
+        {"name": "cbs_buurt_code", "type": "string"},
+        {"name": "buurt_name", "type": "string"},
+        {"name": "pv_capacity_kwp", "type": "number", "unit": "kWp"},
+        {"name": "datacompleetheid", "type": "integer"},
+        {"name": "datacompleetheid_label", "type": "string"},
+        {"name": "datacompleetheid_method_version", "type": "string"},
+        {"name": "last_updated", "type": "datetime"},
+        {"name": "source_last_updated", "type": "datetime", "nullable": true},
+        {"name": "model_version", "type": "string"},
+        {"name": "metadata_contract_version", "type": "string"}
+      ],
+      "data_quality": {
+        "kind": "qualitative_confidence",
+        "is_accuracy_percentage": false,
+        "method_version": "pv-datacompleetheid/1.0.0",
+        "owner": "pv-capacity-model",
+        "scale": {
+          "0": "fully assumption-based",
+          "1": "limited supporting data",
+          "2": "quite accurate",
+          "3": "very accurate"
+        }
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=pv_capacity&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:pv_capacity"
+      },
+      "style": {
+        "style_status": "default_geoserver",
+        "default_visible": false
+      },
+      "actions": [
+        "inspect_feature",
+        "open_model_metadata"
+      ]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/grid-model/lines",
+      "local_id": "layer:grid-model:lines",
+      "title": "Electricity Grid Lines",
+      "description": "Registered and explicitly inferred Liander cable components from the grid topology model.",
+      "model": "grid",
+      "group": "grid",
+      "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
+      "model_version": "1.0.0",
+      "metadata_contract_version": "1.0.0",
+      "table": "grid_lines",
+      "geoserver_layer": "grid_lines",
+      "source": {
+        "type": "model_api",
+        "base_url": "http://grid-api:8080",
+        "metadata_url": "/models/grid/metadata",
+        "repository": "https://github.com/JortGroen/liander-grid-model",
+        "release_commit": "36bfcfbdca4030068a2ec1e2677bf2b334bb4a46",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2",
+        "container_digest": "sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2",
+        "crs": "EPSG:4326",
+        "production_selection": {
+          "type": "bbox",
+          "bbox": [4.65, 52.55, 4.95, 52.75]
+        }
+      },
+      "feature_id_property": "component_id",
+      "feature_uri_property": "persistent_uri",
+      "geometry_type": "MultiLineString",
+      "selectable_feature_type": "grid_component",
+      "spatial_resolution": "exact_model_component_geometry",
+      "temporal_resolution": "static_snapshot",
+      "attributes": [
+        {"name": "component_id", "type": "string"},
+        {"name": "persistent_uri", "type": "uri"},
+        {"name": "component_type", "type": "string"},
+        {"name": "voltage_level", "type": "string"},
+        {"name": "nominal_voltage", "type": "number", "unit": "kV", "nullable": true},
+        {"name": "length_km", "type": "number", "unit": "km", "nullable": true},
+        {"name": "evidence_status", "type": "string"},
+        {"name": "serving_transformer_id", "type": "string", "nullable": true},
+        {"name": "datacompleetheid", "type": "integer"},
+        {"name": "datacompleetheid_label", "type": "string"},
+        {"name": "datacompleetheid_rule_version", "type": "string"},
+        {"name": "grid_data_version", "type": "string"},
+        {"name": "source_retrieved_at", "type": "datetime"},
+        {"name": "model_version", "type": "string"}
+      ],
+      "data_quality": {
+        "kind": "qualitative_confidence",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-grid-v1",
+        "owner": "liander-grid-topology",
+        "scale": {
+          "0": "fully assumption-based",
+          "1": "limited supporting data or ambiguous topology",
+          "2": "registered evidence with documented topology assumptions",
+          "3": "registered geometry and supported topology"
+        }
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lines&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:grid_lines"
+      },
+      "style": {
+        "style_status": "dashboard_voltage_tiers",
+        "default_visible": false
+      },
+      "actions": [
+        "inspect_feature",
+        "open_model_metadata"
+      ]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/grid-model/transformers",
+      "local_id": "layer:grid-model:transformers",
+      "title": "Electricity Grid Transformers",
+      "description": "Liander LV/MV transformers and modelled MV/HV source endpoints from the grid topology model.",
+      "model": "grid",
+      "group": "grid",
+      "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
+      "model_version": "1.0.0",
+      "metadata_contract_version": "1.0.0",
+      "table": "grid_transformers",
+      "geoserver_layer": "grid_transformers",
+      "source": {
+        "type": "model_api",
+        "base_url": "http://grid-api:8080",
+        "metadata_url": "/models/grid/metadata",
+        "repository": "https://github.com/JortGroen/liander-grid-model",
+        "release_commit": "36bfcfbdca4030068a2ec1e2677bf2b334bb4a46",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2",
+        "container_digest": "sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2",
+        "crs": "EPSG:4326",
+        "production_selection": {
+          "type": "bbox",
+          "bbox": [4.65, 52.55, 4.95, 52.75]
+        }
+      },
+      "feature_id_property": "component_id",
+      "feature_uri_property": "persistent_uri",
+      "geometry_type": "Point",
+      "selectable_feature_type": "grid_transformer",
+      "spatial_resolution": "exact_model_component_geometry",
+      "temporal_resolution": "static_snapshot",
+      "attributes": [
+        {"name": "component_id", "type": "string"},
+        {"name": "persistent_uri", "type": "uri"},
+        {"name": "component_type", "type": "string"},
+        {"name": "transformer_type", "type": "string"},
+        {"name": "voltage_level", "type": "string"},
+        {"name": "primary_nominal_voltage_kv", "type": "number", "unit": "kV", "nullable": true},
+        {"name": "secondary_nominal_voltage_kv", "type": "number", "unit": "kV", "nullable": true},
+        {"name": "rated_power_kva", "type": "number", "unit": "kVA", "nullable": true},
+        {"name": "datacompleetheid", "type": "integer"},
+        {"name": "datacompleetheid_label", "type": "string"},
+        {"name": "datacompleetheid_rule_version", "type": "string"},
+        {"name": "grid_data_version", "type": "string"},
+        {"name": "source_retrieved_at", "type": "datetime"},
+        {"name": "model_version", "type": "string"}
+      ],
+      "data_quality": {
+        "kind": "qualitative_confidence",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-grid-v1",
+        "owner": "liander-grid-topology",
+        "scale": {
+          "0": "fully assumption-based",
+          "1": "limited supporting data or ambiguous topology",
+          "2": "registered evidence with documented topology assumptions",
+          "3": "registered geometry and supported topology"
+        }
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_transformers&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:grid_transformers"
+      },
+      "style": {
+        "style_status": "dashboard_transformer_type",
+        "default_visible": false
+      },
+      "actions": [
+        "inspect_feature",
+        "open_model_metadata"
+      ]
+    }
+  ]
+}

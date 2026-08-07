@@ -18,7 +18,7 @@
 </div>
 
 <div id="controls" class="floating-ui">
-    <div class="control-label">Metric Selection</div>
+    <div class="control-label">Map Layer</div>
     <div class="radio-group">
         <div class="radio-item">
             <input type="radio" name="layer" value="gas" id="r-gas" checked> 
@@ -28,6 +28,30 @@
             <input type="radio" name="layer" value="elec" id="r-elec"> 
             <label for="r-elec">ELEC CONSUMPTION (kWh)</label>
         </div>
+        <div class="radio-item">
+            <input type="radio" name="layer" value="pv_capacity" id="r-pv-capacity">
+            <label for="r-pv-capacity">PV CAPACITY (kWp)</label>
+        </div>
+        <div class="radio-item">
+            <input type="radio" name="layer" value="grid_lines" id="r-grid-lines">
+            <label for="r-grid-lines">GRID LINES</label>
+        </div>
+        <div class="radio-item">
+            <input type="radio" name="layer" value="grid_transformers" id="r-grid-transformers">
+            <label for="r-grid-transformers">GRID TRANSFORMERS</label>
+        </div>
+    </div>
+    <div class="layer-health" aria-live="polite">
+        <div class="layer-source-row">
+            <span class="source-indicator" aria-hidden="true"></span>
+            <span id="layer-source-status" data-state="loading">Loading layer</span>
+        </div>
+        <div class="quality-row" title="Qualitative data completeness level">
+            <span id="layer-quality-meter" class="quality-meter quality-level-2" aria-hidden="true">
+                <i></i><i></i><i></i><i></i>
+            </span>
+            <span id="layer-quality-label">Datacompleetheid 2/3</span>
+        </div>
     </div>
 </div>
 
@@ -36,16 +60,52 @@
 <div id="map"></div>
 
 <div id="side-panel">
-    <div id="panel-content">
-        <div class="placeholder-text">
-            <strong>INFO MENU</strong><br>
-            Alkmaar Policy Tool Interface<br><br>
-            Select a postcode region to view localized energy profiles.
+    <section id="feature-panel" aria-labelledby="feature-panel-title">
+        <div id="feature-panel-title" class="panel-section-heading">Selected layer data</div>
+        <div id="panel-content">
+            <div class="placeholder-text">
+                Select a map feature to inspect its data.
+            </div>
         </div>
-    </div>
+    </section>
+
+    <section id="scenario-panel" class="sidebar-controls" aria-labelledby="scenario-panel-title">
+        <div id="scenario-panel-title" class="panel-section-heading">Grid congestion scenario</div>
+        <div id="scenario-target" class="scenario-target" data-state="empty">
+            <span>Scenario target</span>
+            <strong id="scenario-target-value">No PC6 selected</strong>
+        </div>
+
+        <div class="slider-unit">
+            <div class="slider-header">
+                <label class="slider-label" for="input-gas">Gas demand</label>
+                <span class="slider-pct" id="pct-gas">100%</span>
+            </div>
+            <input type="range" class="side-slider" id="input-gas" min="0" max="100" value="100">
+        </div>
+
+        <div class="slider-unit">
+            <div class="slider-header">
+                <label class="slider-label" for="input-pv">PV adoption</label>
+                <span class="slider-pct" id="pct-pv">100%</span>
+            </div>
+            <input type="range" class="side-slider" id="input-pv" min="100" max="500" value="100">
+        </div>
+
+        <button id="run-sim-btn" class="primary-btn" disabled>RUN SCENARIO</button>
+
+        <div id="simulation-output" class="simulation-output" hidden>
+            <div class="control-label">Simulation result</div>
+            <div id="graph-container" class="scenario-graph">
+                <span>Graph will render here...</span>
+            </div>
+            <a id="download-link" href="#" class="download-link">Download processed_data.csv</a>
+        </div>
+    </section>
 </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="map-data.js"></script>
     <script src="script.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>

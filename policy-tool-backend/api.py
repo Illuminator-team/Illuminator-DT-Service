@@ -1,5 +1,8 @@
+import json
 import os
 import subprocess
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -17,10 +20,50 @@ app.add_middleware(
 PYTHON_EXE = "python3"
 BASE_DIR = "/app"
 PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
+LAYER_REGISTRY_PATH = Path(
+    os.getenv("LAYER_REGISTRY_PATH", "/app/config/layer-manifest.json")
+)
 
 @app.get("/")
 def home():
     return {"message": "Policy Tool API is active"}
+
+@app.get("/layers")
+def layers():
+    try:
+        manifest = json.loads(LAYER_REGISTRY_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="Layer registry is unavailable.") from exc
+
+    records = []
+    for layer in manifest.get("layers", []):
+        source = layer.get("source", {})
+        records.append(
+            {
+                "id": layer["id"],
+                "local_id": layer["local_id"],
+                "title": layer["title"],
+                "description": layer["description"],
+                "model": layer["model"],
+                "group": layer["group"],
+                "model_id": layer["model_id"],
+                "model_version": layer["model_version"],
+                "metadata_contract_version": layer["metadata_contract_version"],
+                "metadata_url": source.get("metadata_url"),
+                "geometry_type": layer["geometry_type"],
+                "selectable_feature_type": layer["selectable_feature_type"],
+                "crs": source["crs"],
+                "attributes": layer["attributes"],
+                "data_quality": layer["data_quality"],
+                "services": layer["services"],
+                "style": layer["style"],
+                "actions": layer["actions"],
+            }
+        )
+    return {
+        "contract_version": manifest["contract_version"],
+        "layers": records,
+    }
 
 @app.get("/simulate/{pc6}")
 async def run_simulation(pc6: str, electrification: float = 0.0):

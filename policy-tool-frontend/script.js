@@ -10,7 +10,14 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 let pc6Layer;
+let pvLayer;
+let gridLinesLayer;
+let gridTransformersLayer;
 let currentMetric = 'gas';
+let pc6LayerSource = 'loading';
+let pvLayerSource = 'loading';
+let gridLinesLayerSource = 'loading';
+let gridTransformersLayerSource = 'loading';
 
 // Unified Color Logic
 function getColor(d, type) {
@@ -21,6 +28,12 @@ function getColor(d, type) {
         return d > 4000 ? '#084594' : d > 3500 ? '#2171b5' : d > 3000 ? '#4292c6' :
                d > 2500 ? '#6baed6' : d > 2000 ? '#9ecae1' : d > 1500 ? '#c6dbef' : '#deebf7';
     }
+}
+
+function getPvColor(value) {
+    return value > 25000 ? '#005a32' : value > 15000 ? '#238b45' :
+           value > 7500 ? '#41ab5d' : value > 3000 ? '#78c679' :
+           value > 1000 ? '#addd8e' : value > 0 ? '#d9f0a3' : '#f0f0f0';
 }
 
 // // Styling Function
@@ -105,11 +118,126 @@ function style(feature) {
     return styleObj;
 }
 
+function pvStyle(feature) {
+    return {
+        fillColor: getPvColor(Number(feature.properties.pv_capacity_kwp || 0)),
+        weight: 0.9,
+        opacity: 0.75,
+        color: '#ffffff',
+        fillOpacity: 0.72
+    };
+}
+
+function getGridLineColor(voltageLevel) {
+    return {
+        lv: '#c43d4f',
+        mv: '#2378a7',
+        hv: '#24292e',
+        unknown: '#7f8c8d'
+    }[voltageLevel] || '#7f8c8d';
+}
+
+function gridLineStyle(feature) {
+    return {
+        color: getGridLineColor(feature.properties.voltage_level),
+        weight: feature.properties.voltage_level === 'lv' ? 3 : 4,
+        opacity: 0.9
+    };
+}
+
+function gridTransformerStyle(feature) {
+    const isHighVoltage = feature.properties.transformer_type === 'mv_hv';
+    return {
+        radius: isHighVoltage ? 8 : 6,
+        color: '#ffffff',
+        weight: 2,
+        fillColor: isHighVoltage ? '#e58c2c' : '#7651a8',
+        fillOpacity: 0.95
+    };
+}
+
 // Data Loading
+function updateLayerStatus(layerName, source, fallbackReason = null) {
+    if (layerName === 'pv_capacity') {
+        pvLayerSource = source;
+    } else if (layerName === 'grid_lines') {
+        gridLinesLayerSource = source;
+    } else if (layerName === 'grid_transformers') {
+        gridTransformersLayerSource = source;
+    } else {
+        pc6LayerSource = source;
+    }
+    const activeLayer = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
+    if (activeLayer !== layerName) return;
+
+    const status = document.getElementById('layer-source-status');
+    status.dataset.state = source;
+    status.textContent = source === 'geoserver_wfs'
+        ? 'Live GeoServer WFS'
+        : source === 'static_geojson'
+            ? 'Static fallback active'
+            : source === 'failed'
+                ? 'Layer unavailable'
+                : 'Loading layer';
+    status.title = fallbackReason || '';
+}
+
+function refreshLayerStatus() {
+    const activeLayer = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
+    const sources = {
+        pc6: pc6LayerSource,
+        pv_capacity: pvLayerSource,
+        grid_lines: gridLinesLayerSource,
+        grid_transformers: gridTransformersLayerSource
+    };
+    updateLayerStatus(activeLayer, sources[activeLayer]);
+}
+
+function updateLayerQualitySummary() {
+    const label = document.getElementById('layer-quality-label');
+    const meter = document.getElementById('layer-quality-meter');
+    const isPvCapacity = currentMetric === 'pv_capacity';
+    const isGrid = currentMetric.startsWith('grid_');
+    label.textContent = isGrid
+        ? 'Datacompleetheid per component'
+        : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
+    meter.title = (isPvCapacity || isGrid)
+        ? 'Feature-level confidence varies across this layer'
+        : 'Layer-level confidence';
+}
+
+function setActiveMapLayer() {
+    const layers = {
+        pc6: pc6Layer,
+        pv_capacity: pvLayer,
+        grid_lines: gridLinesLayer,
+        grid_transformers: gridTransformersLayer
+    };
+    const activeLayerName = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
+    Object.entries(layers).forEach(([layerName, layer]) => {
+        if (layer && layerName !== activeLayerName && map.hasLayer(layer)) {
+            map.removeLayer(layer);
+        }
+    });
+    const activeLayer = layers[activeLayerName];
+    if (activeLayer && !map.hasLayer(activeLayer)) {
+        activeLayer.addTo(map);
+        if (activeLayerName !== 'pc6') map.fitBounds(activeLayer.getBounds());
+    }
+    if (activeLayerName === 'pc6' && pc6Layer) pc6Layer.setStyle(style);
+    refreshLayerStatus();
+    updateLayerQualitySummary();
+    updateLegend();
+}
+
 async function loadMap() {
     try {
-        const resp = await fetch('data/alkmaar_energy_map.geojson');
-        const data = await resp.json();
+        const result = await Pc6MapData.loadPc6FeatureCollection(fetch);
+        const data = result.data;
+        updateLayerStatus('pc6', result.source, result.fallbackReason);
+        if (result.fallbackReason) {
+            console.warn('GeoServer WFS unavailable; using static fallback:', result.fallbackReason);
+        }
 
         pc6Layer = L.geoJSON(data, {
             style: style,
@@ -127,16 +255,97 @@ async function loadMap() {
                     }
                 });
             }
-        }).addTo(map);
+        });
+        pc6Layer.addTo(map);
 
         if (data.features.length > 0) {
             map.fitBounds(pc6Layer.getBounds());
         }
-        updateLegend();
-
     } catch (e) {
-        console.error("Data load failed:", e);
+        console.error('PC6 data load failed:', e);
+        updateLayerStatus('pc6', 'failed', e.message);
     }
+
+    try {
+        const result = await Pc6MapData.loadPvFeatureCollection(fetch);
+        pvLayer = L.geoJSON(result.data, {
+            style: pvStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (e) => {
+                        e.target.setStyle({ weight: 2, color: '#2f3640', fillOpacity: 0.82 });
+                    },
+                    mouseout: (e) => {
+                        pvLayer.resetStyle(e.target);
+                    },
+                    click: (e) => {
+                        updatePvSidePanel(feature.properties);
+                        map.fitBounds(e.target.getBounds(), { padding: [40, 40], maxZoom: 16 });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('pv_capacity', result.source);
+    } catch (e) {
+        console.error('PV capacity data load failed:', e);
+        updateLayerStatus('pv_capacity', 'failed', e.message);
+        const pvControl = document.getElementById('r-pv-capacity');
+        pvControl.disabled = true;
+        pvControl.parentElement.title = 'PV capacity layer is unavailable';
+    }
+
+    try {
+        const result = await Pc6MapData.loadGridLinesFeatureCollection(fetch);
+        gridLinesLayer = L.geoJSON(result.data, {
+            style: gridLineStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 6 }),
+                    mouseout: (event) => gridLinesLayer.resetStyle(event.target),
+                    click: (event) => {
+                        updateGridLineSidePanel(feature.properties);
+                        map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 18 });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('grid_lines', result.source);
+    } catch (error) {
+        console.error('Grid lines data load failed:', error);
+        updateLayerStatus('grid_lines', 'failed', error.message);
+        const control = document.getElementById('r-grid-lines');
+        control.disabled = true;
+        control.parentElement.title = 'Grid lines layer is unavailable';
+    }
+
+    try {
+        const result = await Pc6MapData.loadGridTransformersFeatureCollection(fetch);
+        gridTransformersLayer = L.geoJSON(result.data, {
+            pointToLayer: (feature, latlng) => L.circleMarker(
+                latlng,
+                gridTransformerStyle(feature)
+            ),
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 4 }),
+                    mouseout: (event) => event.target.setStyle(gridTransformerStyle(feature)),
+                    click: (event) => {
+                        updateGridTransformerSidePanel(feature.properties);
+                        map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 17));
+                    }
+                });
+            }
+        });
+        updateLayerStatus('grid_transformers', result.source);
+    } catch (error) {
+        console.error('Grid transformer data load failed:', error);
+        updateLayerStatus('grid_transformers', 'failed', error.message);
+        const control = document.getElementById('r-grid-transformers');
+        control.disabled = true;
+        control.parentElement.title = 'Grid transformer layer is unavailable';
+    }
+
+    setActiveMapLayer();
 }
 
 // Search Logic
@@ -168,13 +377,36 @@ function updateLegend() {
 
     legend.onAdd = function () {
         const div = L.DomUtil.create('div', 'info legend');
-        const grades = currentMetric === 'gas' ? [0, 400, 600, 800, 1000, 1200, 1500] : [0, 1500, 2000, 2500, 3000, 3500, 4000];
-        const title = currentMetric === 'gas' ? 'GAS (m³)' : 'ELEC (kWh)';
+        if (currentMetric === 'grid_lines') {
+            div.innerHTML = '<div class="legend-title">GRID VOLTAGE</div>';
+            [
+                ['lv', 'Low voltage'],
+                ['mv', 'Medium voltage'],
+                ['hv', 'High voltage'],
+                ['unknown', 'Unknown']
+            ].forEach(([level, label]) => {
+                div.innerHTML += `<i style="background:${getGridLineColor(level)}"></i> ${label}<br>`;
+            });
+            return div;
+        }
+        if (currentMetric === 'grid_transformers') {
+            div.innerHTML = '<div class="legend-title">TRANSFORMER TYPE</div>';
+            div.innerHTML += '<i style="background:#7651a8"></i> LV / MV<br>';
+            div.innerHTML += '<i style="background:#e58c2c"></i> MV / HV<br>';
+            return div;
+        }
+        const isPvCapacity = currentMetric === 'pv_capacity';
+        const grades = isPvCapacity ? [0, 1000, 3000, 7500, 15000, 25000] :
+            currentMetric === 'gas' ? [0, 400, 600, 800, 1000, 1200, 1500] :
+            [0, 1500, 2000, 2500, 3000, 3500, 4000];
+        const title = isPvCapacity ? 'PV CAPACITY (kWp)' :
+            currentMetric === 'gas' ? 'GAS (m³)' : 'ELEC (kWh)';
         
         div.innerHTML = `<div style="margin-bottom:8px; font-weight:700; font-size:9px;">${title}</div>`;
         
         grades.forEach((g, i) => {
-            div.innerHTML += `<i style="background:${getColor(g + 1, currentMetric)}"></i> ${g}${grades[i+1] ? '&ndash;'+grades[i+1] : '+'}<br>`;
+            const color = isPvCapacity ? getPvColor(g + 1) : getColor(g + 1, currentMetric);
+            div.innerHTML += `<i style="background:${color}"></i> ${g}${grades[i+1] ? '&ndash;'+grades[i+1] : '+'}<br>`;
         });
         return div;
     };
@@ -184,6 +416,74 @@ function updateLegend() {
 // Global object to store local overrides
 // Format: { "1811AA": { gas: 0.5, pv: 2.0 }, ... }
 let postcodeScenarios = {};
+let selectedScenarioPostcode = null;
+let selectedScenarioProperties = null;
+let scenarioDraft = { gas: 1.0, pv: 1.0, modified: false };
+let scenarioRunning = false;
+
+function getActiveScenario() {
+    return selectedScenarioPostcode
+        ? postcodeScenarios[selectedScenarioPostcode]
+        : scenarioDraft;
+}
+
+function updateScenarioControls() {
+    const scenario = getActiveScenario();
+    const target = document.getElementById('scenario-target');
+    const targetValue = document.getElementById('scenario-target-value');
+    const runButton = document.getElementById('run-sim-btn');
+
+    document.getElementById('input-gas').value = scenario.gas * 100;
+    document.getElementById('input-pv').value = scenario.pv * 100;
+    document.getElementById('pct-gas').innerText = `${Math.round(scenario.gas * 100)}%`;
+    document.getElementById('pct-pv').innerText = `${Math.round(scenario.pv * 100)}%`;
+
+    target.dataset.state = selectedScenarioPostcode ? 'selected' : 'empty';
+    targetValue.innerText = selectedScenarioPostcode || 'No PC6 selected';
+    runButton.disabled = !selectedScenarioPostcode || scenarioRunning;
+    runButton.title = selectedScenarioPostcode
+        ? `Run scenario for ${selectedScenarioPostcode}`
+        : 'Select a PC6 feature or search for a postcode before running';
+}
+
+function selectScenarioTarget(prop) {
+    const pc = prop.postcode6;
+    if (!postcodeScenarios[pc]) {
+        postcodeScenarios[pc] = { ...scenarioDraft };
+    }
+    selectedScenarioPostcode = pc;
+    selectedScenarioProperties = prop;
+    updateScenarioControls();
+}
+
+function initializeScenarioControls() {
+    document.getElementById('input-gas').addEventListener('input', (event) => {
+        const scenario = getActiveScenario();
+        scenario.gas = event.target.value / 100;
+        scenario.modified = true;
+        document.getElementById('pct-gas').innerText = `${event.target.value}%`;
+        if (selectedScenarioProperties) refreshVisuals(selectedScenarioProperties);
+    });
+
+    document.getElementById('input-pv').addEventListener('input', (event) => {
+        const scenario = getActiveScenario();
+        scenario.pv = event.target.value / 100;
+        scenario.modified = true;
+        document.getElementById('pct-pv').innerText = `${event.target.value}%`;
+        if (selectedScenarioProperties) refreshVisuals(selectedScenarioProperties);
+    });
+
+    document.getElementById('run-sim-btn').addEventListener('click', () => {
+        if (!selectedScenarioPostcode) return;
+        runPythonSimulation(
+            selectedScenarioPostcode,
+            postcodeScenarios[selectedScenarioPostcode]
+        );
+    });
+
+    updateScenarioControls();
+}
+
 
 function getCalculatedValue(feature, metric) {
     const pc = feature.properties.postcode6;
@@ -207,10 +507,7 @@ function getCalculatedValue(feature, metric) {
 function updateSidePanel(prop) {
     const pc = prop.postcode6;
     
-    // Ensure the scenario object exists
-    if (!postcodeScenarios[pc]) {
-        postcodeScenarios[pc] = { gas: 1.0, pv: 1.0, modified: false };
-    }
+    selectScenarioTarget(prop);
     const s = postcodeScenarios[pc];
 
     const actualGas = prop.p6_gasm3_2023 || 0;
@@ -223,6 +520,10 @@ function updateSidePanel(prop) {
     
     const formatNum = (val) => Math.round(val).toLocaleString('nl-NL');
     const simActiveClass = s.modified ? "active" : "";
+    const completeness = Number(prop.datacompleetheid ?? 2);
+    const completenessLabel = prop.datacompleetheid_label || 'redelijke betrouwbaarheid';
+    const sourceLabel = pc6LayerSource === 'geoserver_wfs'
+        ? 'GeoServer WFS' : 'Static GeoJSON fallback';
 
     document.getElementById('panel-content').innerHTML = `
         <div class="pc6-header">${pc}</div>
@@ -261,71 +562,165 @@ function updateSidePanel(prop) {
             </div>
         </div>
 
-        <div class="sidebar-controls">
-            <div class="control-label" style="margin-bottom:15px; color:var(--accent-red)">Local Scenario Parameters</div>
-            <div class="slider-unit">
-                <div class="slider-header">
-                    <span class="slider-label">Gas Demand</span>
-                    <span class="slider-pct" id="pct-gas">${Math.round(s.gas * 100)}%</span>
-                </div>
-                <input type="range" class="side-slider" id="input-gas" min="0" max="100" value="${s.gas * 100}">
-            </div>
-
-            <div class="slider-unit">
-                <div class="slider-header">
-                    <span class="slider-label">PV Adoption</span>
-                    <span class="slider-pct" id="pct-pv">${Math.round(s.pv * 100)}%</span>
-                </div>
-                <input type="range" class="side-slider" id="input-pv" min="100" max="500" value="${s.pv * 100}">
-            </div>
-
-            <div class="simulation-actions" style="margin-top: 25px;">
-                <button id="run-sim-btn" class="primary-btn">RUN POLICY SIMULATION</button>
-            </div>
-
-            <div id="simulation-output" style="margin-top: 20px; display: none;">
-                <div class="control-label">Simulation Result</div>
-                <div id="graph-container" style="width: 100%; height: 200px; background: #f9f9f9; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; border-radius: 4px;">
-                    <span style="font-size: 10px; color: #999;">Graph will render here...</span>
-                </div>
-                <a id="download-link" href="#" style="display: block; margin-top: 10px; font-size: 10px; color: var(--primary-dark); text-decoration: underline;">Download processed_data.csv</a>
-            </div>
-        </div>
-
         <div style="margin-top:40px; font-size:9px; color:var(--text-muted); line-height:1.5;">
             <strong>METHODOLOGY</strong><br>
             Geometry: CBS 2021 PC6 Boundaries.<br>
-            Energy: VNG (CBS) Energy Statistics 2023.
+            Energy: VNG (CBS) Energy Statistics 2023.<br>
+            Source: ${sourceLabel}.
+        </div>
+
+        <div class="feature-quality" data-level="${completeness}">
+            <span class="quality-score">${completeness}/3</span>
+            <span><strong>Datacompleetheid</strong><br>${completenessLabel}</span>
         </div>
     `;
 
-    // Re-attach listeners because innerHTML wipes them
-    document.getElementById('input-gas').addEventListener('input', (e) => {
-        postcodeScenarios[pc].gas = e.target.value / 100;
-        postcodeScenarios[pc].modified = true;
-        document.getElementById('pct-gas').innerText = e.target.value + "%";
-        refreshVisuals(prop);
-    });
+}
 
-    document.getElementById('input-pv').addEventListener('input', (e) => {
-        postcodeScenarios[pc].pv = e.target.value / 100;
-        postcodeScenarios[pc].modified = true;
-        document.getElementById('pct-pv').innerText = e.target.value + "%";
-        refreshVisuals(prop);
-    });
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    })[character]);
+}
 
-    document.getElementById('run-sim-btn').addEventListener('click', () => {
-        runPythonSimulation(pc, postcodeScenarios[pc]);
+function updatePvSidePanel(prop) {
+    const formatNum = (value) => Number(value || 0).toLocaleString('nl-NL', {
+        maximumFractionDigits: 1
     });
+    const completeness = Number(prop.datacompleetheid ?? 0);
+    const label = escapeHtml(prop.datacompleetheid_label || 'not assessed');
+    const reason = escapeHtml(prop.completeness_reason || 'No quality explanation available.');
+
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">${escapeHtml(prop.buurt_name)}</div>
+        <div class="feature-identifier">${escapeHtml(prop.cbs_buurt_code)}</div>
+
+        <div class="data-grid pv-capacity-grid">
+            <div class="data-column">
+                <div class="column-header">Installed capacity</div>
+                <div class="data-group">
+                    <div class="data-label">Combined estimate</div>
+                    <div class="data-value">${formatNum(prop.pv_capacity_kwp)} kWp</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Residential</div>
+                    <div class="data-value">${formatNum(prop.residential_kwp_real)} kWp</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Commercial</div>
+                    <div class="data-value">${formatNum(prop.commercial_kwp_derived)} kWp</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="feature-quality" data-level="${completeness}" title="${reason}">
+            <span class="quality-score">${completeness}/3</span>
+            <span><strong>Datacompleetheid</strong><br>${label}</span>
+        </div>
+
+        <div class="pv-provenance">
+            <strong>MODEL-ESTIMATED PV CAPACITY</strong><br>
+            Source period: ${escapeHtml(prop.source_reference_period)}<br>
+            Model version: ${escapeHtml(prop.model_version)}<br>
+            <a href="/models/pv/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function qualityMarkup(prop) {
+    const completeness = Number(prop.datacompleetheid ?? 0);
+    const label = escapeHtml(prop.datacompleetheid_label || 'not assessed');
+    const summary = escapeHtml(
+        prop.datacompleetheid_summary || 'No quality explanation available.'
+    );
+    return `
+        <div class="feature-quality" data-level="${completeness}" title="${summary}">
+            <span class="quality-score">${completeness}/3</span>
+            <span><strong>Datacompleetheid</strong><br>${label}</span>
+        </div>
+    `;
+}
+
+function updateGridLineSidePanel(prop) {
+    const length = prop.length_km == null
+        ? 'Unknown'
+        : `${Number(prop.length_km).toLocaleString('nl-NL', { maximumFractionDigits: 3 })} km`;
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">Grid line</div>
+        <div class="feature-identifier">${escapeHtml(prop.component_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Voltage level</div>
+                    <div class="data-value">${escapeHtml(String(prop.voltage_level).toUpperCase())}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Component type</div>
+                    <div class="data-value">${escapeHtml(prop.component_type)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Length</div>
+                    <div class="data-value">${escapeHtml(length)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Serving transformer</div>
+                    <div class="data-value compact-value">${escapeHtml(prop.serving_transformer_id || 'Not uniquely assigned')}</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>GRID TOPOLOGY SNAPSHOT</strong><br>
+            Evidence: ${escapeHtml(prop.evidence_status)}<br>
+            Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+            <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function updateGridTransformerSidePanel(prop) {
+    const rating = prop.rated_power_kva == null
+        ? 'Unknown'
+        : `${Number(prop.rated_power_kva).toLocaleString('nl-NL')} kVA`;
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">Grid transformer</div>
+        <div class="feature-identifier">${escapeHtml(prop.component_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Transformer type</div>
+                    <div class="data-value">${escapeHtml(String(prop.transformer_type).toUpperCase())}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Rated power</div>
+                    <div class="data-value">${escapeHtml(rating)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Primary / secondary</div>
+                    <div class="data-value">${escapeHtml(prop.primary_nominal_voltage_kv ?? '?')} / ${escapeHtml(prop.secondary_nominal_voltage_kv ?? '?')} kV</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>GRID TOPOLOGY SNAPSHOT</strong><br>
+            Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+            <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
 }
 
 function refreshVisuals(originalProps) {
     // This forces Leaflet to re-calculate the styles and patterns
-    pc6Layer.setStyle(style); 
-    
-    // ... update the numeric columns as before ...
-    const pc = originalProps.postcode6;
-    document.getElementById('sim-col').classList.add('active');
+    if (pc6Layer) pc6Layer.setStyle(style);
+
+    const simulatedColumn = document.getElementById('sim-col');
+    if (!simulatedColumn) return;
+    simulatedColumn.classList.add('active');
     
     const scenarioGas = getCalculatedValue({properties: originalProps}, 'gas');
     const scenarioElec = getCalculatedValue({properties: originalProps}, 'elec');
@@ -346,8 +741,7 @@ document.getElementById('search-input').addEventListener('keypress', (e) => {
 document.querySelectorAll('input[name="layer"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
         currentMetric = e.target.value;
-        if (pc6Layer) pc6Layer.setStyle(style);
-        updateLegend();
+        setActiveMapLayer();
     });
 });
 
@@ -364,6 +758,7 @@ async function runPythonSimulation(postcode, scenario) {
     btn.innerText = "RUNNING BACKEND...";
     btn.disabled = true;
 
+    scenarioRunning = true;
     // Sanitize inputs
     const pc6 = postcode.replace(/\s+/g, '').toUpperCase();
     const electrification = (1 - scenario.gas).toFixed(2);
@@ -414,7 +809,7 @@ async function runPythonSimulation(postcode, scenario) {
         `;
 
         graphContainer.innerHTML = '<canvas id="chartCanvas"></canvas>';
-            output.style.display = "block";
+            output.hidden = false;
             renderEnergyChart('chartCanvas', lastCsvData, false);
 
     } catch (err) {
@@ -422,8 +817,9 @@ async function runPythonSimulation(postcode, scenario) {
         alert(`Error: ${err.message === 'BACKEND_ERROR' ? 'The simulation script failed.' : 'Could not retrieve simulation results.'}`);
     } finally {
         // Reset UI state
-        btn.innerText = "RUN SIMULATION";
-        btn.disabled = false;
+        scenarioRunning = false;
+        btn.innerText = "RUN SCENARIO";
+        updateScenarioControls();
     }
 }
 
@@ -517,4 +913,5 @@ function openChartModal() {
 }
 
 // Run
+initializeScenarioControls();
 loadMap();
