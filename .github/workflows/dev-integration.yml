@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Validate PC6 and PV publication contracts
+      - name: Validate PC6, PV, and Grid publication contracts
         run: python -m unittest discover -s tests -p "test_*.py"
 
       - name: Test dashboard layer adapters
@@ -34,7 +34,7 @@ jobs:
           node --check policy-tool-frontend/script.js
           node --test tests/map-data.test.js
 
-      - name: Authenticate to the private PV model package
+      - name: Authenticate to private model packages
         env:
           GHCR_TOKEN: ${{ secrets.JORT_PRIVATE_DOCKER_IMAGES }}
         run: |
@@ -67,14 +67,17 @@ jobs:
       - name: Start integrated stack
         run: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 
-      - name: Run integrated PC6 and PV smoke checks
+      - name: Run integrated PC6, PV, and Grid smoke checks
         run: python tests/smoke_stack.py --base-url https://localhost
 
       - name: Verify repeatable publisher execution
         shell: bash
         run: |
           docker compose -f docker-compose.yml -f docker-compose.local.yml stop layer-publisher
-          docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm -e PUBLISH_ONCE=true layer-publisher
+          output="$(docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm --no-deps -e PUBLISH_ONCE=true layer-publisher 2>&1)"
+          printf '%s\n' "${output}"
+          grep -Fq "grid_lines synchronized: total=22 changed=0 deleted=0" <<<"${output}"
+          grep -Fq "grid_transformers synchronized: total=1 changed=0 deleted=0" <<<"${output}"
           docker compose -f docker-compose.yml -f docker-compose.local.yml up -d layer-publisher
 
       - name: Show service logs on failure

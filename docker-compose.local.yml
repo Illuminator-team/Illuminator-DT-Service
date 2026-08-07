@@ -11,6 +11,27 @@ services:
     labels:
       traefik.http.routers.pv-api.rule: Host(`localhost`) && PathPrefix(`/models/pv`)
 
+  grid-init:
+    command:
+      - python
+      - -m
+      - grid_api
+      - initialize
+      - --fixture
+      - /fixtures/alkmaar_grid_fixture.json
+      - --allow-fixture
+    volumes:
+      - ./tests/fixtures/grid/alkmaar_grid_fixture.json:/fixtures/alkmaar_grid_fixture.json:ro
+
+  grid-api:
+    labels:
+      traefik.http.routers.grid-api.rule: Host(`localhost`) && PathPrefix(`/models/grid`)
+
+  layer-publisher:
+    environment:
+      GRID_EXPECTED_DATA_MODE: fixture
+      GRID_EXPORT_BBOX: 4.774287,52.629131,4.779526,52.635583
+
   grafana:
     environment:
       GF_SERVER_ROOT_URL: https://localhost/grafana

@@ -476,6 +476,13 @@ normal source-data updates may legitimately change them.
 For the first PV capacity model, the agreed fixture is CBS buurt
 `BU03610302` (`Overdie-Oost`) and `pv_capacity_kwp` MUST be greater than zero.
 
+For the first Liander Grid model, the agreed fixture is
+`alkmaar-trafo-1157-v1`, bounded by
+`[4.774287, 52.629131, 4.779526, 52.635583]`. It MUST expose 22 grid lines and
+one transformer (`trafo_MV_LV_1157`) through the same API contract used by the
+real-source model. This fixture proves deterministic integration behavior; it
+does not replace dated evidence from the production source initializer.
+
 When heavy external data makes the full case unsuitable for every PR, CI MUST
 still run a deterministic lightweight fixture. The handoff MUST also include a
 dated result from the real clean-data workflow and its second cached run.

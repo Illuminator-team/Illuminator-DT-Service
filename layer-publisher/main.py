@@ -8,6 +8,8 @@ from xml.sax.saxutils import escape
 
 import psycopg2
 import requests
+from grid import GridArtifact, fetch_grid_artifact, get_grid_readiness_signature
+from grid_postgis import sync_grid_layer
 from pc6 import Pc6Record, get_layer_config, load_manifest, load_pc6_records
 from postgis_sql import values_template
 from psycopg2.extras import execute_values
@@ -33,10 +35,31 @@ def required_env(name: str) -> str:
     return value
 
 
+def bbox_env(name: str, default: list[float]) -> list[float]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        values = [float(item.strip()) for item in raw.split(",")]
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must contain four comma-separated numbers") from exc
+    if len(values) != 4:
+        raise RuntimeError(f"{name} must contain four comma-separated numbers")
+    return values
+
+
 MANIFEST_PATH = Path(os.getenv("PUBLISHER_MANIFEST_PATH", "/app/layer-manifest.json"))
 MANIFEST = load_manifest(MANIFEST_PATH)
 PC6_CONFIG = get_layer_config(MANIFEST, "layer:policy-tool:pc6-energy")
 PV_CONFIG = get_layer_config(MANIFEST, "layer:pv-map:capacity")
+GRID_LINES_CONFIG = get_layer_config(MANIFEST, "layer:grid-model:lines")
+GRID_TRANSFORMERS_CONFIG = get_layer_config(
+    MANIFEST, "layer:grid-model:transformers"
+)
+GRID_CONFIGS = {
+    "grid_lines": GRID_LINES_CONFIG,
+    "grid_transformers": GRID_TRANSFORMERS_CONFIG,
+}
 PC6_SOURCE_PATH = Path(os.getenv("PC6_SOURCE_PATH", PC6_CONFIG["source"]["path"]))
 PV_API_URL = os.getenv("PV_API_URL", PV_CONFIG["source"]["base_url"]).rstrip("/")
 PV_EXPECTED_RELEASE_COMMIT = os.getenv(
@@ -44,6 +67,21 @@ PV_EXPECTED_RELEASE_COMMIT = os.getenv(
 )
 PV_EXPECTED_CONTAINER_IMAGE = os.getenv(
     "PV_EXPECTED_CONTAINER_IMAGE", PV_CONFIG["source"]["container_image"]
+)
+GRID_API_URL = os.getenv(
+    "GRID_API_URL", GRID_LINES_CONFIG["source"]["base_url"]
+).rstrip("/")
+GRID_EXPECTED_RELEASE_COMMIT = os.getenv(
+    "GRID_EXPECTED_RELEASE_COMMIT", GRID_LINES_CONFIG["source"]["release_commit"]
+)
+GRID_EXPECTED_CONTAINER_DIGEST = os.getenv(
+    "GRID_EXPECTED_CONTAINER_DIGEST",
+    GRID_LINES_CONFIG["source"]["container_digest"],
+)
+GRID_EXPECTED_DATA_MODE = os.getenv("GRID_EXPECTED_DATA_MODE", "real_source")
+GRID_EXPORT_BBOX = bbox_env(
+    "GRID_EXPORT_BBOX",
+    GRID_LINES_CONFIG["source"]["production_selection"]["bbox"],
 )
 
 GEOSERVER_REST_URL = os.getenv(
@@ -70,6 +108,9 @@ PC6_TABLE = PC6_CONFIG["table"]
 PC6_LAYER = PC6_CONFIG["geoserver_layer"]
 PV_TABLE = PV_CONFIG["table"]
 PV_LAYER = PV_CONFIG["geoserver_layer"]
+GRID_TABLES = {
+    layer_id: config["table"] for layer_id, config in GRID_CONFIGS.items()
+}
 SOLAR_TABLE = "solar_panel_layer"
 SOLAR_LAYER = "solar_panel_layer"
 
@@ -523,6 +564,37 @@ def publish_pv() -> PvArtifact:
     return artifact
 
 
+def publish_grid() -> GridArtifact:
+    artifact = fetch_grid_artifact(
+        GRID_API_URL,
+        bbox=GRID_EXPORT_BBOX,
+        expected_release_commit=GRID_EXPECTED_RELEASE_COMMIT,
+        expected_container_digest=GRID_EXPECTED_CONTAINER_DIGEST,
+        expected_model_version=GRID_LINES_CONFIG["model_version"],
+        expected_contract_version=GRID_LINES_CONFIG["metadata_contract_version"],
+        expected_data_mode=GRID_EXPECTED_DATA_MODE,
+    )
+    for layer_id, config in GRID_CONFIGS.items():
+        stats = sync_grid_layer(
+            DB_CONN,
+            table=GRID_TABLES[layer_id],
+            layer_id=layer_id,
+            artifact=artifact,
+        )
+        ensure_feature_type(
+            config["geoserver_layer"], config["title"], config["source"]["crs"]
+        )
+        LOGGER.info(
+            "%s synchronized: total=%s changed=%s deleted=%s output=%s",
+            layer_id,
+            stats["total"],
+            stats["changed"],
+            stats["deleted"],
+            artifact.output_ids[layer_id],
+        )
+    return artifact
+
+
 def create_solar_table() -> None:
     with psycopg2.connect(**DB_CONN) as connection:
         with connection.cursor() as cursor:
@@ -592,6 +664,7 @@ def run() -> None:
 
     publish_pc6()
     publish_pv()
+    publish_grid()
     create_solar_table()
     ensure_feature_type(SOLAR_LAYER, "Tutorial Solar Panel", "EPSG:4326")
     try:
@@ -604,6 +677,7 @@ def run() -> None:
 
     last_pc6_signature = source_signature(PC6_SOURCE_PATH)
     last_pv_signature = get_pv_readiness_signature(PV_API_URL)
+    last_grid_signature = get_grid_readiness_signature(GRID_API_URL)
     while True:
         time.sleep(PUBLISH_INTERVAL_SECONDS)
         current_signature = source_signature(PC6_SOURCE_PATH)
@@ -618,6 +692,16 @@ def run() -> None:
         except (RuntimeError, ValueError):
             LOGGER.warning(
                 "Could not check or refresh the PV capacity layer",
+                exc_info=True,
+            )
+        try:
+            current_grid_signature = get_grid_readiness_signature(GRID_API_URL)
+            if current_grid_signature != last_grid_signature:
+                publish_grid()
+                last_grid_signature = current_grid_signature
+        except (RuntimeError, ValueError):
+            LOGGER.warning(
+                "Could not check or refresh the grid layers",
                 exc_info=True,
             )
         try:
