@@ -292,6 +292,74 @@ function updateLegend() {
 // Global object to store local overrides
 // Format: { "1811AA": { gas: 0.5, pv: 2.0 }, ... }
 let postcodeScenarios = {};
+let selectedScenarioPostcode = null;
+let selectedScenarioProperties = null;
+let scenarioDraft = { gas: 1.0, pv: 1.0, modified: false };
+let scenarioRunning = false;
+
+function getActiveScenario() {
+    return selectedScenarioPostcode
+        ? postcodeScenarios[selectedScenarioPostcode]
+        : scenarioDraft;
+}
+
+function updateScenarioControls() {
+    const scenario = getActiveScenario();
+    const target = document.getElementById('scenario-target');
+    const targetValue = document.getElementById('scenario-target-value');
+    const runButton = document.getElementById('run-sim-btn');
+
+    document.getElementById('input-gas').value = scenario.gas * 100;
+    document.getElementById('input-pv').value = scenario.pv * 100;
+    document.getElementById('pct-gas').innerText = `${Math.round(scenario.gas * 100)}%`;
+    document.getElementById('pct-pv').innerText = `${Math.round(scenario.pv * 100)}%`;
+
+    target.dataset.state = selectedScenarioPostcode ? 'selected' : 'empty';
+    targetValue.innerText = selectedScenarioPostcode || 'No PC6 selected';
+    runButton.disabled = !selectedScenarioPostcode || scenarioRunning;
+    runButton.title = selectedScenarioPostcode
+        ? `Run scenario for ${selectedScenarioPostcode}`
+        : 'Select a PC6 feature or search for a postcode before running';
+}
+
+function selectScenarioTarget(prop) {
+    const pc = prop.postcode6;
+    if (!postcodeScenarios[pc]) {
+        postcodeScenarios[pc] = { ...scenarioDraft };
+    }
+    selectedScenarioPostcode = pc;
+    selectedScenarioProperties = prop;
+    updateScenarioControls();
+}
+
+function initializeScenarioControls() {
+    document.getElementById('input-gas').addEventListener('input', (event) => {
+        const scenario = getActiveScenario();
+        scenario.gas = event.target.value / 100;
+        scenario.modified = true;
+        document.getElementById('pct-gas').innerText = `${event.target.value}%`;
+        if (selectedScenarioProperties) refreshVisuals(selectedScenarioProperties);
+    });
+
+    document.getElementById('input-pv').addEventListener('input', (event) => {
+        const scenario = getActiveScenario();
+        scenario.pv = event.target.value / 100;
+        scenario.modified = true;
+        document.getElementById('pct-pv').innerText = `${event.target.value}%`;
+        if (selectedScenarioProperties) refreshVisuals(selectedScenarioProperties);
+    });
+
+    document.getElementById('run-sim-btn').addEventListener('click', () => {
+        if (!selectedScenarioPostcode) return;
+        runPythonSimulation(
+            selectedScenarioPostcode,
+            postcodeScenarios[selectedScenarioPostcode]
+        );
+    });
+
+    updateScenarioControls();
+}
+
 
 function getCalculatedValue(feature, metric) {
     const pc = feature.properties.postcode6;
@@ -315,10 +383,7 @@ function getCalculatedValue(feature, metric) {
 function updateSidePanel(prop) {
     const pc = prop.postcode6;
     
-    // Ensure the scenario object exists
-    if (!postcodeScenarios[pc]) {
-        postcodeScenarios[pc] = { gas: 1.0, pv: 1.0, modified: false };
-    }
+    selectScenarioTarget(prop);
     const s = postcodeScenarios[pc];
 
     const actualGas = prop.p6_gasm3_2023 || 0;
@@ -373,37 +438,6 @@ function updateSidePanel(prop) {
             </div>
         </div>
 
-        <div class="sidebar-controls">
-            <div class="control-label" style="margin-bottom:15px; color:var(--accent-red)">Local Scenario Parameters</div>
-            <div class="slider-unit">
-                <div class="slider-header">
-                    <span class="slider-label">Gas Demand</span>
-                    <span class="slider-pct" id="pct-gas">${Math.round(s.gas * 100)}%</span>
-                </div>
-                <input type="range" class="side-slider" id="input-gas" min="0" max="100" value="${s.gas * 100}">
-            </div>
-
-            <div class="slider-unit">
-                <div class="slider-header">
-                    <span class="slider-label">PV Adoption</span>
-                    <span class="slider-pct" id="pct-pv">${Math.round(s.pv * 100)}%</span>
-                </div>
-                <input type="range" class="side-slider" id="input-pv" min="100" max="500" value="${s.pv * 100}">
-            </div>
-
-            <div class="simulation-actions" style="margin-top: 25px;">
-                <button id="run-sim-btn" class="primary-btn">RUN POLICY SIMULATION</button>
-            </div>
-
-            <div id="simulation-output" style="margin-top: 20px; display: none;">
-                <div class="control-label">Simulation Result</div>
-                <div id="graph-container" style="width: 100%; height: 200px; background: #f9f9f9; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; border-radius: 4px;">
-                    <span style="font-size: 10px; color: #999;">Graph will render here...</span>
-                </div>
-                <a id="download-link" href="#" style="display: block; margin-top: 10px; font-size: 10px; color: var(--primary-dark); text-decoration: underline;">Download processed_data.csv</a>
-            </div>
-        </div>
-
         <div style="margin-top:40px; font-size:9px; color:var(--text-muted); line-height:1.5;">
             <strong>METHODOLOGY</strong><br>
             Geometry: CBS 2021 PC6 Boundaries.<br>
@@ -417,24 +451,6 @@ function updateSidePanel(prop) {
         </div>
     `;
 
-    // Re-attach listeners because innerHTML wipes them
-    document.getElementById('input-gas').addEventListener('input', (e) => {
-        postcodeScenarios[pc].gas = e.target.value / 100;
-        postcodeScenarios[pc].modified = true;
-        document.getElementById('pct-gas').innerText = e.target.value + "%";
-        refreshVisuals(prop);
-    });
-
-    document.getElementById('input-pv').addEventListener('input', (e) => {
-        postcodeScenarios[pc].pv = e.target.value / 100;
-        postcodeScenarios[pc].modified = true;
-        document.getElementById('pct-pv').innerText = e.target.value + "%";
-        refreshVisuals(prop);
-    });
-
-    document.getElementById('run-sim-btn').addEventListener('click', () => {
-        runPythonSimulation(pc, postcodeScenarios[pc]);
-    });
 }
 
 function escapeHtml(value) {
@@ -493,11 +509,11 @@ function updatePvSidePanel(prop) {
 
 function refreshVisuals(originalProps) {
     // This forces Leaflet to re-calculate the styles and patterns
-    pc6Layer.setStyle(style); 
-    
-    // ... update the numeric columns as before ...
-    const pc = originalProps.postcode6;
-    document.getElementById('sim-col').classList.add('active');
+    if (pc6Layer) pc6Layer.setStyle(style);
+
+    const simulatedColumn = document.getElementById('sim-col');
+    if (!simulatedColumn) return;
+    simulatedColumn.classList.add('active');
     
     const scenarioGas = getCalculatedValue({properties: originalProps}, 'gas');
     const scenarioElec = getCalculatedValue({properties: originalProps}, 'elec');
@@ -535,6 +551,7 @@ async function runPythonSimulation(postcode, scenario) {
     btn.innerText = "RUNNING BACKEND...";
     btn.disabled = true;
 
+    scenarioRunning = true;
     // Sanitize inputs
     const pc6 = postcode.replace(/\s+/g, '').toUpperCase();
     const electrification = (1 - scenario.gas).toFixed(2);
@@ -585,7 +602,7 @@ async function runPythonSimulation(postcode, scenario) {
         `;
 
         graphContainer.innerHTML = '<canvas id="chartCanvas"></canvas>';
-            output.style.display = "block";
+            output.hidden = false;
             renderEnergyChart('chartCanvas', lastCsvData, false);
 
     } catch (err) {
@@ -593,8 +610,9 @@ async function runPythonSimulation(postcode, scenario) {
         alert(`Error: ${err.message === 'BACKEND_ERROR' ? 'The simulation script failed.' : 'Could not retrieve simulation results.'}`);
     } finally {
         // Reset UI state
-        btn.innerText = "RUN SIMULATION";
-        btn.disabled = false;
+        scenarioRunning = false;
+        btn.innerText = "RUN SCENARIO";
+        updateScenarioControls();
     }
 }
 
@@ -688,4 +706,5 @@ function openChartModal() {
 }
 
 // Run
+initializeScenarioControls();
 loadMap();
