@@ -119,6 +119,12 @@ function getPvColor(value) {
            value > 1000 ? '#addd8e' : value > 0 ? '#d9f0a3' : '#f0f0f0';
 }
 
+function getConsumptionColor(value) {
+    return value > 30000000 ? '#54278f' : value > 15000000 ? '#756bb1' :
+           value > 7500000 ? '#9e9ac8' : value > 3000000 ? '#cbc9e2' :
+           value > 1000000 ? '#dadaeb' : value > 0 ? '#f2f0f7' : '#f0f0f0';
+}
+
 // // Styling Function
 // function style(feature) {
 //     const val = currentMetric === 'gas' ? feature.properties.p6_gasm3_2023 : feature.properties.p6_kwh_2023;
@@ -791,6 +797,21 @@ function updateLegend() {
             const config = HEAT_LAYER_UI[currentMetric];
             div.innerHTML = '<div class="legend-title">HEAT EVIDENCE</div>';
             div.innerHTML += `<i style="background:${config.color}"></i> ${config.title}<br>`;
+            return div;
+        }
+        if (currentMetric === 'ev_chargers') {
+            div.innerHTML = '<div class="legend-title">PUBLIC EV CHARGERS</div>';
+            div.innerHTML += '<i class="point-legend" style="background:#008b8b"></i> Charging location<br>';
+            return div;
+        }
+        if (currentMetric === 'consumption_areas') {
+            const grades = [0, 1000000, 3000000, 7500000, 15000000, 30000000];
+            div.innerHTML = '<div class="legend-title">ANNUAL ELECTRICITY (kWh)</div>';
+            grades.forEach((grade, index) => {
+                const upper = grades[index + 1];
+                const label = `${(grade / 1000000).toLocaleString('nl-NL')}${upper ? `-${upper / 1000000}` : '+'} M`;
+                div.innerHTML += `<i style="background:${getConsumptionColor(grade + 1)}"></i> ${label}<br>`;
+            });
             return div;
         }
         const isPvCapacity = currentMetric === 'pv_capacity';

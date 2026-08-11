@@ -68,6 +68,14 @@ services:
       traefik.http.routers.ev-api.entrypoints: web
       traefik.http.routers.ev-api.tls: "false"
 
+  ev-api:
+    labels:
+      traefik.http.routers.ev-api.rule: Host(`localhost`) && PathPrefix(`/models/ev`)
+
+  consumption-api:
+    labels:
+      traefik.http.routers.consumption-api.rule: Host(`localhost`) && PathPrefix(`/models/consumption`)
+
   layer-publisher:
     environment:
       WIND_EXPECTED_DATA_MODE: fixture

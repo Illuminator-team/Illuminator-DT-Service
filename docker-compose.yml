@@ -13,6 +13,15 @@ x-heat-image: &heat-image
 x-ev-image: &ev-image
   image: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
 
+x-ev-image: &ev-image
+  image: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+
+x-consumption-image: &consumption-image
+  image: ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba
+
+x-consumption-cache-image: &consumption-cache-image
+  image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:9fbdb8f0308f6db4427de594dfd1173b1feb0447a278b12ab7e63811fe5edee4
+
 x-pv-cache-image: &pv-cache-image
   image: ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b
 
@@ -65,6 +74,7 @@ services:
 
   pv-api:
     <<: *pv-image
+    init: true
     environment:
       PV_RAW_CACHE_DIR: /app/data/raw
       PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
@@ -120,6 +130,7 @@ services:
 
   grid-api:
     <<: *grid-image
+    init: true
     environment:
       GRID_API_DATA_DIR: /data
       GRID_API_CONTAINER_DIGEST: sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4
