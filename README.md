@@ -40,29 +40,82 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 The first start pulls the PV and Grid models by their verified immutable GHCR
 digests. PV runs its one-shot public-source initializer, which can download
 substantial source data and take more than ten minutes; the `pv-raw-cache`
-volume is reused on later starts. The local override initializes Grid from the
-checked-in 22-line/1-transformer Alkmaar acceptance fixture. The production
-Compose path instead runs the model-owned `north-holland-towns` source
-initializer and persists its result in `grid-model-data`.
+volume is reused on later starts. Grid runs the same model-owned
+`north-holland-towns` source initializer used by the production Compose path,
+covering the network from Alkmaar through Schagen, and persists its prepared
+cache in `grid-model-data`. The first full initialization can take multiple
+hours. Compatible real-source caches are reused on later starts before any
+source download; use the model initializer's explicit `--force` option when a
+fresh Liander source rebuild is intended.
+
+To attach an existing verified real-source cache instead of initializing a new
+one, select its Docker volume explicitly:
+
+```powershell
+$env:GRID_MODEL_DATA_VOLUME = "grid_grid-model-data-v202"
+docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.full-grid.yml up -d --build
+```
+
+`docker-compose.local.yml` never enables fixture mode. The acceptance fixture
+is isolated in `docker-compose.ci.yml` and must only be added deliberately for
+CI or contract testing; using that override replaces the active Grid view with
+the small deterministic test area.
+
+CI adds `docker-compose.ci.yml` to replace only the Grid initializer and
+publisher selection with the checked-in deterministic acceptance fixture:
+
+```shell
+docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml up -d --build
+```
+
+The CI smoke check must likewise declare fixture mode explicitly:
+
+```shell
+python tests/smoke_stack.py --base-url http://127.0.0.1 --expected-grid-data-mode fixture
+```
 
 Local endpoints:
 
-- dashboard: https://localhost/dashboard/
-- GeoServer: https://localhost/geoserver/web/
-- PV model API: https://localhost/models/pv/docs
-- Grid model API: https://localhost/models/grid/docs
-- Grafana: https://localhost/grafana/
+- dashboard: http://illuminator.localhost/dashboard/
+- GeoServer: http://illuminator.localhost/geoserver/web/
+- PV model API: http://illuminator.localhost/models/pv/docs
+- Grid model API: http://illuminator.localhost/models/grid/docs
+- Grafana: http://illuminator.localhost/grafana/
 - Redis Insight: http://localhost:5540/
 - Traefik dashboard: http://localhost:8080/dashboard/
 
-The browser may require one-time acceptance of a self-signed development
-certificate. The dashboard loads `rdp:policy_tool_pc6_energy` from GeoServer
+The local override uses HTTP so development does not depend on trusting a
+self-signed certificate. `localhost` and `127.0.0.1` are also accepted, but
+`illuminator.localhost` avoids previously cached HTTPS redirects. The dashboard
+loads `rdp:policy_tool_pc6_energy` from GeoServer
 WFS and automatically falls back to the checked-in GeoJSON if WFS is
 temporarily unavailable. The independent `rdp:pv_capacity` layer is loaded
 from GeoServer WFS without substituting consumption data when it is unavailable.
-The independent `rdp:grid_lines` and `rdp:grid_transformers` layers are likewise
-loaded from GeoServer WFS. Selecting either Grid layer changes the map and
-feature details while leaving the congestion scenario controls available.
+The Grid view loads `rdp:grid_lines`, `rdp:grid_transformers`,
+`rdp:grid_lv_mv_transformer_reach`, and
+`rdp:grid_mv_hv_transformer_reach` from GeoServer WFS. Its checkboxes
+independently control every voltage tier, both transformer types, and both
+PC6 share maps. Selecting a grid feature changes only the details panel, so
+the congestion scenario controls remain available.
+
+Normal local initialization passes
+`policy-tool-frontend/data/alkmaar_energy_map.geojson` to the grid model with
+`--pc6-geojson`. The reach layers therefore cover those Alkmaar PC6 polygons
+while the grid components themselves extend through Schagen. A future,
+wider consumption-model PC6 export can replace this input without changing
+the layer or API contracts. Accepted PC6 identifiers are `pc6_id`,
+`postcode6`, or `postcode`; geometry must be Polygon or MultiPolygon.
+
+After the full local initializer and publisher have completed, verify that the
+published topology extends through Schagen and that both reach layers preserve
+matching PC6 coverage and valid transformer shares:
+
+```shell
+python tests/check_full_grid.py --base-url http://127.0.0.1
+```
+
+The check requires real-source mode, all three voltage levels, seven named
+MV/HV roots, northern grid geometry, and consistent LV/MV and MV/HV PC6 shares.
 
 Run the PC6, PV, and Grid publication contracts and frontend layer-adapter tests:
 
@@ -75,7 +128,7 @@ node --test tests/map-data.test.js
 With the stack running, execute the integrated smoke test:
 
 ```shell
-python tests/smoke_stack.py --base-url https://localhost
+python tests/smoke_stack.py --base-url http://127.0.0.1
 ```
 
 ## Documentation

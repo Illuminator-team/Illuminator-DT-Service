@@ -11,13 +11,21 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let pc6Layer;
 let pvLayer;
-let gridLinesLayer;
-let gridTransformersLayer;
+let gridLineLayers = {};
+let gridTransformerLayers = {};
+let gridLvMvReachLayer;
+let gridMvHvReachLayer;
+let gridHasFit = false;
 let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
 let pvLayerSource = 'loading';
-let gridLinesLayerSource = 'loading';
-let gridTransformersLayerSource = 'loading';
+const gridLayerSources = {
+    grid_lines: 'loading',
+    grid_transformers: 'loading',
+    grid_lv_mv_transformer_reach: 'loading',
+    grid_mv_hv_transformer_reach: 'loading'
+};
+const gridCanvasRenderer = L.canvas({ padding: 0.5 });
 
 // Unified Color Logic
 function getColor(d, type) {
@@ -156,30 +164,64 @@ function gridTransformerStyle(feature) {
     };
 }
 
-// Data Loading
-function updateLayerStatus(layerName, source, fallbackReason = null) {
-    if (layerName === 'pv_capacity') {
-        pvLayerSource = source;
-    } else if (layerName === 'grid_lines') {
-        gridLinesLayerSource = source;
-    } else if (layerName === 'grid_transformers') {
-        gridTransformersLayerSource = source;
-    } else {
-        pc6LayerSource = source;
-    }
-    const activeLayer = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
-    if (activeLayer !== layerName) return;
+function getReachColor(componentId) {
+    const colors = ['#16845b', '#9b5d18', '#7a4c9f', '#227ca3', '#a33f50', '#587c2d', '#8b6d1f'];
+    const hash = String(componentId || '').split('').reduce(
+        (value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0,
+        0
+    );
+    return colors[hash % colors.length];
+}
 
+function gridReachStyle(feature) {
+    const properties = feature.properties || {};
+    const color = getReachColor(
+        properties.dominant_transformer_id || properties.component_id
+    );
+    return {
+        color, weight: 2, opacity: 0.8, fillColor: color, fillOpacity: 0.18,
+        dashArray: properties.is_ambiguous ? '5 4' : null
+    };
+}
+
+// Data Loading
+function renderLayerStatus(source, fallbackReason = null) {
     const status = document.getElementById('layer-source-status');
     status.dataset.state = source;
     status.textContent = source === 'geoserver_wfs'
         ? 'Live GeoServer WFS'
-        : source === 'static_geojson'
-            ? 'Static fallback active'
-            : source === 'failed'
-                ? 'Layer unavailable'
-                : 'Loading layer';
+        : source === 'partial'
+            ? 'Some Grid layers unavailable'
+            : source === 'static_geojson'
+                ? 'Static fallback active'
+                : source === 'failed'
+                    ? 'Layer unavailable'
+                    : 'Loading layer';
     status.title = fallbackReason || '';
+}
+
+function getGridNetworkSource() {
+    const sources = Object.values(gridLayerSources);
+    if (sources.every((source) => source === 'geoserver_wfs')) return 'geoserver_wfs';
+    if (sources.some((source) => source === 'loading')) return 'loading';
+    if (sources.some((source) => source === 'geoserver_wfs')) return 'partial';
+    return 'failed';
+}
+
+function updateLayerStatus(layerName, source, fallbackReason = null) {
+    if (layerName === 'pv_capacity') {
+        pvLayerSource = source;
+    } else if (Object.hasOwn(gridLayerSources, layerName)) {
+        gridLayerSources[layerName] = source;
+    } else {
+        pc6LayerSource = source;
+    }
+    const activeLayer = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
+    if (activeLayer === 'grid_network' && Object.hasOwn(gridLayerSources, layerName)) {
+        renderLayerStatus(getGridNetworkSource(), fallbackReason);
+    } else if (activeLayer === layerName) {
+        renderLayerStatus(source, fallbackReason);
+    }
 }
 
 function refreshLayerStatus() {
@@ -187,17 +229,16 @@ function refreshLayerStatus() {
     const sources = {
         pc6: pc6LayerSource,
         pv_capacity: pvLayerSource,
-        grid_lines: gridLinesLayerSource,
-        grid_transformers: gridTransformersLayerSource
+        grid_network: getGridNetworkSource()
     };
-    updateLayerStatus(activeLayer, sources[activeLayer]);
+    renderLayerStatus(sources[activeLayer]);
 }
 
 function updateLayerQualitySummary() {
     const label = document.getElementById('layer-quality-label');
     const meter = document.getElementById('layer-quality-meter');
     const isPvCapacity = currentMetric === 'pv_capacity';
-    const isGrid = currentMetric.startsWith('grid_');
+    const isGrid = currentMetric === 'grid_network';
     label.textContent = isGrid
         ? 'Datacompleetheid per component'
         : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
@@ -206,25 +247,74 @@ function updateLayerQualitySummary() {
         : 'Layer-level confidence';
 }
 
-function setActiveMapLayer() {
-    const layers = {
-        pc6: pc6Layer,
-        pv_capacity: pvLayer,
-        grid_lines: gridLinesLayer,
-        grid_transformers: gridTransformersLayer
-    };
+function gridControlChecked(id) {
+    return Boolean(document.getElementById(id)?.checked);
+}
+
+function allGridLayers() {
+    return [
+        ...Object.values(gridLineLayers),
+        gridLvMvReachLayer,
+        ...Object.values(gridTransformerLayers),
+        gridMvHvReachLayer
+    ].filter(Boolean);
+}
+
+function selectedGridLayers() {
+    const layers = [];
+    if (gridControlChecked('grid-lv-mv-reach') && gridLvMvReachLayer) layers.push(gridLvMvReachLayer);
+    if (gridControlChecked('grid-mv-hv-reach') && gridMvHvReachLayer) layers.push(gridMvHvReachLayer);
+    if (gridControlChecked('grid-lv-lines') && gridLineLayers.lv) layers.push(gridLineLayers.lv);
+    if (gridControlChecked('grid-mv-lines') && gridLineLayers.mv) layers.push(gridLineLayers.mv);
+    if (gridControlChecked('grid-hv-lines') && gridLineLayers.hv) layers.push(gridLineLayers.hv);
+    if (gridControlChecked('grid-lv-mv-transformers') && gridTransformerLayers.lv_mv) layers.push(gridTransformerLayers.lv_mv);
+    if (gridControlChecked('grid-mv-hv-transformers') && gridTransformerLayers.mv_hv) layers.push(gridTransformerLayers.mv_hv);
+    return layers;
+}
+
+function applyGridVisibility(fit = false) {
+    allGridLayers().forEach((layer) => {
+        if (map.hasLayer(layer)) map.removeLayer(layer);
+    });
+    if (currentMetric !== 'grid_network') return;
+
+    const visibleLayers = selectedGridLayers();
+    visibleLayers.forEach((layer) => layer.addTo(map));
+    Object.values(gridLineLayers).forEach((layer) => {
+        if (map.hasLayer(layer) && layer.bringToFront) layer.bringToFront();
+    });
+    Object.values(gridTransformerLayers).forEach((layer) => {
+        if (map.hasLayer(layer) && layer.bringToFront) layer.bringToFront();
+    });
+    if (fit && visibleLayers.length > 0) {
+        const bounds = L.featureGroup(visibleLayers).getBounds();
+        if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [24, 24] });
+            gridHasFit = true;
+        }
+    }
+}
+
+function updateGridVisibilityPanel() {
+    document.getElementById('grid-visibility').hidden = currentMetric !== 'grid_network';
+}
+
+function setActiveMapLayer(fitActive = false) {
     const activeLayerName = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
-    Object.entries(layers).forEach(([layerName, layer]) => {
+    [[pc6Layer, 'pc6'], [pvLayer, 'pv_capacity']].forEach(([layer, layerName]) => {
         if (layer && layerName !== activeLayerName && map.hasLayer(layer)) {
             map.removeLayer(layer);
         }
     });
-    const activeLayer = layers[activeLayerName];
+    applyGridVisibility(fitActive || (currentMetric === 'grid_network' && !gridHasFit));
+
+    const activeLayer = activeLayerName === 'pc6' ? pc6Layer : activeLayerName === 'pv_capacity' ? pvLayer : null;
     if (activeLayer && !map.hasLayer(activeLayer)) {
         activeLayer.addTo(map);
         if (activeLayerName !== 'pc6') map.fitBounds(activeLayer.getBounds());
     }
     if (activeLayerName === 'pc6' && pc6Layer) pc6Layer.setStyle(style);
+    updateGridVisibilityPanel();
     refreshLayerStatus();
     updateLayerQualitySummary();
     updateLegend();
@@ -296,53 +386,114 @@ async function loadMap() {
 
     try {
         const result = await Pc6MapData.loadGridLinesFeatureCollection(fetch);
-        gridLinesLayer = L.geoJSON(result.data, {
-            style: gridLineStyle,
-            onEachFeature: (feature, layer) => {
-                layer.on({
-                    mouseover: (event) => event.target.setStyle({ weight: 6 }),
-                    mouseout: (event) => gridLinesLayer.resetStyle(event.target),
-                    click: (event) => {
-                        updateGridLineSidePanel(feature.properties);
-                        map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 18 });
-                    }
-                });
-            }
+        ['lv', 'mv', 'hv'].forEach((voltageLevel) => {
+            gridLineLayers[voltageLevel] = L.geoJSON(result.data, {
+                renderer: gridCanvasRenderer,
+                filter: (feature) => feature.properties.voltage_level === voltageLevel,
+                style: gridLineStyle,
+                onEachFeature: (feature, layer) => {
+                    layer.on({
+                        mouseover: (event) => event.target.setStyle({ weight: 6 }),
+                        mouseout: (event) => event.target.setStyle(gridLineStyle(feature)),
+                        click: (event) => {
+                            updateGridLineSidePanel(feature.properties);
+                            map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 18 });
+                        }
+                    });
+                }
+            });
         });
         updateLayerStatus('grid_lines', result.source);
     } catch (error) {
         console.error('Grid lines data load failed:', error);
         updateLayerStatus('grid_lines', 'failed', error.message);
-        const control = document.getElementById('r-grid-lines');
-        control.disabled = true;
-        control.parentElement.title = 'Grid lines layer is unavailable';
+        ['grid-lv-lines', 'grid-mv-lines', 'grid-hv-lines'].forEach((id) => {
+            const control = document.getElementById(id);
+            control.disabled = true;
+            control.parentElement.title = 'Grid lines layer is unavailable';
+        });
     }
 
     try {
         const result = await Pc6MapData.loadGridTransformersFeatureCollection(fetch);
-        gridTransformersLayer = L.geoJSON(result.data, {
-            pointToLayer: (feature, latlng) => L.circleMarker(
-                latlng,
-                gridTransformerStyle(feature)
-            ),
-            onEachFeature: (feature, layer) => {
-                layer.on({
-                    mouseover: (event) => event.target.setStyle({ weight: 4 }),
-                    mouseout: (event) => event.target.setStyle(gridTransformerStyle(feature)),
-                    click: (event) => {
-                        updateGridTransformerSidePanel(feature.properties);
-                        map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 17));
-                    }
-                });
-            }
+        ['lv_mv', 'mv_hv'].forEach((transformerType) => {
+            gridTransformerLayers[transformerType] = L.geoJSON(result.data, {
+                filter: (feature) => feature.properties.transformer_type === transformerType,
+                pointToLayer: (feature, latlng) => L.circleMarker(
+                    latlng,
+                    gridTransformerStyle(feature)
+                ),
+                onEachFeature: (feature, layer) => {
+                    layer.on({
+                        mouseover: (event) => event.target.setStyle({ weight: 4 }),
+                        mouseout: (event) => event.target.setStyle(gridTransformerStyle(feature)),
+                        click: (event) => {
+                            updateGridTransformerSidePanel(feature.properties);
+                            map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 17));
+                        }
+                    });
+                }
+            });
         });
         updateLayerStatus('grid_transformers', result.source);
     } catch (error) {
         console.error('Grid transformer data load failed:', error);
         updateLayerStatus('grid_transformers', 'failed', error.message);
-        const control = document.getElementById('r-grid-transformers');
+        ['grid-lv-mv-transformers', 'grid-mv-hv-transformers'].forEach((id) => {
+            const control = document.getElementById(id);
+            control.disabled = true;
+            control.parentElement.title = 'Grid transformer layer is unavailable';
+        });
+    }
+    try {
+        const result = await Pc6MapData.loadGridLvMvReachFeatureCollection(fetch);
+        gridLvMvReachLayer = L.geoJSON(result.data, {
+            renderer: gridCanvasRenderer,
+            style: gridReachStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 4, fillOpacity: 0.22 }),
+                    mouseout: (event) => event.target.setStyle(gridReachStyle(feature)),
+                    click: (event) => {
+                        updateGridReachSidePanel(feature.properties, 'LV/MV');
+                        map.fitBounds(event.target.getBounds(), { padding: [40, 40] });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('grid_lv_mv_transformer_reach', result.source);
+    } catch (error) {
+        console.error('Grid LV/MV transformer reach load failed:', error);
+        updateLayerStatus('grid_lv_mv_transformer_reach', 'failed', error.message);
+        const control = document.getElementById('grid-lv-mv-reach');
         control.disabled = true;
-        control.parentElement.title = 'Grid transformer layer is unavailable';
+        control.parentElement.title = 'LV/MV transformer reach layer is unavailable';
+    }
+
+
+    try {
+        const result = await Pc6MapData.loadGridMvHvReachFeatureCollection(fetch);
+        gridMvHvReachLayer = L.geoJSON(result.data, {
+            renderer: gridCanvasRenderer,
+            style: gridReachStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 4, fillOpacity: 0.22 }),
+                    mouseout: (event) => event.target.setStyle(gridReachStyle(feature)),
+                    click: (event) => {
+                        updateGridReachSidePanel(feature.properties, 'MV/HV');
+                        map.fitBounds(event.target.getBounds(), { padding: [40, 40] });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('grid_mv_hv_transformer_reach', result.source);
+    } catch (error) {
+        console.error('Grid MV/HV transformer reach load failed:', error);
+        updateLayerStatus('grid_mv_hv_transformer_reach', 'failed', error.message);
+        const control = document.getElementById('grid-mv-hv-reach');
+        control.disabled = true;
+        control.parentElement.title = 'MV/HV transformer reach layer is unavailable';
     }
 
     setActiveMapLayer();
@@ -377,22 +528,23 @@ function updateLegend() {
 
     legend.onAdd = function () {
         const div = L.DomUtil.create('div', 'info legend');
-        if (currentMetric === 'grid_lines') {
-            div.innerHTML = '<div class="legend-title">GRID VOLTAGE</div>';
-            [
-                ['lv', 'Low voltage'],
-                ['mv', 'Medium voltage'],
-                ['hv', 'High voltage'],
-                ['unknown', 'Unknown']
-            ].forEach(([level, label]) => {
-                div.innerHTML += `<i style="background:${getGridLineColor(level)}"></i> ${label}<br>`;
+        if (currentMetric === 'grid_network') {
+            div.innerHTML = '<div class="legend-title">ELECTRICITY GRID</div>';
+            const entries = [
+                ['grid-lv-lines', '#c43d4f', 'LV lines'],
+                ['grid-mv-lines', '#2378a7', 'MV lines'],
+                ['grid-hv-lines', '#24292e', 'HV lines'],
+                ['grid-lv-mv-transformers', '#7651a8', 'LV / MV transformers'],
+                ['grid-mv-hv-transformers', '#e58c2c', 'MV / HV transformers'],
+                ['grid-lv-mv-reach', '#7a4c9f', 'LV / MV reach (PC6 shares)'],
+                ['grid-mv-hv-reach', '#16845b', 'MV / HV reach (PC6 shares)']
+            ];
+            entries.filter(([id]) => gridControlChecked(id)).forEach(([, color, label]) => {
+                div.innerHTML += `<i style="background:${color}"></i> ${label}<br>`;
             });
-            return div;
-        }
-        if (currentMetric === 'grid_transformers') {
-            div.innerHTML = '<div class="legend-title">TRANSFORMER TYPE</div>';
-            div.innerHTML += '<i style="background:#7651a8"></i> LV / MV<br>';
-            div.innerHTML += '<i style="background:#e58c2c"></i> MV / HV<br>';
+            if (selectedGridLayers().length === 0) {
+                div.innerHTML += 'No grid components selected';
+            }
             return div;
         }
         const isPvCapacity = currentMetric === 'pv_capacity';
@@ -454,6 +606,18 @@ function selectScenarioTarget(prop) {
     selectedScenarioPostcode = pc;
     selectedScenarioProperties = prop;
     updateScenarioControls();
+}
+
+function selectScenarioTargetByPc6(pc6Id) {
+    if (!pc6Layer || !pc6Id) return;
+    const normalized = String(pc6Id).replace(/\s+/g, '').toUpperCase();
+    pc6Layer.eachLayer((layer) => {
+        const properties = layer.feature?.properties || {};
+        const candidate = String(properties.postcode6 || '')
+            .replace(/\s+/g, '')
+            .toUpperCase();
+        if (candidate === normalized) selectScenarioTarget(properties);
+    });
 }
 
 function initializeScenarioControls() {
@@ -714,6 +878,94 @@ function updateGridTransformerSidePanel(prop) {
     `;
 }
 
+function parseReachShares(value) {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string' || value.length === 0) return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        console.warn('Invalid ranked transformer shares:', error);
+        return [];
+    }
+}
+
+function formatReachShare(value) {
+    if (value == null || value === '') return 'Not applicable';
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+        ? `${numeric.toLocaleString('nl-NL', { maximumFractionDigits: 1 })}%`
+        : 'Not applicable';
+}
+
+function updateGridReachSidePanel(prop, level) {
+    const shares = parseReachShares(prop.ranked_shares ?? prop.ranked_shares_json);
+    selectScenarioTargetByPc6(prop.pc6_id);
+    const dominantName = prop.dominant_transformer_name || prop.dominant_transformer_id;
+    const runnerUpName = prop.runner_up_transformer_name || prop.runner_up_transformer_id;
+    const matchedLength = prop.matched_lv_cable_length_m == null
+        ? 'Not available'
+        : `${Number(prop.matched_lv_cable_length_m).toLocaleString('nl-NL', {
+            maximumFractionDigits: 1
+        })} m`;
+    const evidence = prop.fallback_used
+        ? `Nearest LV bus (${Number(prop.fallback_distance_m || 0).toLocaleString('nl-NL', {
+            maximumFractionDigits: 1
+        })} m)`
+        : 'LV cable length inside PC6';
+    const ambiguity = prop.is_ambiguous
+        ? 'Close result'
+        : prop.has_overlap ? 'Multiple shares, clear leader' : 'Single transformer';
+    const sharesMarkup = shares.map((share) => `
+        <div class="reach-share-row">
+            <span>${escapeHtml(share.transformer_name || share.transformer_id)}</span>
+            <strong>${formatReachShare(share.share_percent)}</strong>
+        </div>
+    `).join('');
+
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">${escapeHtml(prop.pc6_id)}</div>
+        <div class="feature-identifier">${escapeHtml(level)} transformer reach</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Dominant transformer</div>
+                    <div class="data-value compact-value">${escapeHtml(dominantName)}</div>
+                    <div class="share-value">${formatReachShare(prop.dominant_transformer_share_percent)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Runner-up</div>
+                    <div class="data-value compact-value">${escapeHtml(runnerUpName || 'None')}</div>
+                    <div class="share-value">${formatReachShare(prop.runner_up_transformer_share_percent)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Assignment evidence</div>
+                    <div class="data-value compact-value">${escapeHtml(evidence)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Matched LV cable</div>
+                    <div class="data-value">${escapeHtml(matchedLength)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Share confidence</div>
+                    <div class="data-value compact-value">${escapeHtml(ambiguity)}</div>
+                </div>
+            </div>
+        </div>
+        <div class="reach-shares">
+            <div class="data-label">All absolute PC6 shares</div>
+            ${sharesMarkup || '<div class="compact-value">No share breakdown available</div>'}
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>PC6-BASED MODEL ASSIGNMENT</strong><br>
+            ${escapeHtml(level)} shares are direct fractions of the original PC6 polygon.<br>
+            Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+            <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
 function refreshVisuals(originalProps) {
     // This forces Leaflet to re-calculate the styles and patterns
     if (pc6Layer) pc6Layer.setStyle(style);
@@ -741,7 +993,14 @@ document.getElementById('search-input').addEventListener('keypress', (e) => {
 document.querySelectorAll('input[name="layer"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
         currentMetric = e.target.value;
-        setActiveMapLayer();
+        setActiveMapLayer(true);
+    });
+});
+
+document.querySelectorAll('#grid-visibility input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+        applyGridVisibility();
+        updateLegend();
     });
 });
 

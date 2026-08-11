@@ -56,9 +56,17 @@ GRID_LINES_CONFIG = get_layer_config(MANIFEST, "layer:grid-model:lines")
 GRID_TRANSFORMERS_CONFIG = get_layer_config(
     MANIFEST, "layer:grid-model:transformers"
 )
+GRID_LV_MV_REACH_CONFIG = get_layer_config(
+    MANIFEST, "layer:grid-model:lv-mv-transformer-reach"
+)
+GRID_MV_HV_REACH_CONFIG = get_layer_config(
+    MANIFEST, "layer:grid-model:mv-hv-transformer-reach"
+)
 GRID_CONFIGS = {
     "grid_lines": GRID_LINES_CONFIG,
     "grid_transformers": GRID_TRANSFORMERS_CONFIG,
+    "grid_lv_mv_transformer_reach": GRID_LV_MV_REACH_CONFIG,
+    "grid_mv_hv_transformer_reach": GRID_MV_HV_REACH_CONFIG,
 }
 PC6_SOURCE_PATH = Path(os.getenv("PC6_SOURCE_PATH", PC6_CONFIG["source"]["path"]))
 PV_API_URL = os.getenv("PV_API_URL", PV_CONFIG["source"]["base_url"]).rstrip("/")
@@ -592,6 +600,9 @@ def publish_grid() -> GridArtifact:
             stats["deleted"],
             artifact.output_ids[layer_id],
         )
+    reset_response = geoserver_request("POST", "reset")
+    reset_response.raise_for_status()
+    LOGGER.info("Reset GeoServer datastore connections after Grid publication")
     return artifact
 
 

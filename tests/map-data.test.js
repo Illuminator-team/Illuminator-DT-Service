@@ -127,7 +127,7 @@ test('keeps congestion controls outside layer-specific details', () => {
     assert.match(script, /function updatePvSidePanel\(prop\)/);
 });
 
-test('loads grid lines and transformers as independent GeoServer layers', async () => {
+test('loads grid lines, transformers, and both PC6 reach maps as independent GeoServer layers', async () => {
     const calls = [];
     const payload = collection({
         component_id: 'grid-line-test',
@@ -140,12 +140,18 @@ test('loads grid lines and transformers as independent GeoServer layers', async 
 
     const lines = await mapData.loadGridLinesFeatureCollection(fetchImpl);
     const transformers = await mapData.loadGridTransformersFeatureCollection(fetchImpl);
+    const lvMvReach = await mapData.loadGridLvMvReachFeatureCollection(fetchImpl);
+    const reach = await mapData.loadGridMvHvReachFeatureCollection(fetchImpl);
 
     assert.equal(lines.source, 'geoserver_wfs');
     assert.equal(transformers.source, 'geoserver_wfs');
+    assert.equal(reach.source, 'geoserver_wfs');
+    assert.equal(lvMvReach.source, 'geoserver_wfs');
     assert.deepEqual(calls, [
         mapData.GRID_LINES_WFS_URL,
-        mapData.GRID_TRANSFORMERS_WFS_URL
+        mapData.GRID_TRANSFORMERS_WFS_URL,
+        mapData.GRID_LV_MV_REACH_WFS_URL,
+        mapData.GRID_MV_HV_REACH_WFS_URL
     ]);
 });
 
@@ -163,10 +169,22 @@ test('grid details leave the persistent congestion controls in place', () => {
     const html = fs.readFileSync(path.join(frontendDirectory, 'index.html'), 'utf8');
     const script = fs.readFileSync(path.join(frontendDirectory, 'script.js'), 'utf8');
 
-    assert.match(html, /id="r-grid-lines"/);
-    assert.match(html, /id="r-grid-transformers"/);
+    assert.match(html, /id="r-grid-network"/);
+    assert.match(html, /id="grid-lv-lines"/);
+    assert.match(html, /id="grid-mv-lines"/);
+    assert.match(html, /id="grid-hv-lines"/);
+    assert.match(html, /id="grid-lv-mv-transformers"/);
+    assert.match(html, /id="grid-mv-hv-transformers"/);
+    assert.match(html, /id="grid-lv-mv-reach"/);
+    assert.match(html, /id="grid-mv-hv-reach"/);
     assert.match(script, /function updateGridLineSidePanel\(prop\)/);
     assert.match(script, /function updateGridTransformerSidePanel\(prop\)/);
+    assert.match(script, /function updateGridReachSidePanel\(prop, level\)/);
+    assert.match(script, /ranked_shares_json/);
+    assert.doesNotMatch(script, /COARSE MODEL-ESTIMATED REACH/);
+    assert.match(script, /function selectScenarioTargetByPc6\(pc6Id\)/);
+    assert.match(script, /updateGridReachSidePanel[\s\S]{0,250}selectScenarioTargetByPc6/);
+    assert.match(script, /function applyGridVisibility\(fit = false\)/);
     assert.equal((html.match(/id="run-sim-btn"/g) || []).length, 1);
     assert.doesNotMatch(script, /updateGridLineSidePanel[\s\S]{0,200}selectScenarioTarget/);
 });
