@@ -158,6 +158,52 @@ test('does not substitute another layer when a grid WFS request fails', async ()
     );
 });
 
+test('loads public EV chargers as an independent GeoServer layer', async () => {
+    const calls = [];
+    const payload = collection({
+        feature_id: 'ev-charger-NL-ALL-NLLOC018787',
+        address: 'Diamantweg 10',
+        connector_count: 6,
+        datacompleetheid: 2
+    });
+    const result = await mapData.loadEvChargersFeatureCollection(async (url) => {
+        calls.push(url);
+        return response(true, 200, payload);
+    });
+
+    assert.equal(result.source, 'geoserver_wfs');
+    assert.equal(result.data.features[0].properties.connector_count, 6);
+    assert.deepEqual(calls, [mapData.EV_CHARGERS_WFS_URL]);
+});
+
+test('loads the new consumption map beside the legacy PC6 layer', async () => {
+    const calls = [];
+    const payload = collection({
+        feature_id: 'consumption-electricity-area-bu03610308',
+        spatial_unit_code: 'BU03610308',
+        spatial_unit_type: 'buurt',
+        annual_electricity_kwh: 40002398.257121,
+        datacompleetheid: 2
+    });
+    const result = await mapData.loadConsumptionAreasFeatureCollection(async (url) => {
+        calls.push(url);
+        return response(true, 200, payload);
+    });
+
+    assert.equal(result.source, 'geoserver_wfs');
+    assert.equal(result.data.features[0].properties.spatial_unit_code, 'BU03610308');
+    assert.deepEqual(calls, [mapData.CONSUMPTION_AREAS_WFS_URL]);
+});
+
+test('does not substitute another layer when EV WFS fails', async () => {
+    await assert.rejects(
+        () => mapData.loadEvChargersFeatureCollection(
+            async () => response(false, 503, {})
+        ),
+        /HTTP 503/
+    );
+});
+
 test('grid details leave the persistent congestion controls in place', () => {
     const frontendDirectory = path.join(__dirname, '..', 'policy-tool-frontend');
     const html = fs.readFileSync(path.join(frontendDirectory, 'index.html'), 'utf8');

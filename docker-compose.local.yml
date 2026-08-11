@@ -27,6 +27,14 @@ services:
     labels:
       traefik.http.routers.grid-api.rule: Host(`localhost`) && PathPrefix(`/models/grid`)
 
+  ev-api:
+    labels:
+      traefik.http.routers.ev-api.rule: Host(`localhost`) && PathPrefix(`/models/ev`)
+
+  consumption-api:
+    labels:
+      traefik.http.routers.consumption-api.rule: Host(`localhost`) && PathPrefix(`/models/consumption`)
+
   layer-publisher:
     environment:
       GRID_EXPECTED_DATA_MODE: fixture

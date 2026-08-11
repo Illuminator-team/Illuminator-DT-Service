@@ -13,11 +13,15 @@ let pc6Layer;
 let pvLayer;
 let gridLinesLayer;
 let gridTransformersLayer;
+let evChargersLayer;
+let consumptionAreasLayer;
 let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
 let pvLayerSource = 'loading';
 let gridLinesLayerSource = 'loading';
 let gridTransformersLayerSource = 'loading';
+let evChargersLayerSource = 'loading';
+let consumptionAreasLayerSource = 'loading';
 
 // Unified Color Logic
 function getColor(d, type) {
@@ -34,6 +38,12 @@ function getPvColor(value) {
     return value > 25000 ? '#005a32' : value > 15000 ? '#238b45' :
            value > 7500 ? '#41ab5d' : value > 3000 ? '#78c679' :
            value > 1000 ? '#addd8e' : value > 0 ? '#d9f0a3' : '#f0f0f0';
+}
+
+function getConsumptionColor(value) {
+    return value > 30000000 ? '#54278f' : value > 15000000 ? '#756bb1' :
+           value > 7500000 ? '#9e9ac8' : value > 3000000 ? '#cbc9e2' :
+           value > 1000000 ? '#dadaeb' : value > 0 ? '#f2f0f7' : '#f0f0f0';
 }
 
 // // Styling Function
@@ -156,6 +166,31 @@ function gridTransformerStyle(feature) {
     };
 }
 
+function consumptionAreaStyle(feature) {
+    const isWijk = feature.properties.spatial_unit_type === 'wijk';
+    const annualConsumption = feature.properties.annual_electricity_consumption_kwh ??
+        feature.properties.annual_electricity_kwh;
+    return {
+        fillColor: getConsumptionColor(Number(annualConsumption || 0)),
+        weight: isWijk ? 2.5 : 0.9,
+        opacity: 0.85,
+        color: isWijk ? '#3f2b63' : '#ffffff',
+        dashArray: isWijk ? '6 4' : null,
+        fillOpacity: isWijk ? 0.3 : 0.68
+    };
+}
+
+function evChargerStyle(feature) {
+    const maximumPower = Number(feature.properties.max_power_kw || 0);
+    return {
+        radius: maximumPower >= 50 ? 7 : maximumPower >= 22 ? 6 : 5,
+        color: '#ffffff',
+        weight: 1.5,
+        fillColor: '#008b8b',
+        fillOpacity: 0.9
+    };
+}
+
 // Data Loading
 function updateLayerStatus(layerName, source, fallbackReason = null) {
     if (layerName === 'pv_capacity') {
@@ -164,6 +199,10 @@ function updateLayerStatus(layerName, source, fallbackReason = null) {
         gridLinesLayerSource = source;
     } else if (layerName === 'grid_transformers') {
         gridTransformersLayerSource = source;
+    } else if (layerName === 'ev_chargers') {
+        evChargersLayerSource = source;
+    } else if (layerName === 'consumption_areas') {
+        consumptionAreasLayerSource = source;
     } else {
         pc6LayerSource = source;
     }
@@ -188,7 +227,9 @@ function refreshLayerStatus() {
         pc6: pc6LayerSource,
         pv_capacity: pvLayerSource,
         grid_lines: gridLinesLayerSource,
-        grid_transformers: gridTransformersLayerSource
+        grid_transformers: gridTransformersLayerSource,
+        ev_chargers: evChargersLayerSource,
+        consumption_areas: consumptionAreasLayerSource
     };
     updateLayerStatus(activeLayer, sources[activeLayer]);
 }
@@ -198,10 +239,14 @@ function updateLayerQualitySummary() {
     const meter = document.getElementById('layer-quality-meter');
     const isPvCapacity = currentMetric === 'pv_capacity';
     const isGrid = currentMetric.startsWith('grid_');
+    const isEv = currentMetric === 'ev_chargers';
+    const isConsumption = currentMetric === 'consumption_areas';
     label.textContent = isGrid
         ? 'Datacompleetheid per component'
-        : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
-    meter.title = (isPvCapacity || isGrid)
+        : isEv ? 'Datacompleetheid 0-2/3'
+            : isConsumption ? 'Datacompleetheid 1-2/3'
+                : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
+    meter.title = (isPvCapacity || isGrid || isEv || isConsumption)
         ? 'Feature-level confidence varies across this layer'
         : 'Layer-level confidence';
 }
@@ -211,7 +256,9 @@ function setActiveMapLayer() {
         pc6: pc6Layer,
         pv_capacity: pvLayer,
         grid_lines: gridLinesLayer,
-        grid_transformers: gridTransformersLayer
+        grid_transformers: gridTransformersLayer,
+        ev_chargers: evChargersLayer,
+        consumption_areas: consumptionAreasLayer
     };
     const activeLayerName = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
     Object.entries(layers).forEach(([layerName, layer]) => {
@@ -292,6 +339,54 @@ async function loadMap() {
         const pvControl = document.getElementById('r-pv-capacity');
         pvControl.disabled = true;
         pvControl.parentElement.title = 'PV capacity layer is unavailable';
+    }
+
+    try {
+        const result = await Pc6MapData.loadConsumptionAreasFeatureCollection(fetch);
+        consumptionAreasLayer = L.geoJSON(result.data, {
+            style: consumptionAreaStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 2.5, color: '#2f3640' }),
+                    mouseout: (event) => consumptionAreasLayer.resetStyle(event.target),
+                    click: (event) => {
+                        updateConsumptionSidePanel(feature.properties);
+                        map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 15 });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('consumption_areas', result.source);
+    } catch (error) {
+        console.error('Consumption area data load failed:', error);
+        updateLayerStatus('consumption_areas', 'failed', error.message);
+        const control = document.getElementById('r-consumption-areas');
+        control.disabled = true;
+        control.parentElement.title = 'Consumption map layer is unavailable';
+    }
+
+    try {
+        const result = await Pc6MapData.loadEvChargersFeatureCollection(fetch);
+        evChargersLayer = L.geoJSON(result.data, {
+            pointToLayer: (feature, latlng) => L.circleMarker(latlng, evChargerStyle(feature)),
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 3 }),
+                    mouseout: (event) => event.target.setStyle(evChargerStyle(feature)),
+                    click: (event) => {
+                        updateEvSidePanel(feature.properties);
+                        map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 16));
+                    }
+                });
+            }
+        });
+        updateLayerStatus('ev_chargers', result.source);
+    } catch (error) {
+        console.error('EV charger data load failed:', error);
+        updateLayerStatus('ev_chargers', 'failed', error.message);
+        const control = document.getElementById('r-ev-chargers');
+        control.disabled = true;
+        control.parentElement.title = 'EV charger layer is unavailable';
     }
 
     try {
@@ -393,6 +488,21 @@ function updateLegend() {
             div.innerHTML = '<div class="legend-title">TRANSFORMER TYPE</div>';
             div.innerHTML += '<i style="background:#7651a8"></i> LV / MV<br>';
             div.innerHTML += '<i style="background:#e58c2c"></i> MV / HV<br>';
+            return div;
+        }
+        if (currentMetric === 'ev_chargers') {
+            div.innerHTML = '<div class="legend-title">PUBLIC EV CHARGERS</div>';
+            div.innerHTML += '<i class="point-legend" style="background:#008b8b"></i> Charging location<br>';
+            return div;
+        }
+        if (currentMetric === 'consumption_areas') {
+            const grades = [0, 1000000, 3000000, 7500000, 15000000, 30000000];
+            div.innerHTML = '<div class="legend-title">ANNUAL ELECTRICITY (kWh)</div>';
+            grades.forEach((grade, index) => {
+                const upper = grades[index + 1];
+                const label = `${(grade / 1000000).toLocaleString('nl-NL')}${upper ? `-${upper / 1000000}` : '+'} M`;
+                div.innerHTML += `<i style="background:${getConsumptionColor(grade + 1)}"></i> ${label}<br>`;
+            });
             return div;
         }
         const isPvCapacity = currentMetric === 'pv_capacity';
@@ -635,12 +745,99 @@ function qualityMarkup(prop) {
     const completeness = Number(prop.datacompleetheid ?? 0);
     const label = escapeHtml(prop.datacompleetheid_label || 'not assessed');
     const summary = escapeHtml(
-        prop.datacompleetheid_summary || 'No quality explanation available.'
+        prop.datacompleetheid_summary || prop.datacompleetheid_explanation ||
+            prop.completeness_reason || 'No quality explanation available.'
     );
     return `
         <div class="feature-quality" data-level="${completeness}" title="${summary}">
             <span class="quality-score">${completeness}/3</span>
             <span><strong>Datacompleetheid</strong><br>${label}</span>
+        </div>
+    `;
+}
+
+function updateEvSidePanel(prop) {
+    const formatNum = (value, digits = 0) => value == null
+        ? 'Unknown'
+        : Number(value).toLocaleString('nl-NL', { maximumFractionDigits: digits });
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">Public EV charger</div>
+        <div class="feature-identifier">${escapeHtml(prop.address || prop.source_feature_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Operator</div>
+                    <div class="data-value">${escapeHtml(prop.operator_name || 'Unknown')}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Connectors</div>
+                    <div class="data-value">${formatNum(prop.available_connector_count)} / ${formatNum(prop.connector_count)} available</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Maximum connector power</div>
+                    <div class="data-value">${formatNum(prop.max_power_kw, 1)} kW</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Modelled annual demand</div>
+                    <div class="data-value">${formatNum(prop.modeled_annual_energy_kwh, 0)} kWh</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Modelled annual peak</div>
+                    <div class="data-value">${formatNum(prop.modeled_annual_peak_kw, 1)} kW</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>PUBLIC CHARGER INVENTORY</strong><br>
+            Profile: ${prop.profile_available ? 'PT15M profile available' : 'No profile available'}<br>
+            Model version: ${escapeHtml(prop.model_version)}<br>
+            <a href="/models/ev/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function updateConsumptionSidePanel(prop) {
+    const formatEnergy = (value) => value == null
+        ? 'Not available at this spatial level'
+        : `${Number(value).toLocaleString('nl-NL', { maximumFractionDigits: 0 })} kWh/year`;
+    const unitType = String(prop.spatial_unit_type || '').toUpperCase();
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">${escapeHtml(prop.name)}</div>
+        <div class="feature-identifier">${escapeHtml(prop.spatial_unit_code)} · ${escapeHtml(unitType)}</div>
+        <div class="data-grid consumption-grid">
+            <div class="data-column">
+                <div class="column-header">Annual electricity</div>
+                <div class="data-group">
+                    <div class="data-label">Combined</div>
+                    <div class="data-value">${formatEnergy(
+                        prop.annual_electricity_consumption_kwh ?? prop.annual_electricity_kwh
+                    )}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Residential</div>
+                    <div class="data-value">${formatEnergy(prop.residential_electricity_kwh)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Business</div>
+                    <div class="data-value">${formatEnergy(prop.business_electricity_kwh)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Services / commerce</div>
+                    <div class="data-value">${formatEnergy(prop.services_commerce_electricity_kwh)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Unknown industrial / business</div>
+                    <div class="data-value">${formatEnergy(prop.unknown_industrial_business_electricity_kwh)}</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>NEW CONSUMPTION MODEL</strong><br>
+            Reference period: ${escapeHtml(prop.source_reference_period)}<br>
+            Spatial allocation: ${escapeHtml(prop.allocation_method)}<br>
+            <a href="/models/consumption/metadata" target="_blank" rel="noopener">Model metadata</a>
         </div>
     `;
 }

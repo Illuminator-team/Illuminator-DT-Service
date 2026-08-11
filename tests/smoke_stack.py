@@ -14,6 +14,8 @@ PC6_LAYER = "policy_tool_pc6_energy"
 PV_LAYER = "pv_capacity"
 GRID_LINES_LAYER = "grid_lines"
 GRID_TRANSFORMERS_LAYER = "grid_transformers"
+EV_LAYER = "public_ev_chargers"
+CONSUMPTION_LAYER = "consumption_electricity_areas"
 PV_FIXTURE = "BU03610302"
 PV_RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
 PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
@@ -21,6 +23,12 @@ GRID_RELEASE_COMMIT = "36bfcfbdca4030068a2ec1e2677bf2b334bb4a46"
 GRID_CONTAINER_DIGEST = "sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2"
 GRID_BBOX = [4.774287, 52.629131, 4.779526, 52.635583]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
+EV_RELEASE_COMMIT = "54a894cc7c96c7d8c27e344ee2724012d5ae4e3d"
+EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec"
+EV_FIXTURE = "NL-ALL-NLLOC018787"
+CONSUMPTION_RELEASE_COMMIT = "833f2a072d191bfb58374451a76f4d3b50db2756"
+CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba"
+CONSUMPTION_FIXTURE = "BU03610308"
 FIXTURE = "1842EM"
 
 
@@ -48,7 +56,13 @@ class SmokeClient:
             raise AssertionError(f"{path} returned HTTP {status}")
         return json.loads(body)
 
-    def post_json(self, path: str, payload: dict, timeout: int = 60) -> dict:
+    def post_json(
+        self,
+        path: str,
+        payload: dict,
+        timeout: int = 60,
+        expected_status: int = 201,
+    ) -> dict:
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             method="POST",
@@ -60,7 +74,10 @@ class SmokeClient:
             },
         )
         with self.opener.open(request, timeout=timeout) as response:
-            require(response.status == 201, f"{path} returned HTTP {response.status}")
+            require(
+                response.status == expected_status,
+                f"{path} returned HTTP {response.status}",
+            )
             return json.loads(response.read())
 
 
@@ -504,6 +521,288 @@ def check_grid_layers(client: SmokeClient) -> None:
         require(image.startswith(b"\x89PNG") and len(image) > 500, f"{layer_id} WMS map is empty")
 
 
+def check_ev_model_api(client: SmokeClient) -> None:
+    readiness = client.get_json("/models/ev/ready", timeout=120)
+    require(readiness.get("ready") is True, "EV model is not ready")
+    require(readiness.get("state") == "ready", "EV readiness state drift")
+    require(readiness.get("feature_count") == 784, "EV release feature count drift")
+    require(readiness.get("release_commit") == EV_RELEASE_COMMIT, "EV release identity drift")
+    require(readiness.get("container_image") == EV_CONTAINER_IMAGE, "EV image identity drift")
+
+    metadata = client.get_json("/models/ev/metadata")
+    runtime = metadata.get("runtime", {})
+    require(runtime.get("release_commit") == EV_RELEASE_COMMIT, "EV metadata commit drift")
+    require(runtime.get("container_image") == EV_CONTAINER_IMAGE, "EV metadata image drift")
+
+    layers = client.get_json("/models/ev/layers")
+    by_layer = {item["id"]: item for item in layers.get("layers", [])}
+    require(EV_LAYER in by_layer, "EV charger layer contract is missing")
+    require(by_layer[EV_LAYER].get("current_feature_count") == 784, "EV layer count drift")
+
+    run = client.post_json(
+        "/models/ev/runs",
+        {"spatial_selection": {"type": "all"}, "parameters": {}},
+        timeout=300,
+    )
+    require(run.get("status") == "succeeded", "EV layer run failed")
+    require(run.get("release_commit") == EV_RELEASE_COMMIT, "EV run identity drift")
+    output_links = run.get("links", {}).get("outputs", [])
+    require(len(output_links) == 1, "EV run did not return one output")
+    output = client.get_json(f"/models/ev{output_links[0]}")
+    require(output.get("layer_id") == EV_LAYER, "EV output layer drift")
+    require(output.get("feature_count") == 784, "EV output feature count drift")
+    data_path = output.get("links", {}).get("data")
+    require(isinstance(data_path, str) and data_path.startswith("/outputs/"), "EV data link drift")
+    status, content, content_type = client.get(f"/models/ev{data_path}", timeout=300)
+    require(status == 200, "EV output data request failed")
+    require(content_type == "application/geo+json", "EV output media type drift")
+    require(len(content) == output["byte_size"], "EV output byte size drift")
+    require(hashlib.sha256(content).hexdigest() == output["sha256"], "EV output hash drift")
+
+
+def check_ev_layer(client: SmokeClient) -> None:
+    capabilities_query = urllib.parse.urlencode(
+        {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}
+    )
+    capabilities_path = f"/geoserver/wms?{capabilities_query}"
+    deadline = time.monotonic() + 300
+    while True:
+        status, body, _ = client.get(capabilities_path)
+        if status == 200 and EV_LAYER.encode() in body:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError("EV charger layer missing from WMS capabilities")
+        time.sleep(5)
+
+    describe_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "DescribeFeatureType",
+            "typeNames": EV_LAYER,
+        }
+    )
+    status, body, _ = client.get(f"/geoserver/rdp/ows?{describe_query}")
+    require(status == 200, "EV WFS DescribeFeatureType failed")
+    for field in (
+        "source_feature_id",
+        "address",
+        "connector_count",
+        "max_power_kw",
+        "profile_available",
+        "datacompleetheid",
+        "datacompleetheid_method_version",
+        "model_version",
+    ):
+        require(field.encode() in body, f"EV WFS schema is missing {field}")
+
+    feature_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": EV_LAYER,
+            "outputFormat": "application/json",
+            "cql_filter": f"source_feature_id='{EV_FIXTURE}'",
+        }
+    )
+    collection = client.get_json(f"/geoserver/rdp/ows?{feature_query}")
+    require(collection.get("numberReturned") == 1, "EV fixture charger is missing")
+    feature = collection["features"][0]
+    properties = feature["properties"]
+    require(properties["address"] == "Diamantweg 10", "EV fixture address drift")
+    require(properties["connector_count"] == 6, "EV fixture connector count drift")
+    require(properties["profile_available"] is True, "EV fixture profile link drift")
+    require(0 <= properties["datacompleetheid"] <= 3, "EV fixture quality drift")
+
+    lon, lat = feature["geometry"]["coordinates"][:2]
+    padding = 0.01
+    map_query = urllib.parse.urlencode(
+        {
+            "service": "WMS",
+            "version": "1.1.1",
+            "request": "GetMap",
+            "layers": f"rdp:{EV_LAYER}",
+            "styles": "",
+            "srs": "EPSG:4326",
+            "bbox": f"{lon-padding},{lat-padding},{lon+padding},{lat+padding}",
+            "width": 256,
+            "height": 256,
+            "format": "image/png",
+        }
+    )
+    status, image, content_type = client.get(f"/geoserver/rdp/wms?{map_query}")
+    require(status == 200, "EV WMS GetMap failed")
+    require(content_type == "image/png", f"Unexpected EV WMS content type: {content_type}")
+    require(image.startswith(b"\x89PNG") and len(image) > 500, "EV WMS map is empty")
+
+
+def check_consumption_model_api(client: SmokeClient) -> None:
+    readiness = client.get_json("/models/consumption/readyz", timeout=120)
+    require(readiness.get("status") == "ready", "Consumption model is not ready")
+    require(readiness.get("reasons") == [], "Consumption readiness reasons drift")
+    require(
+        readiness.get("release_commit") == CONSUMPTION_RELEASE_COMMIT,
+        "Consumption release identity drift",
+    )
+    require(
+        readiness.get("container_image") == CONSUMPTION_CONTAINER_IMAGE,
+        "Consumption image identity drift",
+    )
+    require(
+        readiness.get("runtime_state", {}).get("feature_count") == 67,
+        "Consumption source feature count drift",
+    )
+
+    metadata = client.get_json("/models/consumption/metadata")
+    require(metadata.get("model_id") == "consumption-map", "Consumption model ID drift")
+    require(metadata.get("model_version") == "0.2.0", "Consumption model version drift")
+    require(metadata.get("ready") is True, "Consumption metadata is not ready")
+
+    layers = client.get_json("/models/consumption/layers")
+    records = {item["layer_id"]: item for item in layers.get("layers", [])}
+    require(
+        "electricity_consumption_areas" in records,
+        "Consumption annual layer contract is missing",
+    )
+
+    accepted = client.post_json(
+        "/models/consumption/v1/runs",
+        {
+            "dataset_id": "alkmaar_2023",
+            "layer_ids": ["electricity_consumption_areas"],
+            "selection": {"municipality_code": "GM0361"},
+        },
+        timeout=300,
+        expected_status=202,
+    )
+    run_id = accepted.get("run_id")
+    require(isinstance(run_id, str) and run_id, "Consumption run ID is missing")
+    deadline = time.monotonic() + 60
+    while True:
+        run = client.get_json(f"/models/consumption/v1/runs/{run_id}")
+        if run.get("status") == "succeeded":
+            break
+        require(run.get("status") != "failed", "Consumption run failed")
+        require(time.monotonic() < deadline, "Consumption run timed out")
+        time.sleep(0.25)
+    require(run.get("release_commit") == CONSUMPTION_RELEASE_COMMIT, "Consumption run identity drift")
+    output_ids = run.get("output_ids", [])
+    require(len(output_ids) == 1, "Consumption run did not return one output")
+    output = client.get_json(f"/models/consumption/v1/outputs/{output_ids[0]}")
+    require(output.get("feature_count") == 67, "Consumption output feature count drift")
+    status, content, content_type = client.get(
+        f"/models/consumption/v1/outputs/{output_ids[0]}/data",
+        timeout=300,
+    )
+    require(status == 200, "Consumption output data request failed")
+    require(content_type == "application/geo+json", "Consumption media type drift")
+    require(content.endswith(b"\n"), "Consumption output lost canonical newline")
+    require(
+        hashlib.sha256(content).hexdigest() == output["semantic_sha256"],
+        "Consumption output byte hash drift",
+    )
+
+
+def check_consumption_layer(client: SmokeClient) -> None:
+    capabilities_query = urllib.parse.urlencode(
+        {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}
+    )
+    capabilities_path = f"/geoserver/wms?{capabilities_query}"
+    deadline = time.monotonic() + 300
+    while True:
+        status, body, _ = client.get(capabilities_path)
+        if status == 200 and CONSUMPTION_LAYER.encode() in body:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError("Consumption layer missing from WMS capabilities")
+        time.sleep(5)
+
+    describe_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "DescribeFeatureType",
+            "typeNames": CONSUMPTION_LAYER,
+        }
+    )
+    status, body, _ = client.get(f"/geoserver/rdp/ows?{describe_query}")
+    require(status == 200, "Consumption WFS DescribeFeatureType failed")
+    for field in (
+        "spatial_unit_type",
+        "spatial_unit_code",
+        "annual_electricity_consumption_kwh",
+        "residential_electricity_kwh",
+        "business_electricity_kwh",
+        "datacompleetheid",
+        "datacompleetheid_rule_version",
+        "model_version",
+    ):
+        require(field.encode() in body, f"Consumption WFS schema is missing {field}")
+
+    feature_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": CONSUMPTION_LAYER,
+            "outputFormat": "application/json",
+            "cql_filter": f"spatial_unit_code='{CONSUMPTION_FIXTURE}'",
+        }
+    )
+    collection = client.get_json(f"/geoserver/rdp/ows?{feature_query}")
+    require(collection.get("numberReturned") == 1, "Consumption fixture is missing")
+    feature = collection["features"][0]
+    properties = feature["properties"]
+    require(properties["name"] == "Boekelermeer-Zuid", "Consumption fixture name drift")
+    annual = properties["annual_electricity_consumption_kwh"]
+    require(isinstance(annual, (int, float)) and annual > 0, "Consumption fixture is empty")
+    require(0 <= properties["datacompleetheid"] <= 3, "Consumption quality drift")
+
+    null_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": CONSUMPTION_LAYER,
+            "outputFormat": "application/json",
+            "cql_filter": "spatial_unit_code='BU03611000'",
+        }
+    )
+    null_collection = client.get_json(f"/geoserver/rdp/ows?{null_query}")
+    require(null_collection.get("numberReturned") == 1, "Consumption null fixture is missing")
+    require(
+        null_collection["features"][0]["properties"]["business_electricity_kwh"] is None,
+        "Consumption null sector value was coerced",
+    )
+
+    coordinates = list(flatten_coordinates(feature["geometry"]["coordinates"]))
+    xs = [coordinate[0] for coordinate in coordinates]
+    ys = [coordinate[1] for coordinate in coordinates]
+    padding = 0.001
+    map_query = urllib.parse.urlencode(
+        {
+            "service": "WMS",
+            "version": "1.1.1",
+            "request": "GetMap",
+            "layers": f"rdp:{CONSUMPTION_LAYER}",
+            "styles": "",
+            "srs": "EPSG:4326",
+            "bbox": f"{min(xs)-padding},{min(ys)-padding},{max(xs)+padding},{max(ys)+padding}",
+            "width": 256,
+            "height": 256,
+            "format": "image/png",
+        }
+    )
+    status, image, content_type = client.get(f"/geoserver/rdp/wms?{map_query}")
+    require(status == 200, "Consumption WMS GetMap failed")
+    require(content_type == "image/png", f"Unexpected Consumption WMS type: {content_type}")
+    require(
+        image.startswith(b"\x89PNG") and len(image) > 1000,
+        "Consumption WMS map is empty",
+    )
+
+
 def check_dashboard_and_simulation(client: SmokeClient) -> None:
     status, dashboard, _ = client.get("/dashboard/")
     require(status == 200, "Dashboard did not load")
@@ -511,6 +810,8 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(b"r-pv-capacity" in dashboard, "Dashboard PV layer control is missing")
     require(b"r-grid-lines" in dashboard, "Dashboard grid lines control is missing")
     require(b"r-grid-transformers" in dashboard, "Dashboard grid transformers control is missing")
+    require(b"r-ev-chargers" in dashboard, "Dashboard EV charger control is missing")
+    require(b"r-consumption-areas" in dashboard, "Dashboard Consumption control is missing")
     require(b"scenario-panel" in dashboard, "Persistent scenario controls are missing")
 
     status, script, _ = client.get("/dashboard/map-data.js")
@@ -519,6 +820,11 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(b"pv_capacity" in script, "Dashboard is not configured for PV WFS")
     require(b"grid_lines" in script, "Dashboard is not configured for grid lines WFS")
     require(b"grid_transformers" in script, "Dashboard is not configured for transformers WFS")
+    require(b"public_ev_chargers" in script, "Dashboard is not configured for EV WFS")
+    require(
+        b"consumption_electricity_areas" in script,
+        "Dashboard is not configured for Consumption WFS",
+    )
     require(b"alkmaar_energy_map.geojson" in script, "Static fallback is missing")
 
     api = client.get_json("/policy-api/")
@@ -531,6 +837,11 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(
         "layer:grid-model:transformers" in records,
         "Grid transformers registry record is missing",
+    )
+    require("layer:ev-map:public-chargers" in records, "EV registry record is missing")
+    require(
+        "layer:consumption-map:electricity-areas" in records,
+        "Consumption registry record is missing",
     )
     for local_id, qualified_layer in (
         ("layer:grid-model:lines", "rdp:grid_lines"),
@@ -550,6 +861,33 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(
         pv_record["services"]["qualified_layer"] == "rdp:pv_capacity",
         "PV registry GeoServer layer drift",
+    )
+    ev_record = records["layer:ev-map:public-chargers"]
+    require(ev_record["model_version"] == "0.3.0", "EV registry version drift")
+    require(ev_record["crs"] == "EPSG:4326", "EV registry CRS drift")
+    require(
+        ev_record["data_quality"]["method_version"] == "EV-DATA-COMPLETE-001",
+        "EV registry quality method drift",
+    )
+    require(
+        ev_record["services"]["qualified_layer"] == "rdp:public_ev_chargers",
+        "EV registry GeoServer layer drift",
+    )
+    consumption_record = records["layer:consumption-map:electricity-areas"]
+    require(
+        consumption_record["model_version"] == "0.2.0",
+        "Consumption registry version drift",
+    )
+    require(consumption_record["crs"] == "EPSG:4326", "Consumption registry CRS drift")
+    require(
+        consumption_record["data_quality"]["method_version"]
+        == "datacompleetheid-qualitative-v1",
+        "Consumption registry quality method drift",
+    )
+    require(
+        consumption_record["services"]["qualified_layer"]
+        == "rdp:consumption_electricity_areas",
+        "Consumption registry GeoServer layer drift",
     )
 
     simulation = client.get_json(
@@ -585,16 +923,24 @@ def main() -> int:
     wait_until_ready(client, "/policy-api/")
     wait_until_ready(client, "/models/pv/ready", timeout=1800)
     wait_until_ready(client, "/models/grid/ready", timeout=300)
+    wait_until_ready(client, "/models/ev/ready", timeout=300)
+    wait_until_ready(client, "/models/consumption/readyz", timeout=300)
     wait_until_ready(
         client, "/geoserver/wms?service=WMS&version=1.3.0&request=GetCapabilities"
     )
-    check_pv_model_api(client)
-    check_grid_model_api(client)
+    # Published-layer checks must finish before synchronous model runs start.
+    # In particular, overlapping PV runs can contend heavily for memory and CPU.
     check_pc6_layer(client)
     check_pv_layer(client)
     check_grid_layers(client)
+    check_ev_layer(client)
+    check_consumption_layer(client)
+    check_pv_model_api(client)
+    check_grid_model_api(client)
+    check_ev_model_api(client)
+    check_consumption_model_api(client)
     check_dashboard_and_simulation(client)
-    print("Integrated PC6, PV capacity, and grid layer smoke test passed")
+    print("Integrated legacy PC6, PV, Grid, Consumption, and EV layer smoke test passed")
     return 0
 
 
