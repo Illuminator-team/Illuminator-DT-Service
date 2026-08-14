@@ -48,11 +48,26 @@ services:
     labels:
       traefik.http.routers.wind-api.rule: Host(`localhost`) && PathPrefix(`/models/wind`)
 
+  heat-init:
+    command:
+      - python
+      - -m
+      - heat_net_map.api
+      - initialize
+      - --mode
+      - fixture
+      - --allow-fixture
+
+  heat-api:
+    labels:
+      traefik.http.routers.heat-api.rule: Host(`localhost`) && PathPrefix(`/models/heat`)
+
   layer-publisher:
     environment:
       GRID_EXPECTED_DATA_MODE: fixture
       GRID_EXPORT_BBOX: 4.774287,52.629131,4.779526,52.635583
       WIND_EXPECTED_DATA_MODE: fixture
+      HEAT_EXPECTED_DATA_MODE: fixture
 
   grafana:
     environment:

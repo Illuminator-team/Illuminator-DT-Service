@@ -10,7 +10,7 @@ This repository is based on the step-by-step tutorial for the [Rapid Deployment 
 
 You need to have [Docker](https://docs.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) installed.
 
-The pinned PV, Liander Grid, and Wind model images are private GitHub Container Registry packages. Before
+The pinned PV, Liander Grid, Wind, and Heat model images are private GitHub Container Registry packages. Before
 a local first start, authenticate Docker with a separately managed GitHub token
 limited to `read:packages`; do not store that token in this repository:
 
@@ -37,7 +37,7 @@ Start the local stack with isolated GeoServer and Illuminator output volumes:
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
-The first start pulls the PV, Grid, and Wind models by their verified immutable GHCR
+The first start pulls the PV, Grid, Wind, and Heat models by their verified immutable GHCR
 digests. PV runs its one-shot public-source initializer, which can download
 substantial source data and take more than ten minutes; the `pv-raw-cache`
 volume is reused on later starts. The local override initializes Grid from the
@@ -47,6 +47,10 @@ initializer and persists its result in `grid-model-data`. The local override
 initializes Wind from the model-owned four-turbine Alkmaar fixture; production
 uses the model's bounded real-source initializer and persists its result in
 `wind-model-data`.
+The local override initializes all six Heat evidence layers from the model's
+explicit fixture lane. Production runs the bounded real-source initializer and
+persists both its scientific source workspace and API snapshots in
+`heat-model-data`.
 
 Local endpoints:
 
@@ -55,6 +59,7 @@ Local endpoints:
 - PV model API: https://localhost/models/pv/docs
 - Grid model API: https://localhost/models/grid/docs
 - Wind model API: https://localhost/models/wind/docs
+- Heat model API: https://localhost/models/heat/docs
 - Grafana: https://localhost/grafana/
 - Redis Insight: http://localhost:5540/
 - Traefik dashboard: http://localhost:8080/dashboard/
@@ -70,8 +75,13 @@ feature details while leaving the congestion scenario controls available. The
 independent `rdp:public_wind_turbines` point layer exposes published nameplate
 capacity, provisional generation summaries, and model-owned
 `datacompleetheid`; selecting it also leaves the scenario controls in place.
+The Heat evidence selector exposes six separate GeoServer layers for reported
+neighbourhood consumers, inferred PC6 consumers, registered developments,
+documented actual sources, documented large consumers, and potential sources.
+These evidence classes stay separate and selecting any of them leaves the
+scenario controls in place.
 
-Run the PC6, PV, Grid, and Wind publication contracts and frontend layer-adapter tests:
+Run the PC6, PV, Grid, Wind, and Heat publication contracts and frontend layer-adapter tests:
 
 ```shell
 python -m unittest discover -s tests -p "test_*.py"
@@ -91,3 +101,4 @@ python tests/smoke_stack.py --base-url https://localhost
 - [Model developer integration guide](docs/model-developer-integration-guide.md)
 - [PV integration lessons learned](docs/pv-integration-lessons-learned.md)
 - [Wind turbine integration](docs/wind-integration.md)
+- [Heat network integration](docs/heat-integration.md)

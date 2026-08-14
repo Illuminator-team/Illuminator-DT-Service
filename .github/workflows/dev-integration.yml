@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Validate PC6, PV, Grid, and Wind publication contracts
+      - name: Validate PC6, PV, Grid, Wind, and Heat publication contracts
         run: python -m unittest discover -s tests -p "test_*.py"
 
       - name: Test dashboard layer adapters
@@ -67,7 +67,7 @@ jobs:
       - name: Start integrated stack
         run: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 
-      - name: Run integrated PC6, PV, Grid, and Wind smoke checks
+      - name: Run integrated PC6, PV, Grid, Wind, and Heat smoke checks
         run: python tests/smoke_stack.py --base-url https://localhost
 
       - name: Verify repeatable publisher execution
@@ -79,6 +79,15 @@ jobs:
           grep -Fq "grid_lines synchronized: total=22 changed=0 deleted=0" <<<"${output}"
           grep -Fq "grid_transformers synchronized: total=1 changed=0 deleted=0" <<<"${output}"
           grep -Fq "Wind layer synchronized: total=4 changed=0 deleted=0" <<<"${output}"
+          for layer in \
+            reported_neighbourhood_heat_consumers \
+            inferred_pc6_heat_consumers \
+            registered_heat_network_developments \
+            documented_actual_heat_sources \
+            documented_large_heat_consumers \
+            potential_heat_sources; do
+            grep -Fq "Heat ${layer} synchronized: total=1 changed=0 deleted=0" <<<"${output}"
+          done
           docker compose -f docker-compose.yml -f docker-compose.local.yml up -d layer-publisher
 
       - name: Show service logs on failure

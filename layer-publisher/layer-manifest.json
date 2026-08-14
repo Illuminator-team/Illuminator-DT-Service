@@ -349,6 +349,330 @@
         "default_visible": false
       },
       "actions": ["inspect_feature", "open_model_metadata"]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/heat-net-map/reported-neighbourhood-heat-consumers",
+      "local_id": "layer:heat-net-map:reported_neighbourhood_heat_consumers",
+      "title": "Reported Neighbourhood Heat Consumers",
+      "description": "Neighbourhood polygons with registered rounded district-heating shares and model-estimated connected dwellings and heat demand.",
+      "model": "heat",
+      "group": "heat_network",
+      "model_id": "https://reformers01.ewi.tudelft.nl/id/model/heat-net-map",
+      "model_version": "0.2.0",
+      "metadata_contract_version": "1.0.0",
+      "schema_contract_version": "1.0.0",
+      "table": "reported_neighbourhood_heat_consumers",
+      "geoserver_layer": "reported_neighbourhood_heat_consumers",
+      "source": {
+        "type": "model_api",
+        "model_layer_id": "reported_neighbourhood_heat_consumers",
+        "base_url": "http://heat-api:8080",
+        "metadata_url": "/models/heat/metadata",
+        "repository": "https://github.com/JortGroen/Heat-net-map",
+        "release_commit": "1f2b2c8b770e5c59efbed4ab58641b40b164845a",
+        "container_image": "ghcr.io/jortgroen/heat-net-map-api@sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "container_digest": "sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "crs": "EPSG:4326",
+        "production_selection": {"type": "all", "meaning": "bounded Alkmaar layer"}
+      },
+      "feature_id_property": "feature_id",
+      "feature_uri_property": "persistent_uri",
+      "geometry_type": "MultiPolygon",
+      "selectable_feature_type": "cbs_buurt",
+      "spatial_resolution": "neighbourhood",
+      "temporal_resolution": "static_evidence_snapshot",
+      "attributes": [
+        {"name": "consumer_area_id", "type": "string"},
+        {"name": "area_name", "type": "string"},
+        {"name": "reference_year", "type": "integer", "unit": "year"},
+        {"name": "reported_connected_share_pct", "type": "number", "unit": "percent"},
+        {"name": "connected_dwellings_estimate", "type": "integer", "unit": "dwellings"},
+        {"name": "heat_demand_estimate_gj_per_year", "type": "number", "unit": "GJ/year"}
+      ],
+      "data_quality": {
+        "kind": "qualitative_evidence_completeness",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-heat-net-v1",
+        "owner": "heat-net-map",
+        "scale": {"0": "no supporting evidence", "1": "material inference or missing evidence", "2": "supported with known limitations", "3": "direct current independently validated evidence"},
+        "current_layer_maximum": 2
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=reported_neighbourhood_heat_consumers&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:reported_neighbourhood_heat_consumers"
+      },
+      "style": {"style_status": "dashboard_heat_consumer_areas", "default_visible": false},
+      "actions": ["inspect_feature", "open_model_metadata"]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/heat-net-map/inferred-pc6-heat-consumers",
+      "local_id": "layer:heat-net-map:inferred_pc6_heat_consumers",
+      "title": "Inferred PC6 Heat Consumers",
+      "description": "PC6 polygons with model allocations, candidate signals, exclusions, and explicit Liander corroboration or conflict labels.",
+      "model": "heat",
+      "group": "heat_network",
+      "model_id": "https://reformers01.ewi.tudelft.nl/id/model/heat-net-map",
+      "model_version": "0.2.0",
+      "metadata_contract_version": "1.0.0",
+      "schema_contract_version": "1.0.0",
+      "table": "inferred_pc6_heat_consumers",
+      "geoserver_layer": "inferred_pc6_heat_consumers",
+      "source": {
+        "type": "model_api",
+        "model_layer_id": "inferred_pc6_heat_consumers",
+        "base_url": "http://heat-api:8080",
+        "metadata_url": "/models/heat/metadata",
+        "repository": "https://github.com/JortGroen/Heat-net-map",
+        "release_commit": "1f2b2c8b770e5c59efbed4ab58641b40b164845a",
+        "container_image": "ghcr.io/jortgroen/heat-net-map-api@sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "container_digest": "sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "crs": "EPSG:4326",
+        "production_selection": {"type": "all", "meaning": "bounded Alkmaar layer"}
+      },
+      "feature_id_property": "feature_id",
+      "feature_uri_property": "persistent_uri",
+      "geometry_type": "MultiPolygon",
+      "selectable_feature_type": "pc6",
+      "spatial_resolution": "pc6",
+      "temporal_resolution": "static_evidence_snapshot",
+      "attributes": [
+        {"name": "postcode6", "type": "string"},
+        {"name": "allocated_connected_dwellings_est", "type": "integer", "unit": "dwellings"},
+        {"name": "heat_demand_gj_year_est", "type": "number", "unit": "GJ/year"},
+        {"name": "gas_avg_m3", "type": "number", "unit": "m3/dwelling/year", "nullable": true},
+        {"name": "electricity_avg_kwh", "type": "number", "unit": "kWh/dwelling/year", "nullable": true},
+        {"name": "inference_class", "type": "string"},
+        {"name": "liander_crosscheck_status", "type": "string"}
+      ],
+      "data_quality": {
+        "kind": "qualitative_evidence_completeness",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-heat-net-v1",
+        "owner": "heat-net-map",
+        "scale": {"0": "no supporting evidence", "1": "material inference or missing evidence", "2": "supported with known limitations", "3": "direct current independently validated evidence"},
+        "current_layer_maximum": 2
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=inferred_pc6_heat_consumers&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:inferred_pc6_heat_consumers"
+      },
+      "style": {"style_status": "dashboard_heat_pc6_inference", "default_visible": false},
+      "actions": ["inspect_feature", "open_model_metadata"]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/heat-net-map/registered-heat-network-developments",
+      "local_id": "layer:heat-net-map:registered_heat_network_developments",
+      "title": "Registered Heat Network Developments",
+      "description": "Registered development-plan polygons; registration does not establish an operating connection.",
+      "model": "heat",
+      "group": "heat_network",
+      "model_id": "https://reformers01.ewi.tudelft.nl/id/model/heat-net-map",
+      "model_version": "0.2.0",
+      "metadata_contract_version": "1.0.0",
+      "schema_contract_version": "1.0.0",
+      "table": "registered_heat_network_developments",
+      "geoserver_layer": "registered_heat_network_developments",
+      "source": {
+        "type": "model_api",
+        "model_layer_id": "registered_heat_network_developments",
+        "base_url": "http://heat-api:8080",
+        "metadata_url": "/models/heat/metadata",
+        "repository": "https://github.com/JortGroen/Heat-net-map",
+        "release_commit": "1f2b2c8b770e5c59efbed4ab58641b40b164845a",
+        "container_image": "ghcr.io/jortgroen/heat-net-map-api@sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "container_digest": "sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "crs": "EPSG:4326",
+        "production_selection": {"type": "all", "meaning": "bounded Alkmaar layer"}
+      },
+      "feature_id_property": "feature_id",
+      "feature_uri_property": "persistent_uri",
+      "geometry_type": "MultiPolygon",
+      "selectable_feature_type": "heat_network_development_area",
+      "spatial_resolution": "registered_development_area",
+      "temporal_resolution": "static_evidence_snapshot",
+      "attributes": [
+        {"name": "development_area_id", "type": "string"},
+        {"name": "development_name", "type": "string"},
+        {"name": "development_phase", "type": "string"},
+        {"name": "status_date", "type": "datetime", "nullable": true},
+        {"name": "planned_consumer_scale", "type": "string"},
+        {"name": "planned_heat_source_description", "type": "string"}
+      ],
+      "data_quality": {
+        "kind": "qualitative_evidence_completeness",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-heat-net-v1",
+        "owner": "heat-net-map",
+        "scale": {"0": "no supporting evidence", "1": "material inference or missing evidence", "2": "supported with known limitations", "3": "direct current independently validated evidence"},
+        "current_layer_maximum": 2
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=registered_heat_network_developments&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:registered_heat_network_developments"
+      },
+      "style": {"style_status": "dashboard_heat_developments", "default_visible": false},
+      "actions": ["inspect_feature", "open_model_metadata"]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/heat-net-map/documented-actual-heat-sources",
+      "local_id": "layer:heat-net-map:documented_actual_heat_sources",
+      "title": "Documented Actual Heat Sources",
+      "description": "Documented operating heat-production sites, kept separate from potential source candidates.",
+      "model": "heat",
+      "group": "heat_network",
+      "model_id": "https://reformers01.ewi.tudelft.nl/id/model/heat-net-map",
+      "model_version": "0.2.0",
+      "metadata_contract_version": "1.0.0",
+      "schema_contract_version": "1.0.0",
+      "table": "documented_actual_heat_sources",
+      "geoserver_layer": "documented_actual_heat_sources",
+      "source": {
+        "type": "model_api",
+        "model_layer_id": "documented_actual_heat_sources",
+        "base_url": "http://heat-api:8080",
+        "metadata_url": "/models/heat/metadata",
+        "repository": "https://github.com/JortGroen/Heat-net-map",
+        "release_commit": "1f2b2c8b770e5c59efbed4ab58641b40b164845a",
+        "container_image": "ghcr.io/jortgroen/heat-net-map-api@sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "container_digest": "sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "crs": "EPSG:4326",
+        "production_selection": {"type": "all", "meaning": "bounded Alkmaar layer"}
+      },
+      "feature_id_property": "feature_id",
+      "feature_uri_property": "persistent_uri",
+      "geometry_type": "Point",
+      "selectable_feature_type": "documented_heat_source",
+      "spatial_resolution": "documented_point",
+      "temporal_resolution": "static_evidence_snapshot",
+      "attributes": [
+        {"name": "source_name", "type": "string"},
+        {"name": "source_status", "type": "string"},
+        {"name": "technology", "type": "string"}
+      ],
+      "data_quality": {
+        "kind": "qualitative_evidence_completeness",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-heat-net-v1",
+        "owner": "heat-net-map",
+        "scale": {"0": "no supporting evidence", "1": "material inference or missing evidence", "2": "supported with known limitations", "3": "direct current independently validated evidence"},
+        "current_layer_maximum": 2
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=documented_actual_heat_sources&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:documented_actual_heat_sources"
+      },
+      "style": {"style_status": "dashboard_actual_heat_sources", "default_visible": false},
+      "actions": ["inspect_feature", "open_model_metadata"]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/heat-net-map/documented-large-heat-consumers",
+      "local_id": "layer:heat-net-map:documented_large_heat_consumers",
+      "title": "Documented Large Heat Consumers",
+      "description": "Documented examples of large connected consumers without unsupported private consumption values.",
+      "model": "heat",
+      "group": "heat_network",
+      "model_id": "https://reformers01.ewi.tudelft.nl/id/model/heat-net-map",
+      "model_version": "0.2.0",
+      "metadata_contract_version": "1.0.0",
+      "schema_contract_version": "1.0.0",
+      "table": "documented_large_heat_consumers",
+      "geoserver_layer": "documented_large_heat_consumers",
+      "source": {
+        "type": "model_api",
+        "model_layer_id": "documented_large_heat_consumers",
+        "base_url": "http://heat-api:8080",
+        "metadata_url": "/models/heat/metadata",
+        "repository": "https://github.com/JortGroen/Heat-net-map",
+        "release_commit": "1f2b2c8b770e5c59efbed4ab58641b40b164845a",
+        "container_image": "ghcr.io/jortgroen/heat-net-map-api@sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "container_digest": "sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "crs": "EPSG:4326",
+        "production_selection": {"type": "all", "meaning": "bounded Alkmaar layer"}
+      },
+      "feature_id_property": "feature_id",
+      "feature_uri_property": "persistent_uri",
+      "geometry_type": "Point",
+      "selectable_feature_type": "documented_large_heat_consumer",
+      "spatial_resolution": "documented_point",
+      "temporal_resolution": "static_evidence_snapshot",
+      "attributes": [
+        {"name": "consumer_name", "type": "string"},
+        {"name": "connection_evidence", "type": "string"},
+        {"name": "annual_heat_consumption", "type": "number", "unit": "GJ/year", "nullable": true}
+      ],
+      "data_quality": {
+        "kind": "qualitative_evidence_completeness",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-heat-net-v1",
+        "owner": "heat-net-map",
+        "scale": {"0": "no supporting evidence", "1": "material inference or missing evidence", "2": "supported with known limitations", "3": "direct current independently validated evidence"},
+        "current_layer_maximum": 2
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=documented_large_heat_consumers&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:documented_large_heat_consumers"
+      },
+      "style": {"style_status": "dashboard_large_heat_consumers", "default_visible": false},
+      "actions": ["inspect_feature", "open_model_metadata"]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/heat-net-map/potential-heat-sources",
+      "local_id": "layer:heat-net-map:potential_heat_sources",
+      "title": "Potential Heat Sources",
+      "description": "Registered potential heat-source candidates; candidate status is not evidence of an operating connection.",
+      "model": "heat",
+      "group": "heat_network",
+      "model_id": "https://reformers01.ewi.tudelft.nl/id/model/heat-net-map",
+      "model_version": "0.2.0",
+      "metadata_contract_version": "1.0.0",
+      "schema_contract_version": "1.0.0",
+      "table": "potential_heat_sources",
+      "geoserver_layer": "potential_heat_sources",
+      "source": {
+        "type": "model_api",
+        "model_layer_id": "potential_heat_sources",
+        "base_url": "http://heat-api:8080",
+        "metadata_url": "/models/heat/metadata",
+        "repository": "https://github.com/JortGroen/Heat-net-map",
+        "release_commit": "1f2b2c8b770e5c59efbed4ab58641b40b164845a",
+        "container_image": "ghcr.io/jortgroen/heat-net-map-api@sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "container_digest": "sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda",
+        "crs": "EPSG:4326",
+        "production_selection": {"type": "all", "meaning": "bounded Alkmaar layer"}
+      },
+      "feature_id_property": "feature_id",
+      "feature_uri_property": "persistent_uri",
+      "geometry_type": "Point",
+      "selectable_feature_type": "potential_heat_source",
+      "spatial_resolution": "candidate_point",
+      "temporal_resolution": "static_evidence_snapshot",
+      "attributes": [
+        {"name": "source_name", "type": "string"},
+        {"name": "source_type", "type": "string"},
+        {"name": "potential_thermal_capacity_mw", "type": "number", "unit": "MWth", "nullable": true},
+        {"name": "temperature_c", "type": "number", "unit": "degC", "nullable": true},
+        {"name": "candidate_status", "type": "string", "nullable": true}
+      ],
+      "data_quality": {
+        "kind": "qualitative_evidence_completeness",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-heat-net-v1",
+        "owner": "heat-net-map",
+        "scale": {"0": "no supporting evidence", "1": "material inference or missing evidence", "2": "supported with known limitations", "3": "direct current independently validated evidence"},
+        "current_layer_maximum": 2
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=potential_heat_sources&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:potential_heat_sources"
+      },
+      "style": {"style_status": "dashboard_potential_heat_sources", "default_visible": false},
+      "actions": ["inspect_feature", "open_model_metadata"]
     }
   ]
 }

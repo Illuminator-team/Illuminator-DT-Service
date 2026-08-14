@@ -44,6 +44,18 @@
             <input type="radio" name="layer" value="public_wind_turbines" id="r-wind-turbines">
             <label for="r-wind-turbines">WIND TURBINES</label>
         </div>
+        <div class="layer-select-item">
+            <label for="heat-layer-select">HEAT EVIDENCE</label>
+            <select id="heat-layer-select">
+                <option value="" selected>SELECT LAYER</option>
+                <option value="reported_neighbourhood_heat_consumers">Neighbourhood consumers</option>
+                <option value="inferred_pc6_heat_consumers">Inferred PC6 consumers</option>
+                <option value="registered_heat_network_developments">Registered developments</option>
+                <option value="documented_actual_heat_sources">Actual heat sources</option>
+                <option value="documented_large_heat_consumers">Large heat consumers</option>
+                <option value="potential_heat_sources">Potential heat sources</option>
+            </select>
+        </div>
     </div>
     <div class="layer-health" aria-live="polite">
         <div class="layer-source-row">
