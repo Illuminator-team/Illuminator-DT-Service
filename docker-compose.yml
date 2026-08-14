@@ -10,6 +10,9 @@ x-wind-image: &wind-image
 x-heat-image: &heat-image
   image: ghcr.io/jortgroen/heat-net-map-api@sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda
 
+x-ev-image: &ev-image
+  image: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+
 x-pv-cache-image: &pv-cache-image
   image: ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b
 
@@ -267,6 +270,38 @@ services:
       - "traefik.http.services.heat-api.loadbalancer.server.port=8080"
     restart: unless-stopped
 
+  ## -----------------------------------------------------
+  ## Expose the standalone public EV charging model API.
+  ## -----------------------------------------------------
+  ev-api:
+    <<: *ev-image
+    init: true
+    environment:
+      EV_RELEASE_COMMIT: 54a894cc7c96c7d8c27e344ee2724012d5ae4e3d
+      EV_IMAGE_IDENTITY: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+      EV_OUTPUT_DIR: /var/lib/ev-map/outputs
+    volumes:
+      - ev-generated-outputs:/var/lib/ev-map/outputs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/ready', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ev-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/ev`)"
+      - "traefik.http.routers.ev-api.entrypoints=web,websecure"
+      - "traefik.http.routers.ev-api.tls=true"
+      - "traefik.http.middlewares.ev-api-strip.stripprefix.prefixes=/models/ev"
+      - "traefik.http.routers.ev-api.middlewares=ev-api-strip"
+      - "traefik.http.services.ev-api.loadbalancer.server.port=8000"
+    restart: unless-stopped
+
 #  ------------------------------------END OF PLAYGROUND -------------------------------------
 
 
@@ -516,6 +551,9 @@ services:
       HEAT_EXPECTED_RELEASE_COMMIT: 1f2b2c8b770e5c59efbed4ab58641b40b164845a
       HEAT_EXPECTED_CONTAINER_DIGEST: sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda
       HEAT_EXPECTED_DATA_MODE: real_source
+      EV_API_URL: http://ev-api:8000
+      EV_EXPECTED_RELEASE_COMMIT: 54a894cc7c96c7d8c27e344ee2724012d5ae4e3d
+      EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
@@ -533,6 +571,8 @@ services:
       wind-api:
         condition: service_healthy
       heat-api:
+        condition: service_healthy
+      ev-api:
         condition: service_healthy
     networks:
       - default
@@ -568,3 +608,4 @@ volumes:
   grid-model-data:
   wind-model-data:
   heat-model-data:
+  ev-generated-outputs:

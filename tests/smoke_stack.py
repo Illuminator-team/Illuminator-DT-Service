@@ -17,6 +17,7 @@ GRID_TRANSFORMERS_LAYER = "grid_transformers"
 GRID_MV_HV_REACH_LAYER = "grid_mv_hv_transformer_reach"
 GRID_LV_MV_REACH_LAYER = "grid_lv_mv_transformer_reach"
 WIND_LAYER = "public_wind_turbines"
+EV_LAYER = "public_ev_chargers"
 PV_FIXTURE = "BU03610302"
 PV_RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
 PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
@@ -61,6 +62,9 @@ HEAT_LAYERS = {
     },
 }
 HEAT_PC6_FIXTURE = "pc6-1812ab"
+EV_RELEASE_COMMIT = "54a894cc7c96c7d8c27e344ee2724012d5ae4e3d"
+EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec"
+EV_FIXTURE = "NL-ALL-NLLOC018787"
 FIXTURE = "1842EM"
 
 
@@ -618,6 +622,122 @@ def check_heat_layers(client: SmokeClient) -> None:
         require(image.startswith(b"\x89PNG") and len(image) > 500, f"{layer_id} WMS map is empty")
 
 
+def check_ev_model_api(client: SmokeClient) -> None:
+    readiness = client.get_json("/models/ev/ready", timeout=120)
+    require(readiness.get("ready") is True, "EV model is not ready")
+    require(readiness.get("state") == "ready", "EV readiness state drift")
+    require(readiness.get("feature_count") == 784, "EV release feature count drift")
+    require(readiness.get("release_commit") == EV_RELEASE_COMMIT, "EV release identity drift")
+    require(readiness.get("container_image") == EV_CONTAINER_IMAGE, "EV image identity drift")
+
+    metadata = client.get_json("/models/ev/metadata")
+    runtime = metadata.get("runtime", {})
+    require(runtime.get("release_commit") == EV_RELEASE_COMMIT, "EV metadata commit drift")
+    require(runtime.get("container_image") == EV_CONTAINER_IMAGE, "EV metadata image drift")
+
+    layers = client.get_json("/models/ev/layers")
+    by_layer = {item["id"]: item for item in layers.get("layers", [])}
+    require(EV_LAYER in by_layer, "EV charger layer contract is missing")
+    require(by_layer[EV_LAYER].get("current_feature_count") == 784, "EV layer count drift")
+
+    run = client.post_json(
+        "/models/ev/runs",
+        {"spatial_selection": {"type": "all"}, "parameters": {}},
+        timeout=300,
+    )
+    require(run.get("status") == "succeeded", "EV layer run failed")
+    require(run.get("release_commit") == EV_RELEASE_COMMIT, "EV run identity drift")
+    output_links = run.get("links", {}).get("outputs", [])
+    require(len(output_links) == 1, "EV run did not return one output")
+    output = client.get_json(f"/models/ev{output_links[0]}")
+    require(output.get("layer_id") == EV_LAYER, "EV output layer drift")
+    require(output.get("feature_count") == 784, "EV output feature count drift")
+    data_path = output.get("links", {}).get("data")
+    require(isinstance(data_path, str) and data_path.startswith("/outputs/"), "EV data link drift")
+    status, content, content_type = client.get(f"/models/ev{data_path}", timeout=300)
+    require(status == 200, "EV output data request failed")
+    require(content_type == "application/geo+json", "EV output media type drift")
+    require(len(content) == output["byte_size"], "EV output byte size drift")
+    require(hashlib.sha256(content).hexdigest() == output["sha256"], "EV output hash drift")
+
+
+def check_ev_layer(client: SmokeClient) -> None:
+    capabilities_query = urllib.parse.urlencode(
+        {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}
+    )
+    capabilities_path = f"/geoserver/wms?{capabilities_query}"
+    deadline = time.monotonic() + 300
+    while True:
+        status, body, _ = client.get(capabilities_path)
+        if status == 200 and EV_LAYER.encode() in body:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError("EV charger layer missing from WMS capabilities")
+        time.sleep(5)
+
+    describe_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "DescribeFeatureType",
+            "typeNames": EV_LAYER,
+        }
+    )
+    status, body, _ = client.get(f"/geoserver/rdp/ows?{describe_query}")
+    require(status == 200, "EV WFS DescribeFeatureType failed")
+    for field in (
+        "source_feature_id",
+        "address",
+        "connector_count",
+        "max_power_kw",
+        "profile_available",
+        "datacompleetheid",
+        "datacompleetheid_method_version",
+        "model_version",
+    ):
+        require(field.encode() in body, f"EV WFS schema is missing {field}")
+
+    feature_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": EV_LAYER,
+            "outputFormat": "application/json",
+            "cql_filter": f"source_feature_id='{EV_FIXTURE}'",
+        }
+    )
+    collection = client.get_json(f"/geoserver/rdp/ows?{feature_query}")
+    require(collection.get("numberReturned") == 1, "EV fixture charger is missing")
+    feature = collection["features"][0]
+    properties = feature["properties"]
+    require(properties["address"] == "Diamantweg 10", "EV fixture address drift")
+    require(properties["connector_count"] == 6, "EV fixture connector count drift")
+    require(properties["profile_available"] is True, "EV fixture profile link drift")
+    require(0 <= properties["datacompleetheid"] <= 3, "EV fixture quality drift")
+
+    lon, lat = feature["geometry"]["coordinates"][:2]
+    padding = 0.01
+    map_query = urllib.parse.urlencode(
+        {
+            "service": "WMS",
+            "version": "1.1.1",
+            "request": "GetMap",
+            "layers": f"rdp:{EV_LAYER}",
+            "styles": "",
+            "srs": "EPSG:4326",
+            "bbox": f"{lon-padding},{lat-padding},{lon+padding},{lat+padding}",
+            "width": 256,
+            "height": 256,
+            "format": "image/png",
+        }
+    )
+    status, image, content_type = client.get(f"/geoserver/rdp/wms?{map_query}")
+    require(status == 200, "EV WMS GetMap failed")
+    require(content_type == "image/png", f"Unexpected EV WMS content type: {content_type}")
+    require(image.startswith(b"\x89PNG") and len(image) > 500, "EV WMS map is empty")
+
+
 def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     root = client.get_json("/models/grid/")
     require(root.get("status") == "alive", "Grid model liveness failed")
@@ -935,6 +1055,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(status == 200, "Dashboard did not load")
     require(b"map-data.js" in dashboard, "Dashboard does not load its map data adapter")
     require(b"r-pv-capacity" in dashboard, "Dashboard PV layer control is missing")
+    require(b"r-ev-chargers" in dashboard, "Dashboard EV layer control is missing")
     require(b"r-grid-network" in dashboard, "Dashboard Grid control is missing")
     for control_id in (
         b"grid-lv-lines", b"grid-mv-lines", b"grid-hv-lines",
@@ -952,6 +1073,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(status == 200, "Map data adapter did not load")
     require(b"policy_tool_pc6_energy" in script, "Dashboard is not configured for PC6 WFS")
     require(b"pv_capacity" in script, "Dashboard is not configured for PV WFS")
+    require(b"public_ev_chargers" in script, "Dashboard is not configured for EV WFS")
     require(b"grid_lines" in script, "Dashboard is not configured for grid lines WFS")
     require(b"grid_transformers" in script, "Dashboard is not configured for transformers WFS")
     require(b"grid_mv_hv_transformer_reach" in script, "Dashboard is not configured for MV/HV reach WFS")
@@ -967,6 +1089,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     records = {record["local_id"]: record for record in registry.get("layers", [])}
     require("layer:policy-tool:pc6-energy" in records, "PC6 registry record is missing")
     require("layer:pv-map:capacity" in records, "PV registry record is missing")
+    require("layer:ev-map:public-chargers" in records, "EV registry record is missing")
     require("layer:grid-model:lines" in records, "Grid lines registry record is missing")
     require(
         "layer:grid-model:transformers" in records,
@@ -1006,6 +1129,17 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(
         pv_record["services"]["qualified_layer"] == "rdp:pv_capacity",
         "PV registry GeoServer layer drift",
+    )
+    ev_record = records["layer:ev-map:public-chargers"]
+    require(ev_record["model_version"] == "0.3.0", "EV registry version drift")
+    require(ev_record["crs"] == "EPSG:4326", "EV registry CRS drift")
+    require(
+        ev_record["data_quality"]["method_version"] == "EV-DATA-COMPLETE-001",
+        "EV registry quality method drift",
+    )
+    require(
+        ev_record["services"]["qualified_layer"] == "rdp:public_ev_chargers",
+        "EV registry GeoServer layer drift",
     )
     wind_record = records["layer:wind-turbine-map:public-turbines"]
     require(wind_record["model_version"] == "0.2.0", "Wind registry version drift")
@@ -1071,6 +1205,7 @@ def main() -> int:
     wait_until_ready(client, "/models/grid/ready", timeout=300)
     wait_until_ready(client, "/models/wind/ready", timeout=300)
     wait_until_ready(client, "/models/heat/ready", timeout=300)
+    wait_until_ready(client, "/models/ev/ready", timeout=300)
     wait_until_ready(
         client, "/geoserver/wms?service=WMS&version=1.3.0&request=GetCapabilities"
     )
@@ -1078,13 +1213,15 @@ def main() -> int:
     check_grid_model_api(client, args.expected_grid_data_mode)
     check_wind_model_api(client)
     check_heat_model_api(client)
+    check_ev_model_api(client)
     check_pc6_layer(client)
     check_pv_layer(client)
     check_grid_layers(client)
     check_wind_layer(client)
     check_heat_layers(client)
+    check_ev_layer(client)
     check_dashboard_and_simulation(client)
-    print("Integrated PC6, PV capacity, grid, Wind, and Heat layer smoke test passed")
+    print("Integrated PC6, PV capacity, grid, Wind, Heat, and EV layer smoke test passed")
     return 0
 
 

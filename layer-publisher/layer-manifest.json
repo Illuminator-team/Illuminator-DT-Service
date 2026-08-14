@@ -1482,6 +1482,128 @@
         "inspect_feature",
         "open_model_metadata"
       ]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/ev-map/public-chargers",
+      "local_id": "layer:ev-map:public-chargers",
+      "title": "Public EV Charging Locations",
+      "description": "Individual public charging locations in the frozen Alkmaar NDW/DOT-NL inventory with deterministic modelled profile summaries.",
+      "model": "ev",
+      "group": "mobility",
+      "model_id": "ev-map",
+      "model_version": "0.3.0",
+      "metadata_contract_version": "1.0.0",
+      "table": "public_ev_chargers",
+      "geoserver_layer": "public_ev_chargers",
+      "source": {
+        "type": "model_api",
+        "base_url": "http://ev-api:8000",
+        "metadata_url": "/models/ev/metadata",
+        "repository": "https://github.com/JortGroen/EV-map",
+        "release_commit": "54a894cc7c96c7d8c27e344ee2724012d5ae4e3d",
+        "container_image": "ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec",
+        "crs": "EPSG:4326",
+        "coverage": "Alkmaar frozen source-selection envelope"
+      },
+      "feature_id_property": "feature_id",
+      "source_feature_id_property": "source_feature_id",
+      "feature_uri_property": "feature_uri",
+      "geometry_type": "Point",
+      "selectable_feature_type": "public_ev_charger",
+      "spatial_resolution": "individual_public_charging_location",
+      "temporal_resolution": "static_inventory_with_pt15m_profile_link",
+      "attributes": [
+        {
+          "name": "feature_id",
+          "type": "string"
+        },
+        {
+          "name": "source_feature_id",
+          "type": "string"
+        },
+        {
+          "name": "address",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "operator_name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "connector_count",
+          "type": "integer"
+        },
+        {
+          "name": "available_connector_count",
+          "type": "integer"
+        },
+        {
+          "name": "max_power_kw",
+          "type": "number",
+          "unit": "kW",
+          "nullable": true
+        },
+        {
+          "name": "modeled_annual_energy_kwh",
+          "type": "number",
+          "unit": "kWh/year",
+          "nullable": true
+        },
+        {
+          "name": "modeled_annual_peak_kw",
+          "type": "number",
+          "unit": "kW",
+          "nullable": true
+        },
+        {
+          "name": "profile_available",
+          "type": "boolean"
+        },
+        {
+          "name": "datacompleetheid",
+          "type": "integer"
+        },
+        {
+          "name": "datacompleetheid_label",
+          "type": "string"
+        },
+        {
+          "name": "datacompleetheid_method_version",
+          "type": "string"
+        },
+        {
+          "name": "source_retrieved_at",
+          "type": "datetime"
+        },
+        {
+          "name": "model_version",
+          "type": "string"
+        }
+      ],
+      "data_quality": {
+        "kind": "qualitative_confidence",
+        "is_accuracy_percentage": false,
+        "method_version": "EV-DATA-COMPLETE-001",
+        "owner": "ev-map",
+        "maximum_current_score": 2,
+        "limitations": "Locations and connector inventory are source-backed; charging demand profiles are modelled rather than measured."
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_ev_chargers&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:public_ev_chargers"
+      },
+      "style": {
+        "style_status": "dashboard_ev_charger",
+        "default_visible": false
+      },
+      "actions": [
+        "inspect_feature",
+        "open_model_metadata",
+        "request_pt15m_profile"
+      ]
     }
   ]
 }

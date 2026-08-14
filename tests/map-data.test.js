@@ -164,6 +164,33 @@ test('does not substitute another layer when a grid WFS request fails', async ()
     );
 });
 
+test('loads public EV chargers as an independent GeoServer layer', async () => {
+    const calls = [];
+    const payload = collection({
+        feature_id: 'ev-charger-NL-ALL-NLLOC018787',
+        address: 'Diamantweg 10',
+        connector_count: 6,
+        datacompleetheid: 2
+    });
+    const result = await mapData.loadEvChargersFeatureCollection(async (url) => {
+        calls.push(url);
+        return response(true, 200, payload);
+    });
+
+    assert.equal(result.source, 'geoserver_wfs');
+    assert.equal(result.data.features[0].properties.connector_count, 6);
+    assert.deepEqual(calls, [mapData.EV_CHARGERS_WFS_URL]);
+});
+
+test('does not substitute another layer when EV WFS fails', async () => {
+    await assert.rejects(
+        () => mapData.loadEvChargersFeatureCollection(
+            async () => response(false, 503, {})
+        ),
+        /HTTP 503/
+    );
+});
+
 test('loads Wind turbines as an independent GeoServer point layer', async () => {
     const calls = [];
     const payload = {
@@ -264,11 +291,13 @@ test('grid details leave the persistent congestion controls in place', () => {
     assert.match(script, /updateGridReachSidePanel[\s\S]{0,250}selectScenarioTargetByPc6/);
     assert.match(script, /function applyGridVisibility\(fit = false\)/);
     assert.match(html, /id="r-wind-turbines"/);
+    assert.match(html, /id="r-ev-chargers"/);
     assert.match(html, /id="heat-layer-select"/);
     mapData.HEAT_LAYER_IDS.forEach((layerId) => assert.match(html, new RegExp(layerId)));
     assert.match(script, /function updateGridLineSidePanel\(prop\)/);
     assert.match(script, /function updateGridTransformerSidePanel\(prop\)/);
     assert.match(script, /function updateWindTurbineSidePanel\(prop\)/);
+    assert.match(script, /function updateEvSidePanel\(prop\)/);
     assert.match(script, /function updateHeatSidePanel\(layerId, prop\)/);
     assert.equal((html.match(/id="run-sim-btn"/g) || []).length, 1);
     assert.doesNotMatch(script, /updateGridLineSidePanel[\s\S]{0,200}selectScenarioTarget/);

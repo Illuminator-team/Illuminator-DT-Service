@@ -17,6 +17,7 @@ let gridLvMvReachLayer;
 let gridMvHvReachLayer;
 let gridHasFit = false;
 let windTurbinesLayer;
+let evChargersLayer;
 const heatMapLayers = {};
 let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
@@ -29,6 +30,7 @@ const gridLayerSources = {
 };
 const gridCanvasRenderer = L.canvas({ padding: 0.5 });
 let windTurbinesLayerSource = 'loading';
+let evChargersLayerSource = 'loading';
 const heatLayerSources = Object.fromEntries(
     Pc6MapData.HEAT_LAYER_IDS.map((layerId) => [layerId, 'loading'])
 );
@@ -237,6 +239,17 @@ function gridTransformerStyle(feature) {
     };
 }
 
+function evChargerStyle(feature) {
+    const maximumPower = Number(feature.properties.max_power_kw || 0);
+    return {
+        radius: maximumPower >= 50 ? 7 : maximumPower >= 22 ? 6 : 5,
+        color: '#ffffff',
+        weight: 1.5,
+        fillColor: '#008b8b',
+        fillOpacity: 0.9
+    };
+}
+
 function getReachColor(componentId) {
     const colors = ['#16845b', '#9b5d18', '#7a4c9f', '#227ca3', '#a33f50', '#587c2d', '#8b6d1f'];
     const hash = String(componentId || '').split('').reduce(
@@ -319,6 +332,8 @@ function updateLayerStatus(layerName, source, fallbackReason = null) {
         gridLayerSources[layerName] = source;
     } else if (layerName === 'public_wind_turbines') {
         windTurbinesLayerSource = source;
+    } else if (layerName === 'ev_chargers') {
+        evChargersLayerSource = source;
     } else if (Pc6MapData.HEAT_LAYER_IDS.includes(layerName)) {
         heatLayerSources[layerName] = source;
     } else {
@@ -338,6 +353,7 @@ function refreshLayerStatus() {
         pc6: pc6LayerSource,
         pv_capacity: pvLayerSource,
         grid_network: getGridNetworkSource(),
+        ev_chargers: evChargersLayerSource,
         public_wind_turbines: windTurbinesLayerSource,
         ...heatLayerSources
     };
@@ -349,12 +365,14 @@ function updateLayerQualitySummary() {
     const meter = document.getElementById('layer-quality-meter');
     const isPvCapacity = currentMetric === 'pv_capacity';
     const isGrid = currentMetric === 'grid_network';
+    const isEv = currentMetric === 'ev_chargers';
     const isWind = currentMetric === 'public_wind_turbines';
     const isHeat = Pc6MapData.HEAT_LAYER_IDS.includes(currentMetric);
     label.textContent = (isGrid || isWind || isHeat)
         ? 'Datacompleetheid per component'
-        : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
-    meter.title = (isPvCapacity || isGrid || isWind || isHeat)
+        : isEv ? 'Datacompleetheid 0-2/3'
+            : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
+    meter.title = (isPvCapacity || isGrid || isWind || isHeat || isEv)
         ? 'Feature-level confidence varies across this layer'
         : 'Layer-level confidence';
 }
@@ -415,6 +433,7 @@ function setActiveMapLayer(fitActive = false) {
     const independentLayers = {
         pc6: pc6Layer,
         pv_capacity: pvLayer,
+        ev_chargers: evChargersLayer,
         public_wind_turbines: windTurbinesLayer,
         ...heatMapLayers
     };
@@ -502,6 +521,33 @@ async function loadMap() {
         const pvControl = document.getElementById('r-pv-capacity');
         pvControl.disabled = true;
         pvControl.parentElement.title = 'PV capacity layer is unavailable';
+    }
+
+    try {
+        const result = await Pc6MapData.loadEvChargersFeatureCollection(fetch);
+        evChargersLayer = L.geoJSON(result.data, {
+            pointToLayer: (feature, latlng) => L.circleMarker(
+                latlng,
+                evChargerStyle(feature)
+            ),
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 3 }),
+                    mouseout: (event) => event.target.setStyle(evChargerStyle(feature)),
+                    click: (event) => {
+                        updateEvSidePanel(feature.properties);
+                        map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 16));
+                    }
+                });
+            }
+        });
+        updateLayerStatus('ev_chargers', result.source);
+    } catch (error) {
+        console.error('EV charger data load failed:', error);
+        updateLayerStatus('ev_chargers', 'failed', error.message);
+        const control = document.getElementById('r-ev-chargers');
+        control.disabled = true;
+        control.parentElement.title = 'EV charger layer is unavailable';
     }
 
     try {
@@ -734,6 +780,11 @@ function updateLegend() {
         if (currentMetric === 'public_wind_turbines') {
             div.innerHTML = '<div class="legend-title">WIND TURBINES</div>';
             div.innerHTML += '<i style="background:#16856b"></i> Published position and capacity<br>';
+            return div;
+        }
+        if (currentMetric === 'ev_chargers') {
+            div.innerHTML = '<div class="legend-title">PUBLIC EV CHARGERS</div>';
+            div.innerHTML += '<i class="point-legend" style="background:#008b8b"></i> Charging location<br>';
             return div;
         }
         if (Pc6MapData.HEAT_LAYER_IDS.includes(currentMetric)) {
@@ -994,12 +1045,54 @@ function qualityMarkup(prop) {
     const completeness = Number(prop.datacompleetheid ?? 0);
     const label = escapeHtml(prop.datacompleetheid_label || 'not assessed');
     const summary = escapeHtml(
-        prop.datacompleetheid_summary || 'No quality explanation available.'
+        prop.datacompleetheid_summary || prop.completeness_reason ||
+            prop.quality_evidence?.summary || 'No quality explanation available.'
     );
     return `
         <div class="feature-quality" data-level="${completeness}" title="${summary}">
             <span class="quality-score">${completeness}/3</span>
             <span><strong>Datacompleetheid</strong><br>${label}</span>
+        </div>
+    `;
+}
+
+function updateEvSidePanel(prop) {
+    const formatNum = (value, digits = 0) => value == null
+        ? 'Unknown'
+        : Number(value).toLocaleString('nl-NL', { maximumFractionDigits: digits });
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">Public EV charger</div>
+        <div class="feature-identifier">${escapeHtml(prop.address || prop.source_feature_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Operator</div>
+                    <div class="data-value">${escapeHtml(prop.operator_name || 'Unknown')}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Connectors</div>
+                    <div class="data-value">${formatNum(prop.available_connector_count)} / ${formatNum(prop.connector_count)} available</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Maximum connector power</div>
+                    <div class="data-value">${formatNum(prop.max_power_kw, 1)} kW</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Modelled annual demand</div>
+                    <div class="data-value">${formatNum(prop.modeled_annual_energy_kwh)} kWh</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Modelled annual peak</div>
+                    <div class="data-value">${formatNum(prop.modeled_annual_peak_kw, 1)} kW</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>PUBLIC CHARGER INVENTORY</strong><br>
+            Profile: ${prop.profile_available ? 'PT15M profile available' : 'No profile available'}<br>
+            Model version: ${escapeHtml(prop.model_version)}<br>
+            <a href="/models/ev/metadata" target="_blank" rel="noopener">Model metadata</a>
         </div>
     `;
 }

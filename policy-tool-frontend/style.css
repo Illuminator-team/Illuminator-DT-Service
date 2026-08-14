@@ -548,6 +548,10 @@ button {
     grid-template-columns: minmax(0, 1fr);
 }
 
+.info.legend i.point-legend {
+    border-radius: 50%;
+}
+
 .compact-value {
     overflow-wrap: anywhere;
     font-size: 12px;
