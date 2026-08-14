@@ -215,7 +215,8 @@ class WindContractTest(unittest.TestCase):
         payload = path.read_bytes()
         fixture = json.loads(payload)
 
-        self.assertEqual(hashlib.sha256(payload).hexdigest(), FIXTURE_SHA256)
+        normalized_payload = payload.replace(b"\r\n", b"\n")
+        self.assertEqual(hashlib.sha256(normalized_payload).hexdigest(), FIXTURE_SHA256)
         self.assertTrue(fixture["fixture_only"])
         self.assertEqual(len(fixture["features"]), 4)
         stable = next(item for item in fixture["features"] if item["id"] == "wind-turbine-2811")

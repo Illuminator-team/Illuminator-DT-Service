@@ -14,12 +14,83 @@ let pvLayer;
 let gridLinesLayer;
 let gridTransformersLayer;
 let windTurbinesLayer;
+const heatMapLayers = {};
 let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
 let pvLayerSource = 'loading';
 let gridLinesLayerSource = 'loading';
 let gridTransformersLayerSource = 'loading';
 let windTurbinesLayerSource = 'loading';
+const heatLayerSources = Object.fromEntries(
+    Pc6MapData.HEAT_LAYER_IDS.map((layerId) => [layerId, 'loading'])
+);
+
+const HEAT_LAYER_UI = {
+    reported_neighbourhood_heat_consumers: {
+        title: 'Neighbourhood heat consumers',
+        color: '#b64b4b',
+        geometry: 'area',
+        fields: [
+            ['area_name', 'Area', ''],
+            ['reported_connected_share_pct', 'Reported connected share', '%'],
+            ['connected_dwellings_estimate', 'Connected dwellings estimate', ''],
+            ['heat_demand_estimate_gj_per_year', 'Estimated heat demand', ' GJ/year']
+        ]
+    },
+    inferred_pc6_heat_consumers: {
+        title: 'Inferred PC6 heat consumers',
+        color: '#d47b51',
+        geometry: 'area',
+        fields: [
+            ['postcode6', 'PC6', ''],
+            ['allocated_connected_dwellings_est', 'Allocated dwellings', ''],
+            ['heat_demand_gj_year_est', 'Estimated heat demand', ' GJ/year'],
+            ['liander_crosscheck_status', 'Liander cross-check', '']
+        ]
+    },
+    registered_heat_network_developments: {
+        title: 'Registered heat-network development',
+        color: '#d0a329',
+        geometry: 'area',
+        fields: [
+            ['development_name', 'Development', ''],
+            ['development_phase', 'Phase', ''],
+            ['status_date', 'Status date', ''],
+            ['planned_heat_source_description', 'Planned source', '']
+        ]
+    },
+    documented_actual_heat_sources: {
+        title: 'Documented actual heat source',
+        color: '#c23958',
+        geometry: 'point',
+        fields: [
+            ['source_name', 'Source', ''],
+            ['source_status', 'Status', ''],
+            ['technology', 'Technology', '']
+        ]
+    },
+    documented_large_heat_consumers: {
+        title: 'Documented large heat consumer',
+        color: '#4e606d',
+        geometry: 'point',
+        fields: [
+            ['consumer_name', 'Consumer', ''],
+            ['connection_evidence', 'Connection evidence', ''],
+            ['annual_heat_consumption', 'Annual consumption', ' GJ/year']
+        ]
+    },
+    potential_heat_sources: {
+        title: 'Potential heat source',
+        color: '#287f8f',
+        geometry: 'point',
+        fields: [
+            ['source_name', 'Source', ''],
+            ['source_type', 'Type', ''],
+            ['potential_thermal_capacity_mw', 'Potential capacity', ' MWth'],
+            ['temperature_c', 'Temperature', ' °C']
+        ]
+    }
+};
 
 // Unified Color Logic
 function getColor(d, type) {
@@ -169,6 +240,26 @@ function windTurbineStyle(feature) {
     };
 }
 
+function heatLayerStyle(layerId) {
+    const config = HEAT_LAYER_UI[layerId];
+    if (config.geometry === 'point') {
+        return {
+            radius: 7,
+            color: '#ffffff',
+            weight: 2,
+            fillColor: config.color,
+            fillOpacity: 0.95
+        };
+    }
+    return {
+        fillColor: config.color,
+        weight: 1.2,
+        opacity: 0.85,
+        color: '#ffffff',
+        fillOpacity: 0.58
+    };
+}
+
 // Data Loading
 function updateLayerStatus(layerName, source, fallbackReason = null) {
     if (layerName === 'pv_capacity') {
@@ -179,6 +270,8 @@ function updateLayerStatus(layerName, source, fallbackReason = null) {
         gridTransformersLayerSource = source;
     } else if (layerName === 'public_wind_turbines') {
         windTurbinesLayerSource = source;
+    } else if (Pc6MapData.HEAT_LAYER_IDS.includes(layerName)) {
+        heatLayerSources[layerName] = source;
     } else {
         pc6LayerSource = source;
     }
@@ -204,7 +297,8 @@ function refreshLayerStatus() {
         pv_capacity: pvLayerSource,
         grid_lines: gridLinesLayerSource,
         grid_transformers: gridTransformersLayerSource,
-        public_wind_turbines: windTurbinesLayerSource
+        public_wind_turbines: windTurbinesLayerSource,
+        ...heatLayerSources
     };
     updateLayerStatus(activeLayer, sources[activeLayer]);
 }
@@ -215,10 +309,11 @@ function updateLayerQualitySummary() {
     const isPvCapacity = currentMetric === 'pv_capacity';
     const isGrid = currentMetric.startsWith('grid_');
     const isWind = currentMetric === 'public_wind_turbines';
-    label.textContent = (isGrid || isWind)
+    const isHeat = Pc6MapData.HEAT_LAYER_IDS.includes(currentMetric);
+    label.textContent = (isGrid || isWind || isHeat)
         ? 'Datacompleetheid per component'
         : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
-    meter.title = (isPvCapacity || isGrid || isWind)
+    meter.title = (isPvCapacity || isGrid || isWind || isHeat)
         ? 'Feature-level confidence varies across this layer'
         : 'Layer-level confidence';
 }
@@ -229,7 +324,8 @@ function setActiveMapLayer() {
         pv_capacity: pvLayer,
         grid_lines: gridLinesLayer,
         grid_transformers: gridTransformersLayer,
-        public_wind_turbines: windTurbinesLayer
+        public_wind_turbines: windTurbinesLayer,
+        ...heatMapLayers
     };
     const activeLayerName = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
     Object.entries(layers).forEach(([layerName, layer]) => {
@@ -240,7 +336,9 @@ function setActiveMapLayer() {
     const activeLayer = layers[activeLayerName];
     if (activeLayer && !map.hasLayer(activeLayer)) {
         activeLayer.addTo(map);
-        if (activeLayerName !== 'pc6') map.fitBounds(activeLayer.getBounds());
+        if (activeLayerName !== 'pc6' && activeLayer.getLayers().length > 0) {
+            map.fitBounds(activeLayer.getBounds());
+        }
     }
     if (activeLayerName === 'pc6' && pc6Layer) pc6Layer.setStyle(style);
     refreshLayerStatus();
@@ -387,6 +485,46 @@ async function loadMap() {
         control.parentElement.title = 'Wind turbine layer is unavailable';
     }
 
+    await Promise.all(Pc6MapData.HEAT_LAYER_IDS.map(async (layerId) => {
+        try {
+            const result = await Pc6MapData.loadHeatFeatureCollection(fetch, layerId);
+            const config = HEAT_LAYER_UI[layerId];
+            heatMapLayers[layerId] = L.geoJSON(result.data, {
+                style: () => heatLayerStyle(layerId),
+                pointToLayer: (feature, latlng) => L.circleMarker(
+                    latlng,
+                    heatLayerStyle(layerId)
+                ),
+                onEachFeature: (feature, layer) => {
+                    layer.on({
+                        mouseover: (event) => event.target.setStyle({ weight: 4 }),
+                        mouseout: (event) => event.target.setStyle(heatLayerStyle(layerId)),
+                        click: (event) => {
+                            updateHeatSidePanel(layerId, feature.properties);
+                            if (config.geometry === 'point') {
+                                map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 15));
+                            } else {
+                                map.fitBounds(event.target.getBounds(), {
+                                    padding: [40, 40],
+                                    maxZoom: 16
+                                });
+                            }
+                        }
+                    });
+                }
+            });
+            updateLayerStatus(layerId, result.source);
+        } catch (error) {
+            console.error(`${layerId} data load failed:`, error);
+            updateLayerStatus(layerId, 'failed', error.message);
+            const option = document.querySelector(
+                `#heat-layer-select option[value="${layerId}"]`
+            );
+            option.disabled = true;
+            option.title = 'Layer unavailable';
+        }
+    }));
+
     setActiveMapLayer();
 }
 
@@ -440,6 +578,12 @@ function updateLegend() {
         if (currentMetric === 'public_wind_turbines') {
             div.innerHTML = '<div class="legend-title">WIND TURBINES</div>';
             div.innerHTML += '<i style="background:#16856b"></i> Published position and capacity<br>';
+            return div;
+        }
+        if (Pc6MapData.HEAT_LAYER_IDS.includes(currentMetric)) {
+            const config = HEAT_LAYER_UI[currentMetric];
+            div.innerHTML = '<div class="legend-title">HEAT EVIDENCE</div>';
+            div.innerHTML += `<i style="background:${config.color}"></i> ${config.title}<br>`;
             return div;
         }
         const isPvCapacity = currentMetric === 'pv_capacity';
@@ -804,6 +948,39 @@ function updateWindTurbineSidePanel(prop) {
     `;
 }
 
+function formatHeatValue(value, unit) {
+    if (value === null || value === undefined || value === '') return 'Not available';
+    const rendered = typeof value === 'number'
+        ? value.toLocaleString('nl-NL', { maximumFractionDigits: 2 })
+        : String(value).replaceAll('_', ' ');
+    return `${rendered}${unit}`;
+}
+
+function updateHeatSidePanel(layerId, prop) {
+    const config = HEAT_LAYER_UI[layerId];
+    const rows = config.fields.map(([field, label, unit]) => `
+        <div class="data-group">
+            <div class="data-label">${escapeHtml(label)}</div>
+            <div class="data-value compact-value">${escapeHtml(formatHeatValue(prop[field], unit))}</div>
+        </div>
+    `).join('');
+    const evidenceStatus = String(prop.evidence_status || 'Not available').replaceAll('_', ' ');
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">${escapeHtml(config.title)}</div>
+        <div class="feature-identifier">${escapeHtml(prop.feature_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">${rows}</div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>HEAT-NET-MAP EVIDENCE</strong><br>
+            Evidence: ${escapeHtml(evidenceStatus)}<br>
+            Snapshot: ${escapeHtml(prop.model_snapshot_id || 'Unknown')}<br>
+            <a href="/models/heat/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
 function refreshVisuals(originalProps) {
     // This forces Leaflet to re-calculate the styles and patterns
     if (pc6Layer) pc6Layer.setStyle(style);
@@ -830,9 +1007,19 @@ document.getElementById('search-input').addEventListener('keypress', (e) => {
 
 document.querySelectorAll('input[name="layer"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
+        document.getElementById('heat-layer-select').value = '';
         currentMetric = e.target.value;
         setActiveMapLayer();
     });
+});
+
+document.getElementById('heat-layer-select').addEventListener('change', (event) => {
+    if (!event.target.value) return;
+    document.querySelectorAll('input[name="layer"]').forEach((radio) => {
+        radio.checked = false;
+    });
+    currentMetric = event.target.value;
+    setActiveMapLayer();
 });
 
 let energyChart = null; 
