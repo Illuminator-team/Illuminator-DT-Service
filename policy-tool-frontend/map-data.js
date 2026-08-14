@@ -11,6 +11,7 @@
     const GRID_TRANSFORMERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_transformers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_LV_MV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lv_mv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_MV_HV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_mv_hv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const EV_CHARGERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_ev_chargers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const WIND_TURBINES_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_wind_turbines&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const HEAT_LAYER_IDS = Object.freeze([
         'reported_neighbourhood_heat_consumers',
@@ -102,6 +103,15 @@
         return { data, source: 'geoserver_wfs', fallbackReason: null };
     }
 
+    async function loadEvChargersFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(
+            fetchImpl,
+            EV_CHARGERS_WFS_URL,
+            'EV chargers GeoServer WFS'
+        );
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
     async function loadWindTurbinesFeatureCollection(fetchImpl) {
         const data = await fetchCollection(fetchImpl, WIND_TURBINES_WFS_URL, 'Wind turbines GeoServer WFS');
         return { data, source: 'geoserver_wfs', fallbackReason: null };
@@ -123,6 +133,7 @@
     return {
         FALLBACK_QUALITY,
         FALLBACK_URL,
+        EV_CHARGERS_WFS_URL,
         GRID_LINES_WFS_URL,
         GRID_LV_MV_REACH_WFS_URL,
         GRID_MV_HV_REACH_WFS_URL,
@@ -137,6 +148,7 @@
         loadGridLvMvReachFeatureCollection,
         loadGridMvHvReachFeatureCollection,
         loadGridTransformersFeatureCollection,
+        loadEvChargersFeatureCollection,
         loadHeatFeatureCollection,
         loadPc6FeatureCollection,
         loadPvFeatureCollection,

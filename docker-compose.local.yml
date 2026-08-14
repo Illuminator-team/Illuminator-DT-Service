@@ -62,6 +62,12 @@ services:
       traefik.http.routers.heat-api.entrypoints: web
       traefik.http.routers.heat-api.tls: "false"
 
+  ev-api:
+    labels:
+      traefik.http.routers.ev-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/ev`)
+      traefik.http.routers.ev-api.entrypoints: web
+      traefik.http.routers.ev-api.tls: "false"
+
   layer-publisher:
     environment:
       WIND_EXPECTED_DATA_MODE: fixture

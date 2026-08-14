@@ -8,6 +8,8 @@ from xml.sax.saxutils import escape
 
 import psycopg2
 import requests
+from ev import EvArtifact, fetch_ev_artifact, get_ev_readiness_signature
+from ev_postgis import sync_ev_layer
 from grid import GridArtifact, fetch_grid_artifact, get_grid_readiness_signature
 from grid_postgis import sync_grid_layer
 from pc6 import Pc6Record, get_layer_config, load_manifest, load_pc6_records
@@ -82,6 +84,7 @@ HEAT_CONFIGS = {
     layer_id: get_layer_config(MANIFEST, f"layer:heat-net-map:{layer_id}")
     for layer_id in HEAT_LAYER_IDS
 }
+EV_CONFIG = get_layer_config(MANIFEST, "layer:ev-map:public-chargers")
 PC6_SOURCE_PATH = Path(os.getenv("PC6_SOURCE_PATH", PC6_CONFIG["source"]["path"]))
 PV_API_URL = os.getenv("PV_API_URL", PV_CONFIG["source"]["base_url"]).rstrip("/")
 PV_EXPECTED_RELEASE_COMMIT = os.getenv(
@@ -131,6 +134,13 @@ HEAT_EXPECTED_CONTAINER_DIGEST = os.getenv(
     next(iter(HEAT_CONFIGS.values()))["source"]["container_digest"],
 )
 HEAT_EXPECTED_DATA_MODE = os.getenv("HEAT_EXPECTED_DATA_MODE", "real_source")
+EV_API_URL = os.getenv("EV_API_URL", EV_CONFIG["source"]["base_url"]).rstrip("/")
+EV_EXPECTED_RELEASE_COMMIT = os.getenv(
+    "EV_EXPECTED_RELEASE_COMMIT", EV_CONFIG["source"]["release_commit"]
+)
+EV_EXPECTED_CONTAINER_IMAGE = os.getenv(
+    "EV_EXPECTED_CONTAINER_IMAGE", EV_CONFIG["source"]["container_image"]
+)
 
 GEOSERVER_REST_URL = os.getenv(
     "GEOSERVER_REST_URL", "http://geo:8080/geoserver/rest"
@@ -164,6 +174,8 @@ WIND_LAYER = WIND_CONFIG["geoserver_layer"]
 HEAT_TABLES = {
     layer_id: config["table"] for layer_id, config in HEAT_CONFIGS.items()
 }
+EV_TABLE = EV_CONFIG["table"]
+EV_LAYER = EV_CONFIG["geoserver_layer"]
 SOLAR_TABLE = "solar_panel_layer"
 SOLAR_LAYER = "solar_panel_layer"
 
@@ -704,6 +716,29 @@ def publish_heat() -> HeatArtifact:
     return artifact
 
 
+def publish_ev() -> EvArtifact:
+    artifact = fetch_ev_artifact(
+        EV_API_URL,
+        expected_release_commit=EV_EXPECTED_RELEASE_COMMIT,
+        expected_container_image=EV_EXPECTED_CONTAINER_IMAGE,
+        expected_model_version=EV_CONFIG["model_version"],
+        expected_metadata_contract_version=EV_CONFIG["metadata_contract_version"],
+        expected_quality_method_version=EV_CONFIG["data_quality"]["method_version"],
+    )
+    stats = sync_ev_layer(DB_CONN, table=EV_TABLE, records=artifact.records)
+    ensure_feature_type(
+        EV_LAYER, EV_CONFIG["title"], EV_CONFIG["source"]["crs"]
+    )
+    LOGGER.info(
+        "EV charger layer synchronized: total=%s changed=%s deleted=%s output=%s",
+        stats["total"],
+        stats["changed"],
+        stats["deleted"],
+        artifact.output_id,
+    )
+    return artifact
+
+
 def create_solar_table() -> None:
     with psycopg2.connect(**DB_CONN) as connection:
         with connection.cursor() as cursor:
@@ -776,6 +811,7 @@ def run() -> None:
     publish_grid()
     publish_wind()
     publish_heat()
+    publish_ev()
     create_solar_table()
     ensure_feature_type(SOLAR_LAYER, "Tutorial Solar Panel", "EPSG:4326")
     try:
@@ -795,6 +831,7 @@ def run() -> None:
     last_heat_signature = get_heat_readiness_signature(
         HEAT_API_URL, expected_data_mode=HEAT_EXPECTED_DATA_MODE
     )
+    last_ev_signature = get_ev_readiness_signature(EV_API_URL)
     while True:
         time.sleep(PUBLISH_INTERVAL_SECONDS)
         current_signature = source_signature(PC6_SOURCE_PATH)
@@ -843,6 +880,16 @@ def run() -> None:
         except (RuntimeError, ValueError):
             LOGGER.warning(
                 "Could not check or refresh the Heat layers",
+                exc_info=True,
+            )
+        try:
+            current_ev_signature = get_ev_readiness_signature(EV_API_URL)
+            if current_ev_signature != last_ev_signature:
+                publish_ev()
+                last_ev_signature = current_ev_signature
+        except (requests.RequestException, RuntimeError, TypeError, ValueError):
+            LOGGER.warning(
+                "Could not check or refresh the EV charger layer",
                 exc_info=True,
             )
         try:

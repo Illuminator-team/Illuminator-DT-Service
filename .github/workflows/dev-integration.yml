@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Validate PC6, PV, Grid, Wind, and Heat publication contracts
+      - name: Validate PC6, PV, Grid, Wind, Heat, and EV publication contracts
         run: python -m unittest discover -s tests -p "test_*.py"
 
       - name: Test dashboard layer adapters
@@ -67,7 +67,7 @@ jobs:
       - name: Start integrated stack
         run: docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml up -d --build
 
-      - name: Run integrated PC6, PV, Grid, Wind, and Heat smoke checks
+      - name: Run integrated PC6, PV, Grid, Wind, Heat, and EV smoke checks
         run: python tests/smoke_stack.py --base-url http://127.0.0.1 --expected-grid-data-mode fixture
 
       - name: Verify repeatable publisher execution
@@ -81,6 +81,7 @@ jobs:
           grep -Fq "grid_lv_mv_transformer_reach synchronized: total=2 changed=0 deleted=0" <<<"${output}"
           grep -Fq "grid_mv_hv_transformer_reach synchronized: total=2 changed=0 deleted=0" <<<"${output}"
           grep -Fq "Wind layer synchronized: total=4 changed=0 deleted=0" <<<"${output}"
+          grep -Fq "EV charger layer synchronized: total=784 changed=0 deleted=0" <<<"${output}"
           for layer in \
             reported_neighbourhood_heat_consumers \
             inferred_pc6_heat_consumers \
