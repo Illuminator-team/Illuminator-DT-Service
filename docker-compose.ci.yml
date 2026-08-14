@@ -57,28 +57,52 @@ services:
       GRID_EXPORT_BBOX: 4.74454,52.629131,4.835248,52.644642
 
   orchestration-grid-init:
-    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
+    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
+    user: "10001:10001"
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     command:
       - python
       - -m
       - grid_api
       - initialize
       - --fixture
-      - /fixtures/pc6_1483aa_grid_fixture.json
+      - /fixtures/orchestration_1483aa_bu03610709_grid_fixture.json
+      - --buurt-pc6-crosswalk
+      - /crosswalk/alkmaar-buurt-pc6-2025.json
       - --allow-fixture
     environment:
       GRID_API_DATA_DIR: /data
+      GRID_API_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
     volumes:
       - orchestration-grid-model-data:/data
-      - ./tests/fixtures/grid/pc6_1483aa_grid_fixture.json:/fixtures/pc6_1483aa_grid_fixture.json:ro
+      - grid-crosswalk-data:/crosswalk:ro
+      - ./tests/fixtures/grid/orchestration_1483aa_bu03610709_grid_fixture.json:/fixtures/orchestration_1483aa_bu03610709_grid_fixture.json:ro
+    depends_on:
+      grid-crosswalk-init:
+        condition: service_completed_successfully
     restart: "no"
 
   orchestration-grid-api:
-    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
+    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
     init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
+      GRID_API_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
     volumes:
       - orchestration-grid-model-data:/data
     depends_on:

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -15,14 +18,24 @@ import requests
 
 PT15M = timedelta(minutes=15)
 PC6_PATTERN = re.compile(r"^[1-9][0-9]{3}[A-Z]{2}$")
+CBS_BUURT_PATTERN = re.compile(r"^BU[0-9]{8}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+OCI_DIGEST_PATTERN = re.compile(r"^ghcr\.io/[^@]+@sha256:[0-9a-f]{64}$")
 CONSUMPTION_LAYER_ID = "residential_electricity_pc6_profiles_pt15m"
 CONSUMPTION_MODEL_ID = "consumption-map"
 CONSUMPTION_MODEL_VERSION = "0.4.0"
 CONSUMPTION_RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
 GRID_HIERARCHY_POLICY = "nearest_electrical_root_v1"
 PROVISIONAL_AGGREGATION_MODE = "two_stage_provisional_estimated"
+PV_MODEL_ID = "pv-map"
+PV_CAPACITY_MODEL_ID = "pv-capacity-model"
+PV_LAYER_ID = "pv_production_profile"
+PV_METADATA_CONTRACT_VERSION = "2.1.0"
+PV_PROFILE_CONTRACT_VERSION = "1.0.0"
+PV_SCENARIO = "koersvaste_middenweg"
+PV_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
+MAX_REQUEST_TIMEOUT_SECONDS = 600.0
 
 
 class OrchestrationError(RuntimeError):
@@ -65,6 +78,21 @@ class ConsumptionProfileIdentity:
     release_commit: str
 
 
+@dataclass(frozen=True)
+class PvProfileIdentity:
+    model_id: str
+    model_version: str
+    layer_id: str
+    layer_version: str
+    profile_id: str
+    profile_version: str
+    release_commit: str
+    container_image: str
+    artifact_sha256: str
+    geometry: dict[str, Any]
+    capacity_artifact_sha256: str
+
+
 class ModelApiClient:
     def __init__(
         self,
@@ -80,7 +108,7 @@ class ModelApiClient:
         self.base_url = base_url.rstrip("/")
         self.service_name = service_name
         self.session = session or requests.Session()
-        self.request_timeout = request_timeout
+        self.request_timeout = validate_request_timeout(request_timeout)
         self.poll_attempts = poll_attempts
         self.poll_interval = poll_interval
         self.sleeper = sleeper
@@ -268,6 +296,285 @@ class ModelApiClient:
             release_commit=release_commit,
         )
 
+    def get_pv_profile_identity(
+        self,
+        *,
+        buurt_code: str,
+        start: datetime,
+        end: datetime,
+        expected_release_commit: str,
+        expected_container_image: str,
+        expected_model_version: str,
+    ) -> PvProfileIdentity:
+        if not GIT_SHA_PATTERN.fullmatch(expected_release_commit):
+            raise ValueError("expected PV release commit must be a full Git SHA")
+        if not OCI_DIGEST_PATTERN.fullmatch(expected_container_image):
+            raise ValueError("expected PV image must be digest-qualified")
+        if not expected_model_version:
+            raise ValueError("expected PV model version is required")
+
+        metadata = self._json_request("GET", "/metadata")
+        profile_contract = metadata.get("production_profile")
+        links = metadata.get("links")
+        if (
+            metadata.get("model_id") != PV_CAPACITY_MODEL_ID
+            or metadata.get("model_version") != expected_model_version
+            or metadata.get("metadata_contract_version")
+            != PV_METADATA_CONTRACT_VERSION
+            or metadata.get("release_commit") != expected_release_commit
+            or metadata.get("container_image") != expected_container_image
+            or not isinstance(profile_contract, dict)
+            or profile_contract.get("layer_id") != PV_LAYER_ID
+            or profile_contract.get("profile_contract_version")
+            != PV_PROFILE_CONTRACT_VERSION
+            or profile_contract.get("contribution_kind") != "production"
+            or profile_contract.get("original_sign_convention")
+            != "positive_generation"
+            or profile_contract.get("interval_duration") != "PT15M"
+            or profile_contract.get("scenario_year") != 2035
+            or profile_contract.get("profile_calendar") != 2024
+            or not isinstance(links, dict)
+        ):
+            raise self._contract_error("PV metadata identity is incompatible")
+
+        capacity_output_path = links.get("latest_output")
+        if (
+            not isinstance(capacity_output_path, str)
+            or not re.fullmatch(r"/outputs/[0-9a-f]{32}", capacity_output_path)
+        ):
+            raise self._contract_error("PV capacity output is unavailable")
+        capacity_output = self._json_request("GET", capacity_output_path)
+        capacity_output_id = capacity_output_path.rsplit("/", 1)[-1]
+        capacity_links = capacity_output.get("links")
+        if (
+            capacity_output.get("output_id") != capacity_output_id
+            or capacity_output.get("output_type") != "capacity"
+            or capacity_output.get("layer_id") != "pv_capacity"
+            or capacity_output.get("media_type") != "application/geo+json"
+            or capacity_output.get("release_commit") != expected_release_commit
+            or capacity_output.get("container_image") != expected_container_image
+            or capacity_output.get("model_version") != expected_model_version
+            or not isinstance(capacity_output.get("byte_size"), int)
+            or isinstance(capacity_output.get("byte_size"), bool)
+            or not 1 <= capacity_output["byte_size"] <= PV_MAX_ARTIFACT_BYTES
+            or not isinstance(capacity_links, dict)
+            or capacity_links.get("data")
+            != f"/outputs/{capacity_output_id}/data"
+        ):
+            raise self._contract_error("PV capacity output identity drifted")
+        capacity_bytes, capacity_media_type = self._bytes_request(
+            "GET", capacity_links["data"]
+        )
+        if capacity_media_type != "application/geo+json":
+            raise self._contract_error("PV capacity output media type drifted")
+        self._verify_artifact(capacity_output, capacity_bytes, "PV capacity output")
+        try:
+            capacity_document = json.loads(capacity_bytes)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise self._contract_error("PV capacity output is invalid GeoJSON") from exc
+        features = capacity_document.get("features")
+        matches = (
+            [
+                feature
+                for feature in features
+                if isinstance(feature, dict)
+                and isinstance(feature.get("properties"), dict)
+                and feature["properties"].get("source_feature_id") == buurt_code
+                and feature["properties"].get("feature_id")
+                == f"pv_capacity_{buurt_code}"
+            ]
+            if capacity_document.get("type") == "FeatureCollection"
+            and isinstance(features, list)
+            else []
+        )
+        if len(matches) != 1 or not isinstance(matches[0].get("geometry"), dict):
+            raise self._contract_error("requested PV capacity feature is missing")
+        geometry = matches[0]["geometry"]
+        if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+            raise self._contract_error("PV capacity feature geometry is incompatible")
+
+        profile_id = pv_profile_id(buurt_code, PV_SCENARIO)
+        request = {
+            "output_type": "production_profile",
+            "spatial_selection": {
+                "type": "cbs_buurt",
+                "feature_ids": [buurt_code],
+            },
+            "time_window": {
+                "start": iso_z(start),
+                "end_exclusive": iso_z(end),
+            },
+            "scenario": PV_SCENARIO,
+            "scenario_year": 2035,
+            "profile_calendar": 2024,
+            "parameters": {},
+        }
+        run = self._json_request("POST", "/runs", json=request)
+        output_ids = run.get("output_ids")
+        if (
+            run.get("status") != "succeeded"
+            or run.get("model_id") != PV_CAPACITY_MODEL_ID
+            or run.get("model_version") != expected_model_version
+            or run.get("metadata_contract_version")
+            != PV_METADATA_CONTRACT_VERSION
+            or run.get("release_commit") != expected_release_commit
+            or run.get("container_image") != expected_container_image
+            or run.get("input") != request
+            or run.get("errors") != []
+            or not isinstance(run.get("run_id"), str)
+            or not re.fullmatch(r"[0-9a-f]{32}", run["run_id"])
+            or not isinstance(output_ids, list)
+            or len(output_ids) != 1
+            or not isinstance(output_ids[0], str)
+            or not re.fullmatch(r"[0-9a-f]{32}", output_ids[0])
+        ):
+            raise self._contract_error("PV production run identity drifted")
+        output_id = output_ids[0]
+        output = self._json_request("GET", f"/outputs/{output_id}")
+        output_links = output.get("links")
+        profile_metadata = output.get("profile_metadata")
+        expected_intervals = int((end - start) / PT15M)
+        if (
+            output.get("output_id") != output_id
+            or output.get("run_id") != run["run_id"]
+            or output.get("output_type") != "production_profile"
+            or output.get("layer_id") != PV_LAYER_ID
+            or output.get("media_type") != "text/csv"
+            or output.get("output_format") != "csv"
+            or output.get("contribution_kind") != "production"
+            or output.get("unit") != "kW"
+            or output.get("model_version") != expected_model_version
+            or output.get("release_commit") != expected_release_commit
+            or output.get("container_image") != expected_container_image
+            or output.get("profile_count") != 1
+            or output.get("interval_count") != expected_intervals
+            or not isinstance(output.get("byte_size"), int)
+            or isinstance(output.get("byte_size"), bool)
+            or not 1 <= output["byte_size"] <= PV_MAX_ARTIFACT_BYTES
+            or not isinstance(output_links, dict)
+            or output_links.get("data") != f"/outputs/{output_id}/data"
+            or not isinstance(profile_metadata, dict)
+            or profile_metadata.get("layer_id") != PV_LAYER_ID
+            or profile_metadata.get("profile_contract_version")
+            != PV_PROFILE_CONTRACT_VERSION
+            or profile_metadata.get("scenario") != PV_SCENARIO
+            or profile_metadata.get("scenario_year") != 2035
+            or profile_metadata.get("profile_calendar") != 2024
+            or profile_metadata.get("interval_count") != expected_intervals
+        ):
+            raise self._contract_error("PV production output identity drifted")
+        profile_records = profile_metadata.get("profiles")
+        records = (
+            [
+                item
+                for item in profile_records
+                if isinstance(item, dict)
+                and item.get("source_feature_id") == buurt_code
+                and item.get("feature_id") == f"pv_capacity_{buurt_code}"
+                and item.get("profile_id") == profile_id
+            ]
+            if isinstance(profile_records, list)
+            else []
+        )
+        if len(records) != 1:
+            raise self._contract_error("PV profile identity is missing")
+        profile_version = records[0].get("profile_version")
+        if not isinstance(profile_version, str) or not re.fullmatch(
+            r"1\.0\.0\+[0-9a-f]{16}", profile_version
+        ):
+            raise self._contract_error("PV profile version is invalid")
+
+        profile_bytes, profile_media_type = self._bytes_request(
+            "GET", output_links["data"]
+        )
+        if profile_media_type != "text/csv":
+            raise self._contract_error("PV production output media type drifted")
+        self._verify_artifact(output, profile_bytes, "PV production output")
+        try:
+            reader = csv.DictReader(io.StringIO(profile_bytes.decode("utf-8")))
+            rows = list(reader)
+        except (UnicodeDecodeError, csv.Error) as exc:
+            raise self._contract_error("PV production output is invalid CSV") from exc
+        if reader.fieldnames != [
+            "profile_id",
+            "profile_version",
+            "feature_id",
+            "source_feature_id",
+            "interval_start_utc",
+            "pv_ac_generation_kw",
+        ] or len(rows) != expected_intervals:
+            raise self._contract_error("PV production interval count drifted")
+        for index, row in enumerate(rows):
+            try:
+                value = float(row.get("pv_ac_generation_kw", ""))
+            except ValueError as exc:
+                raise self._contract_error("PV production value is invalid") from exc
+            expected_timestamp = start + index * PT15M
+            if (
+                row.get("profile_id") != profile_id
+                or row.get("profile_version") != profile_version
+                or row.get("feature_id") != f"pv_capacity_{buurt_code}"
+                or row.get("source_feature_id") != buurt_code
+                or not same_instant(row.get("interval_start_utc"), expected_timestamp)
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise self._contract_error("PV production CSV contract drifted")
+
+        return PvProfileIdentity(
+            model_id=PV_MODEL_ID,
+            model_version=expected_model_version,
+            layer_id=PV_LAYER_ID,
+            layer_version=PV_PROFILE_CONTRACT_VERSION,
+            profile_id=profile_id,
+            profile_version=profile_version,
+            release_commit=expected_release_commit,
+            container_image=expected_container_image,
+            artifact_sha256=output["sha256"],
+            geometry=geometry,
+            capacity_artifact_sha256=capacity_output["sha256"],
+        )
+
+    def _bytes_request(self, method: str, path: str) -> tuple[bytes, str]:
+        try:
+            response = self.session.request(
+                method,
+                f"{self.base_url}{path}",
+                timeout=self.request_timeout,
+            )
+            response.raise_for_status()
+            payload = response.content
+        except requests.Timeout as exc:
+            raise OrchestrationError(
+                "upstream_request_timeout",
+                f"{self.service_name} did not answer in time.",
+                service=self.service_name,
+                status_code=504,
+            ) from exc
+        except requests.RequestException as exc:
+            raise OrchestrationError(
+                "upstream_request_failed",
+                f"{self.service_name} returned an unsuccessful response.",
+                service=self.service_name,
+            ) from exc
+        if not isinstance(payload, bytes):
+            raise self._contract_error("artifact response is not bytes")
+        media_type = response.headers.get("content-type", "").split(";", 1)[0]
+        return payload, media_type
+
+    def _verify_artifact(
+        self, metadata: Mapping[str, Any], payload: bytes, context: str
+    ) -> None:
+        expected_sha = metadata.get("sha256")
+        expected_size = metadata.get("byte_size")
+        if (
+            not isinstance(expected_sha, str)
+            or not SHA256_PATTERN.fullmatch(expected_sha)
+            or expected_sha != hashlib.sha256(payload).hexdigest()
+            or expected_size != len(payload)
+        ):
+            raise self._contract_error(f"{context} integrity verification failed")
+
     def _completed_run(self, record: dict[str, Any], run_id: str) -> CompletedRun:
         outputs = record.get("outputs")
         if not isinstance(outputs, list) or len(outputs) != 1:
@@ -329,11 +636,19 @@ class TransformerProfileOrchestrator:
         grid_client: ModelApiClient,
         congestion_client: ModelApiClient,
         pc6_geometry_path: Path,
+        pv_client: ModelApiClient | None = None,
+        pv_expected_release_commit: str | None = None,
+        pv_expected_container_image: str | None = None,
+        pv_expected_model_version: str | None = None,
     ) -> None:
         self.consumption_client = consumption_client
         self.grid_client = grid_client
         self.congestion_client = congestion_client
         self.pc6_geometry_path = pc6_geometry_path
+        self.pv_client = pv_client
+        self.pv_expected_release_commit = pv_expected_release_commit
+        self.pv_expected_container_image = pv_expected_container_image
+        self.pv_expected_model_version = pv_expected_model_version
 
     def aggregate_pc6(
         self,
@@ -458,12 +773,187 @@ class TransformerProfileOrchestrator:
             "result": result,
         }
 
+    def aggregate_pv_buurt(
+        self,
+        buurt_code: str,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> dict[str, Any]:
+        normalized_buurt = normalize_cbs_buurt(buurt_code)
+        start_utc, end_utc = validate_pv_window(start, end)
+        if (
+            self.pv_client is None
+            or self.pv_expected_release_commit is None
+            or self.pv_expected_container_image is None
+            or self.pv_expected_model_version is None
+        ):
+            raise OrchestrationError(
+                "pv_integration_unconfigured",
+                "PV transformer-profile integration is not configured.",
+                service="pv",
+                status_code=503,
+            )
+        try:
+            profile_identity = self.pv_client.get_pv_profile_identity(
+                buurt_code=normalized_buurt,
+                start=start_utc,
+                end=end_utc,
+                expected_release_commit=self.pv_expected_release_commit,
+                expected_container_image=self.pv_expected_container_image,
+                expected_model_version=self.pv_expected_model_version,
+            )
+        except ValueError as exc:
+            raise OrchestrationError(
+                "pv_integration_unconfigured",
+                "PV transformer-profile release identity is invalid.",
+                service="pv",
+                status_code=503,
+            ) from exc
+
+        selection_bbox = geometry_bbox(profile_identity.geometry)
+        grid_payload = {
+            "operation": "assign_feature_hierarchy",
+            "hierarchy_policy": GRID_HIERARCHY_POLICY,
+            "selection": {"type": "bbox", "bbox": selection_bbox},
+            "source": {
+                "source_model_id": profile_identity.model_id,
+                "source_model_version": profile_identity.model_version,
+                "source_layer_id": profile_identity.layer_id,
+                "source_layer_version": profile_identity.layer_version,
+                "source_release_id": profile_identity.release_commit,
+                "source_artifact_sha256": profile_identity.artifact_sha256,
+            },
+            "features": [
+                {
+                    "source_feature_id": normalized_buurt,
+                    "source_feature_type": "cbs_buurt",
+                    "source_feature_version": profile_identity.profile_version,
+                    "geometry": profile_identity.geometry,
+                }
+            ],
+        }
+        grid_run = self.grid_client.create_completed_run(grid_payload)
+        congestion_payload = {
+            "aggregation_mode": "two_stage_authoritative",
+            "hierarchy_policy": GRID_HIERARCHY_POLICY,
+            "target_level": "mv_hv_transformer",
+            "persistence": "none",
+            "grid_assignment_output_id": grid_run.output_id,
+            "profiles": [
+                {
+                    "model_id": profile_identity.model_id,
+                    "layer_id": profile_identity.layer_id,
+                    "feature_type": "cbs_buurt",
+                    "source_feature_id": normalized_buurt,
+                    "profile_id": profile_identity.profile_id,
+                    "start": iso_z(start_utc),
+                    "end": iso_z(end_utc),
+                }
+            ],
+        }
+        congestion_run = self.congestion_client.create_completed_run(
+            congestion_payload
+        )
+        result = self.congestion_client.get_verified_json_output(
+            congestion_run.output_id
+        )
+        if result.get("aggregation_mode") != PROVISIONAL_AGGREGATION_MODE:
+            raise OrchestrationError(
+                "upstream_contract_invalid",
+                "congestion returned an unexpected hierarchy authority mode.",
+                service="congestion",
+            )
+        completeness = result.get("overall_datacompleetheid")
+        if (
+            not isinstance(completeness, int)
+            or isinstance(completeness, bool)
+            or not 0 <= completeness <= 1
+        ):
+            raise OrchestrationError(
+                "upstream_contract_invalid",
+                "congestion returned invalid provisional datacompleetheid.",
+                service="congestion",
+            )
+
+        return {
+            "status": "completed",
+            "feature": {
+                "feature_type": "cbs_buurt",
+                "source_feature_id": normalized_buurt,
+                "geometry_source": {
+                    "model_id": PV_CAPACITY_MODEL_ID,
+                    "layer_id": "pv_capacity",
+                    "artifact_sha256": profile_identity.capacity_artifact_sha256,
+                },
+            },
+            "profile": {
+                "model_id": profile_identity.model_id,
+                "producer_model_id": PV_CAPACITY_MODEL_ID,
+                "model_version": profile_identity.model_version,
+                "release_commit": profile_identity.release_commit,
+                "container_image": profile_identity.container_image,
+                "layer_id": profile_identity.layer_id,
+                "layer_version": profile_identity.layer_version,
+                "profile_id": profile_identity.profile_id,
+                "profile_version": profile_identity.profile_version,
+                "contribution_kind": "production",
+                "source_sign_convention": "positive_generation",
+                "canonical_sign_convention": "negative_production",
+                "scenario": PV_SCENARIO,
+                "scenario_year": 2035,
+                "profile_calendar": 2024,
+                "start": iso_z(start_utc),
+                "end": iso_z(end_utc),
+                "resolution": "PT15M",
+            },
+            "grid_assignment": {
+                "run_id": grid_run.run_id,
+                "output_id": grid_run.output_id,
+                "operation": "assign_feature_hierarchy",
+                "hierarchy_policy": GRID_HIERARCHY_POLICY,
+            },
+            "congestion_aggregation": {
+                "run_id": congestion_run.run_id,
+                "output_id": congestion_run.output_id,
+                "aggregation_mode": PROVISIONAL_AGGREGATION_MODE,
+                "hierarchy_policy": GRID_HIERARCHY_POLICY,
+            },
+            "result": result,
+        }
+
 
 def normalize_pc6(value: str) -> str:
     normalized = value.replace(" ", "").upper()
     if not PC6_PATTERN.fullmatch(normalized):
         raise OrchestrationError(
             "invalid_pc6", "PC6 must contain four digits followed by two letters.", status_code=422
+        )
+    return normalized
+
+
+def validate_request_timeout(value: object) -> float:
+    if isinstance(value, bool):
+        raise ValueError("request timeout must be a finite number")
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("request timeout must be a finite number") from exc
+    if not math.isfinite(timeout) or not 0 < timeout <= MAX_REQUEST_TIMEOUT_SECONDS:
+        raise ValueError(
+            f"request timeout must be greater than zero and at most "
+            f"{MAX_REQUEST_TIMEOUT_SECONDS:g} seconds"
+        )
+    return timeout
+
+
+def normalize_cbs_buurt(value: str) -> str:
+    normalized = value.strip().upper()
+    if not CBS_BUURT_PATTERN.fullmatch(normalized):
+        raise OrchestrationError(
+            "invalid_cbs_buurt",
+            "CBS buurt code must contain BU followed by eight digits.",
+            status_code=422,
         )
     return normalized
 
@@ -488,8 +978,25 @@ def validate_window(start: datetime, end: datetime) -> tuple[datetime, datetime]
     return start_utc, end_utc
 
 
+def validate_pv_window(start: datetime, end: datetime) -> tuple[datetime, datetime]:
+    start_utc, end_utc = validate_window(start, end)
+    calendar_start = datetime(2024, 1, 1, tzinfo=UTC)
+    calendar_end = datetime(2025, 1, 1, tzinfo=UTC)
+    if start_utc < calendar_start or end_utc > calendar_end:
+        raise OrchestrationError(
+            "invalid_time_window",
+            "PV profile windows must stay within the 2024 reference-weather calendar.",
+            status_code=422,
+        )
+    return start_utc, end_utc
+
+
 def residential_pc6_profile_id(pc6: str) -> str:
     return f"consumption-residential-electricity-pc6-demand-{pc6.lower()}-2023-pt15m"
+
+
+def pv_profile_id(buurt_code: str, scenario: str) -> str:
+    return f"pv_production_{buurt_code}_{scenario}_2035"
 
 
 def iso_z(value: datetime) -> str:

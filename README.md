@@ -43,7 +43,10 @@ substantial source data and take more than ten minutes; the `pv-raw-cache`
 volume is reused on later starts. Grid runs the same model-owned
 `north-holland-towns` source initializer used by the production Compose path,
 covering the network from Alkmaar through Schagen, and persists its prepared
-cache in `grid-model-data`. The first full initialization can take multiple
+cache in `grid-model-data`. Before Grid initialization, a private data-only
+bootstrap installs the checksum-bound Alkmaar CBS buurt-to-PC6 crosswalk and
+authoritative CBS 2024 PC6 geometry into `grid-crosswalk-data` without network
+access. The first full initialization can take multiple
 hours. Compatible real-source caches are reused on later starts before any
 source download; use the model initializer's explicit `--force` option when a
 fresh Liander source rebuild is intended.
@@ -69,7 +72,9 @@ CI or contract testing; using that override replaces the active Grid view with
 the small deterministic test area.
 
 CI adds `docker-compose.ci.yml` to replace only the Grid initializer and
-publisher selection with the checked-in deterministic acceptance fixture:
+publisher selection with checked-in deterministic fixtures. Its orchestration
+Grid cache contains both the Consumption `1483AA` and PV `BU03610709` accepted
+paths, so one API instance exercises both model flows:
 
 ```shell
 docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml up -d --build
@@ -108,13 +113,12 @@ independently control every voltage tier, both transformer types, and both
 PC6 share maps. Selecting a grid feature changes only the details panel, so
 the congestion scenario controls remain available.
 
-Normal local initialization passes
-`policy-tool-frontend/data/alkmaar_energy_map.geojson` to the grid model with
-`--pc6-geojson`. The reach layers therefore cover those Alkmaar PC6 polygons
-while the grid components themselves extend through Schagen. A future,
-wider consumption-model PC6 export can replace this input without changing
-the layer or API contracts. Accepted PC6 identifiers are `pc6_id`,
-`postcode6`, or `postcode`; geometry must be Polygon or MultiPolygon.
+Normal local initialization passes the crosswalk bootstrap's
+`alkmaar-cbs-postcode6-2024.geojson` as Grid's authoritative PC6 geometry and
+`alkmaar-buurt-pc6-2025.json` as the BAG-weighted buurt crosswalk. The reach
+layers cover that Alkmaar PC6 inventory while grid components extend through
+Schagen. Grid reports the known missing `1812RW` geometry as typed source
+coverage unavailability and never redistributes its retained weight.
 
 After the full local initializer and publisher have completed, verify that the
 published topology extends through Schagen and that both reach layers preserve
