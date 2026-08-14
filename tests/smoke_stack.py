@@ -21,15 +21,15 @@ GRID_LV_MV_REACH_LAYER = "grid_lv_mv_transformer_reach"
 PV_FIXTURE = "BU03610302"
 PV_RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
 PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
-GRID_RELEASE_COMMIT = "4059f6fbe066cc959ee7751779807b28ba1feae8"
-GRID_CONTAINER_DIGEST = "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4"
+GRID_RELEASE_COMMIT = "f023242f16d12435ce01c41fd1fdb6487b4bfc30"
+GRID_CONTAINER_DIGEST = "sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa"
 GRID_BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
 EV_RELEASE_COMMIT = "54a894cc7c96c7d8c27e344ee2724012d5ae4e3d"
 EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec"
 EV_FIXTURE = "NL-ALL-NLLOC018787"
-CONSUMPTION_RELEASE_COMMIT = "833f2a072d191bfb58374451a76f4d3b50db2756"
-CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba"
+CONSUMPTION_RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
+CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e"
 CONSUMPTION_FIXTURE = "BU03610308"
 FIXTURE = "1842EM"
 
@@ -774,7 +774,7 @@ def check_consumption_model_api(client: SmokeClient) -> None:
 
     metadata = client.get_json("/models/consumption/metadata")
     require(metadata.get("model_id") == "consumption-map", "Consumption model ID drift")
-    require(metadata.get("model_version") == "0.2.0", "Consumption model version drift")
+    require(metadata.get("model_version") == "0.4.0", "Consumption model version drift")
     require(metadata.get("ready") is True, "Consumption metadata is not ready")
 
     layers = client.get_json("/models/consumption/layers")
@@ -819,6 +819,46 @@ def check_consumption_model_api(client: SmokeClient) -> None:
     require(
         hashlib.sha256(content).hexdigest() == output["semantic_sha256"],
         "Consumption output byte hash drift",
+    )
+
+
+def check_congestion_model_api(client: SmokeClient) -> None:
+    readiness = client.get_json("/models/congestion/ready")
+    require(readiness.get("status") == "ready", "Congestion model is not ready")
+
+    metadata = client.get_json("/models/congestion/metadata")
+    require(
+        metadata.get("service") == "congestion-backend",
+        "Congestion service identity drift",
+    )
+    require(metadata.get("service_version") == "0.1.0", "Congestion version drift")
+    require(metadata.get("contract_version") == "1.0.0", "Congestion contract drift")
+    require(metadata.get("temporal_resolution") == "PT15M", "Congestion resolution drift")
+    require(metadata.get("canonical_unit") == "kW", "Congestion unit drift")
+    require(metadata.get("adapter_mode") == "http", "Congestion adapter mode drift")
+    require(metadata.get("synthetic") is False, "Congestion unexpectedly uses synthetic data")
+    require(
+        metadata.get("grid_hierarchy_contract", {}).get("api_contract_version")
+        == "2.2.0",
+        "Congestion Grid contract drift",
+    )
+    require(
+        "two_stage_authoritative" in metadata.get("aggregation_modes", []),
+        "Congestion authoritative aggregation mode is missing",
+    )
+
+    layers = client.get_json("/models/congestion/layers")
+    require(len(layers.get("layers", [])) == 1, "Congestion layer contract is missing")
+    aggregate = layers["layers"][0]
+    require(
+        aggregate.get("id") == "transformer_profile_aggregates",
+        "Congestion aggregate layer ID drift",
+    )
+    require(aggregate.get("resolution") == "PT15M", "Congestion layer resolution drift")
+    require(
+        aggregate.get("target_levels")
+        == ["lv_mv_transformer", "mv_hv_transformer"],
+        "Congestion target hierarchy drift",
     )
 
 
@@ -1010,7 +1050,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     )
     consumption_record = records["layer:consumption-map:electricity-areas"]
     require(
-        consumption_record["model_version"] == "0.2.0",
+        consumption_record["model_version"] == "0.4.0",
         "Consumption registry version drift",
     )
     require(consumption_record["crs"] == "EPSG:4326", "Consumption registry CRS drift")
@@ -1065,6 +1105,7 @@ def main() -> int:
     wait_until_ready(client, "/models/grid/ready", timeout=300)
     wait_until_ready(client, "/models/ev/ready", timeout=300)
     wait_until_ready(client, "/models/consumption/readyz", timeout=300)
+    wait_until_ready(client, "/models/congestion/ready", timeout=300)
     wait_until_ready(
         client, "/geoserver/wms?service=WMS&version=1.3.0&request=GetCapabilities"
     )
@@ -1079,8 +1120,12 @@ def main() -> int:
     check_grid_model_api(client, args.expected_grid_data_mode)
     check_ev_model_api(client)
     check_consumption_model_api(client)
+    check_congestion_model_api(client)
     check_dashboard_and_simulation(client)
-    print("Integrated legacy PC6, PV, Grid, Consumption, and EV layer smoke test passed")
+    print(
+        "Integrated legacy PC6, PV, Grid, Consumption, EV, and Congestion "
+        "smoke test passed"
+    )
     return 0
 
 

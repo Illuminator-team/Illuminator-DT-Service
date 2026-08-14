@@ -56,6 +56,10 @@ GRID_LINE_SQL_TYPES = {
     "evidence_status": "TEXT NOT NULL",
     "connected_transformer_ids": "JSONB NOT NULL",
     "serving_transformer_id": "TEXT",
+    "connected_mv_hv_transformer_ids": "JSONB NOT NULL",
+    "serving_mv_hv_transformer_id": "TEXT",
+    "root_bus_ids": "JSONB NOT NULL",
+    "source_station_objectids": "JSONB NOT NULL",
 }
 
 GRID_TRANSFORMER_SQL_TYPES = {
@@ -68,6 +72,14 @@ GRID_TRANSFORMER_SQL_TYPES = {
     "in_service": "BOOLEAN",
     "source_station_objectid": "TEXT",
     "source_station_name": "TEXT",
+    "upstream_mapping_status": "TEXT NOT NULL",
+    "upstream_mapping_method": "TEXT",
+    "upstream_mv_hv_transformer_id": "TEXT",
+    "upstream_root_bus_id": "TEXT",
+    "upstream_source_station_objectid": "TEXT",
+    "upstream_candidate_root_bus_ids": "JSONB NOT NULL",
+    "upstream_candidate_mv_hv_transformer_ids": "JSONB NOT NULL",
+    "upstream_topology_path_edge_ids": "JSONB NOT NULL",
 }
 
 GRID_REACH_SQL_TYPES = {
@@ -139,21 +151,17 @@ def create_grid_table(cursor: Any, table: str, layer_id: str) -> None:
         f"{name} {config['types'][name]}" for name in config["fields"]
     )
     cursor.execute("CREATE EXTENSION IF NOT EXISTS postgis")
-    if layer_id == "grid_mv_hv_transformer_reach":
-        cursor.execute(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                  AND table_name = %s
-                  AND column_name = 'bus_count'
-            )
-            """,
-            (table,),
-        )
-        if cursor.fetchone()[0]:
-            cursor.execute(f"DROP TABLE public.{table}")
+    cursor.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s
+        """,
+        (table,),
+    )
+    existing_columns = {row[0] for row in cursor.fetchall()}
+    if existing_columns and not set(config["fields"]).issubset(existing_columns):
+        cursor.execute(f"DROP TABLE public.{table}")
 
     cursor.execute(
         f"""
@@ -199,6 +207,12 @@ def grid_record_values(
         value = record.properties[field]
         if field in {
             "connected_transformer_ids",
+            "connected_mv_hv_transformer_ids",
+            "root_bus_ids",
+            "source_station_objectids",
+            "upstream_candidate_root_bus_ids",
+            "upstream_candidate_mv_hv_transformer_ids",
+            "upstream_topology_path_edge_ids",
             "datacompleetheid_reason_codes",
             "ranked_shares",
             "match_evidence",

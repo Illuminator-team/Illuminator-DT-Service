@@ -59,6 +59,10 @@ GRID_LINE_FIELDS = (
     "evidence_status",
     "connected_transformer_ids",
     "serving_transformer_id",
+    "connected_mv_hv_transformer_ids",
+    "serving_mv_hv_transformer_id",
+    "root_bus_ids",
+    "source_station_objectids",
 )
 
 GRID_TRANSFORMER_FIELDS = (
@@ -71,6 +75,14 @@ GRID_TRANSFORMER_FIELDS = (
     "in_service",
     "source_station_objectid",
     "source_station_name",
+    "upstream_mapping_status",
+    "upstream_mapping_method",
+    "upstream_mv_hv_transformer_id",
+    "upstream_root_bus_id",
+    "upstream_source_station_objectid",
+    "upstream_candidate_root_bus_ids",
+    "upstream_candidate_mv_hv_transformer_ids",
+    "upstream_topology_path_edge_ids",
 )
 
 GRID_REACH_FIELDS = (
@@ -435,6 +447,22 @@ def load_grid_records(
                 "serving_transformer_id",
                 feature_id,
             )
+            for field in (
+                "connected_mv_hv_transformer_ids",
+                "root_bus_ids",
+                "source_station_objectids",
+            ):
+                identifiers = properties.get(field)
+                if not isinstance(identifiers, list) or not all(
+                    isinstance(item, str) and item for item in identifiers
+                ):
+                    raise ValueError(f"{feature_id}: invalid {field}")
+                normalized[field] = identifiers
+            normalized["serving_mv_hv_transformer_id"] = _nullable_string(
+                properties.get("serving_mv_hv_transformer_id"),
+                "serving_mv_hv_transformer_id",
+                feature_id,
+            )
         elif layer_id == "grid_transformers":
             normalized["model_component_name"] = _nullable_string(
                 properties.get("model_component_name"), "model_component_name", feature_id
@@ -460,6 +488,35 @@ def load_grid_records(
                 normalized[field] = _nullable_string(
                     properties.get(field), field, feature_id
                 )
+            mapping_status = properties.get("upstream_mapping_status")
+            if mapping_status not in {
+                "available",
+                "disconnected",
+                "ambiguous",
+                "not_applicable",
+            }:
+                raise ValueError(f"{feature_id}: upstream mapping status drift")
+            normalized["upstream_mapping_status"] = mapping_status
+            for field in (
+                "upstream_mapping_method",
+                "upstream_mv_hv_transformer_id",
+                "upstream_root_bus_id",
+                "upstream_source_station_objectid",
+            ):
+                normalized[field] = _nullable_string(
+                    properties.get(field), field, feature_id
+                )
+            for field in (
+                "upstream_candidate_root_bus_ids",
+                "upstream_candidate_mv_hv_transformer_ids",
+                "upstream_topology_path_edge_ids",
+            ):
+                identifiers = properties.get(field)
+                if not isinstance(identifiers, list) or not all(
+                    isinstance(item, str) and item for item in identifiers
+                ):
+                    raise ValueError(f"{feature_id}: invalid {field}")
+                normalized[field] = identifiers
 
         else:
             reach_contract = {

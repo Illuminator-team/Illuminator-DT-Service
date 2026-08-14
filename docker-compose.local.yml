@@ -35,6 +35,12 @@ services:
       traefik.http.routers.consumption-api.entrypoints: web
       traefik.http.routers.consumption-api.tls: "false"
 
+  congestion-backend:
+    labels:
+      traefik.http.routers.congestion-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/congestion`)
+      traefik.http.routers.congestion-api.entrypoints: web
+      traefik.http.routers.congestion-api.tls: "false"
+
   grafana:
     environment:
       GF_SERVER_ROOT_URL: http://illuminator.localhost/grafana

@@ -184,7 +184,7 @@
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
       "model_version": "2.0.0",
-      "metadata_contract_version": "2.0.1",
+      "metadata_contract_version": "2.2.0",
       "table": "grid_lines",
       "geoserver_layer": "grid_lines",
       "source": {
@@ -192,9 +192,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "4059f6fbe066cc959ee7751779807b28ba1feae8",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
-        "container_digest": "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
+        "release_commit": "f023242f16d12435ce01c41fd1fdb6487b4bfc30",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa",
+        "container_digest": "sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -249,6 +249,23 @@
           "name": "serving_transformer_id",
           "type": "string",
           "nullable": true
+        },
+        {
+          "name": "connected_mv_hv_transformer_ids",
+          "type": "array"
+        },
+        {
+          "name": "serving_mv_hv_transformer_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "root_bus_ids",
+          "type": "array"
+        },
+        {
+          "name": "source_station_objectids",
+          "type": "array"
         },
         {
           "name": "datacompleetheid",
@@ -310,7 +327,7 @@
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
       "model_version": "2.0.0",
-      "metadata_contract_version": "2.0.1",
+      "metadata_contract_version": "2.2.0",
       "table": "grid_transformers",
       "geoserver_layer": "grid_transformers",
       "source": {
@@ -318,9 +335,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "4059f6fbe066cc959ee7751779807b28ba1feae8",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
-        "container_digest": "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
+        "release_commit": "f023242f16d12435ce01c41fd1fdb6487b4bfc30",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa",
+        "container_digest": "sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -376,6 +393,42 @@
           "type": "number",
           "unit": "kVA",
           "nullable": true
+        },
+        {
+          "name": "upstream_mapping_status",
+          "type": "string"
+        },
+        {
+          "name": "upstream_mapping_method",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "upstream_mv_hv_transformer_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "upstream_root_bus_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "upstream_source_station_objectid",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "upstream_candidate_root_bus_ids",
+          "type": "array"
+        },
+        {
+          "name": "upstream_candidate_mv_hv_transformer_ids",
+          "type": "array"
+        },
+        {
+          "name": "upstream_topology_path_edge_ids",
+          "type": "array"
         },
         {
           "name": "datacompleetheid",
@@ -437,7 +490,7 @@
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
       "model_version": "2.0.0",
-      "metadata_contract_version": "2.0.1",
+      "metadata_contract_version": "2.2.0",
       "table": "grid_lv_mv_transformer_reach",
       "geoserver_layer": "grid_lv_mv_transformer_reach",
       "source": {
@@ -445,9 +498,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "4059f6fbe066cc959ee7751779807b28ba1feae8",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
-        "container_digest": "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
+        "release_commit": "f023242f16d12435ce01c41fd1fdb6487b4bfc30",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa",
+        "container_digest": "sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -646,7 +699,7 @@
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
       "model_version": "2.0.0",
-      "metadata_contract_version": "2.0.1",
+      "metadata_contract_version": "2.2.0",
       "table": "grid_mv_hv_transformer_reach",
       "geoserver_layer": "grid_mv_hv_transformer_reach",
       "source": {
@@ -654,9 +707,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "4059f6fbe066cc959ee7751779807b28ba1feae8",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
-        "container_digest": "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
+        "release_commit": "f023242f16d12435ce01c41fd1fdb6487b4bfc30",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa",
+        "container_digest": "sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -854,7 +907,7 @@
       "model": "consumption",
       "group": "consumption",
       "model_id": "consumption-map",
-      "model_version": "0.2.0",
+      "model_version": "0.4.0",
       "metadata_contract_version": "reformers-consumption-v1",
       "table": "consumption_electricity_areas",
       "geoserver_layer": "consumption_electricity_areas",
@@ -863,10 +916,10 @@
         "base_url": "http://consumption-api:8080",
         "metadata_url": "/models/consumption/metadata",
         "repository": "https://github.com/JortGroen/concumption-map",
-        "release_commit": "833f2a072d191bfb58374451a76f4d3b50db2756",
-        "container_image": "ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba",
-        "source_cache_image": "ghcr.io/jortgroen/consumption-map-source-cache@sha256:9fbdb8f0308f6db4427de594dfd1173b1feb0447a278b12ab7e63811fe5edee4",
-        "source_cache_sha256": "de4c93428b566c7e2a81ba3a13bf5c646c094c63cda6b2e3f4416884b95f7e47",
+        "release_commit": "e5f44368b01bee9f4a77a409e6894f22f57f9684",
+        "container_image": "ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e",
+        "source_cache_image": "ghcr.io/jortgroen/consumption-map-source-cache@sha256:f4bcf9c44b39ee4e1e244502a220296d1a0cdfa9ed2bb21bf2667654f391ef59",
+        "source_cache_sha256": "6b05e30599e6790713fd10c713ee1e7374efdbcee38e9c256e6b542111fd6861",
         "crs": "EPSG:4326",
         "native_crs": "urn:ogc:def:crs:OGC::CRS84",
         "dataset_id": "alkmaar_2023",

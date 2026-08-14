@@ -32,6 +32,7 @@ PC6_GEOMETRY_PATH = Path(
 )
 GRID_API_URL = os.getenv("GRID_API_URL", "http://grid-api:8080")
 CONGESTION_API_URL = os.getenv("CONGESTION_API_URL", "http://congestion-backend:8080")
+CONSUMPTION_API_URL = os.getenv("CONSUMPTION_API_URL", "http://consumption-api:8080")
 
 
 class TransformerProfileScenario(BaseModel):
@@ -85,6 +86,7 @@ def transformer_profiles_pc6(
     pc6: str, scenario: TransformerProfileScenario
 ):
     orchestrator = TransformerProfileOrchestrator(
+        consumption_client=ModelApiClient(CONSUMPTION_API_URL, "consumption"),
         grid_client=ModelApiClient(GRID_API_URL, "grid"),
         congestion_client=ModelApiClient(CONGESTION_API_URL, "congestion"),
         pc6_geometry_path=PC6_GEOMETRY_PATH,

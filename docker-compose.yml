@@ -2,16 +2,19 @@ x-pv-image: &pv-image
   image: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
 
 x-grid-image: &grid-image
-  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4
+  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa
+
+x-congestion-image: &congestion-image
+  image: ghcr.io/jortgroen/congestion-backend@sha256:3f23bd186c4b719b4dda90d15f447c4825afff4bdf3013e23c524f45bf3926d1
 
 x-ev-image: &ev-image
   image: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
 
 x-consumption-image: &consumption-image
-  image: ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba
+  image: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
 
 x-consumption-cache-image: &consumption-cache-image
-  image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:9fbdb8f0308f6db4427de594dfd1173b1feb0447a278b12ab7e63811fe5edee4
+  image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:f4bcf9c44b39ee4e1e244502a220296d1a0cdfa9ed2bb21bf2667654f391ef59
 
 x-pv-cache-image: &pv-cache-image
   image: ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b
@@ -39,9 +42,14 @@ services:
       volumes:
         - policy-tool-data:/app/data/processed
         - ./layer-publisher/layer-manifest.json:/app/config/layer-manifest.json:ro
+        - ./policy-tool-frontend/data/alkmaar_energy_map.geojson:/app/config/alkmaar_energy_map.geojson:ro
       environment:
         - REDIS_PASSWORD=${REDIS_PASSWORD}
         - LAYER_REGISTRY_PATH=/app/config/layer-manifest.json
+        - PC6_GEOMETRY_PATH=/app/config/alkmaar_energy_map.geojson
+        - GRID_API_URL=http://grid-api:8080
+        - CONGESTION_API_URL=http://congestion-backend:8080
+        - CONSUMPTION_API_URL=http://consumption-api:8080
       labels:
         - "traefik.enable=true"
         # path to /policy-api is needed to out frontend to make calls to the backend
@@ -124,7 +132,7 @@ services:
     init: true
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4
+      GRID_API_CONTAINER_DIGEST: sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa
     volumes:
       - grid-model-data:/data
     depends_on:
@@ -148,6 +156,44 @@ services:
       - "traefik.http.middlewares.grid-api-strip.stripprefix.prefixes=/models/grid"
       - "traefik.http.routers.grid-api.middlewares=grid-api-strip"
       - "traefik.http.services.grid-api.loadbalancer.server.port=8080"
+    restart: unless-stopped
+
+  ## ----------------------------------------------------------------
+  ## Aggregate model profiles over authoritative Grid assignments.
+  ## ----------------------------------------------------------------
+  congestion-backend:
+    <<: *congestion-image
+    init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      CONGESTION_ADAPTER_MODE: http
+      GRID_API_BASE_URL: http://grid-api:8080
+      CONSUMPTION_API_BASE_URL: http://consumption-api:8080
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8080/ready', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.congestion-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/congestion`)"
+      - "traefik.http.routers.congestion-api.entrypoints=web,websecure"
+      - "traefik.http.routers.congestion-api.tls=true"
+      - "traefik.http.middlewares.congestion-api-strip.stripprefix.prefixes=/models/congestion"
+      - "traefik.http.routers.congestion-api.middlewares=congestion-api-strip"
+      - "traefik.http.services.congestion-api.loadbalancer.server.port=8080"
     restart: unless-stopped
 
   ## -----------------------------------------------------
@@ -234,7 +280,7 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba
+      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
     depends_on:
       consumption-runtime-init:
         condition: service_completed_successfully
@@ -496,16 +542,16 @@ services:
       PV_EXPECTED_RELEASE_COMMIT: bd29351e108d9db002b9e54d5c7fb2356416a306
       PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
       GRID_API_URL: http://grid-api:8080
-      GRID_EXPECTED_RELEASE_COMMIT: 4059f6fbe066cc959ee7751779807b28ba1feae8
-      GRID_EXPECTED_CONTAINER_DIGEST: sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4
+      GRID_EXPECTED_RELEASE_COMMIT: f023242f16d12435ce01c41fd1fdb6487b4bfc30
+      GRID_EXPECTED_CONTAINER_DIGEST: sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa
       GRID_EXPECTED_DATA_MODE: real_source
       GRID_EXPORT_BBOX: 4.60,52.50,4.98,52.88
       EV_API_URL: http://ev-api:8000
       EV_EXPECTED_RELEASE_COMMIT: 54a894cc7c96c7d8c27e344ee2724012d5ae4e3d
       EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
       CONSUMPTION_API_URL: http://consumption-api:8080
-      CONSUMPTION_EXPECTED_RELEASE_COMMIT: 833f2a072d191bfb58374451a76f4d3b50db2756
-      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba
+      CONSUMPTION_EXPECTED_RELEASE_COMMIT: e5f44368b01bee9f4a77a409e6894f22f57f9684
+      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
