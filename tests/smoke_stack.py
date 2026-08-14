@@ -18,11 +18,12 @@ GRID_MV_HV_REACH_LAYER = "grid_mv_hv_transformer_reach"
 GRID_LV_MV_REACH_LAYER = "grid_lv_mv_transformer_reach"
 WIND_LAYER = "public_wind_turbines"
 EV_LAYER = "public_ev_chargers"
+CONSUMPTION_LAYER = "consumption_electricity_areas"
 PV_FIXTURE = "BU03610302"
 PV_RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
 PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
-GRID_RELEASE_COMMIT = "4059f6fbe066cc959ee7751779807b28ba1feae8"
-GRID_CONTAINER_DIGEST = "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4"
+GRID_RELEASE_COMMIT = "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+GRID_CONTAINER_DIGEST = "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0"
 GRID_BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
 WIND_FIXTURE = "wind-turbine-2811"
@@ -65,12 +66,17 @@ HEAT_PC6_FIXTURE = "pc6-1812ab"
 EV_RELEASE_COMMIT = "54a894cc7c96c7d8c27e344ee2724012d5ae4e3d"
 EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec"
 EV_FIXTURE = "NL-ALL-NLLOC018787"
+CONSUMPTION_RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
+CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e"
+CONSUMPTION_FIXTURE = "BU03610308"
 FIXTURE = "1842EM"
+ORCHESTRATION_PC6 = "1483AA"
 
 
 class SmokeClient:
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, *, host_header: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
+        self.host_header = host_header
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
@@ -79,9 +85,12 @@ class SmokeClient:
         )
 
     def get(self, path: str, timeout: int = 60) -> tuple[int, bytes, str]:
+        headers = {"Accept": "*/*", "User-Agent": "rdp-integration-smoke/1.0"}
+        if self.host_header is not None:
+            headers["Host"] = self.host_header
         request = urllib.request.Request(
             f"{self.base_url}{path}",
-            headers={"Accept": "*/*", "User-Agent": "rdp-integration-smoke/1.0"},
+            headers=headers,
         )
         with self.opener.open(request, timeout=timeout) as response:
             return response.status, response.read(), response.headers.get_content_type()
@@ -92,19 +101,31 @@ class SmokeClient:
             raise AssertionError(f"{path} returned HTTP {status}")
         return json.loads(body)
 
-    def post_json(self, path: str, payload: dict, timeout: int = 60) -> dict:
+    def post_json(
+        self,
+        path: str,
+        payload: dict,
+        timeout: int = 60,
+        expected_status: int = 201,
+    ) -> dict:
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "rdp-integration-smoke/1.0",
+        }
+        if self.host_header is not None:
+            headers["Host"] = self.host_header
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             method="POST",
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "User-Agent": "rdp-integration-smoke/1.0",
-            },
+            headers=headers,
         )
         with self.opener.open(request, timeout=timeout) as response:
-            require(response.status == 201, f"{path} returned HTTP {response.status}")
+            require(
+                response.status == expected_status,
+                f"{path} returned HTTP {response.status}",
+            )
             return json.loads(response.read())
 
 
@@ -741,6 +762,7 @@ def check_ev_layer(client: SmokeClient) -> None:
 def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     root = client.get_json("/models/grid/")
     require(root.get("status") == "alive", "Grid model liveness failed")
+    require(root.get("api_version") == "2.3.0", "Grid API version drift")
 
     readiness = client.get_json("/models/grid/ready", timeout=120)
     require(readiness.get("status") == "ready", "Grid model is not ready")
@@ -755,6 +777,15 @@ def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     )
 
     metadata = client.get_json("/models/grid/metadata")
+    require(metadata.get("contract_version") == "2.3.0", "Grid contract drift")
+    require(
+        metadata.get("model", {}).get("version") == "2.1.0",
+        "Grid model version drift",
+    )
+    require(
+        metadata.get("method", {}).get("version") == "2.1.0",
+        "Grid method version drift",
+    )
     release = metadata.get("release", {})
     require(
         release.get("git_commit") == GRID_RELEASE_COMMIT,
@@ -1050,6 +1081,508 @@ def check_grid_layers(client: SmokeClient) -> None:
         require(image.startswith(b"\x89PNG") and len(image) > 500, f"{layer_id} WMS map is empty")
 
 
+def check_ev_model_api(client: SmokeClient) -> None:
+    readiness = client.get_json("/models/ev/ready", timeout=120)
+    require(readiness.get("ready") is True, "EV model is not ready")
+    require(readiness.get("state") == "ready", "EV readiness state drift")
+    require(readiness.get("feature_count") == 784, "EV release feature count drift")
+    require(readiness.get("release_commit") == EV_RELEASE_COMMIT, "EV release identity drift")
+    require(readiness.get("container_image") == EV_CONTAINER_IMAGE, "EV image identity drift")
+
+    metadata = client.get_json("/models/ev/metadata")
+    runtime = metadata.get("runtime", {})
+    require(runtime.get("release_commit") == EV_RELEASE_COMMIT, "EV metadata commit drift")
+    require(runtime.get("container_image") == EV_CONTAINER_IMAGE, "EV metadata image drift")
+
+    layers = client.get_json("/models/ev/layers")
+    by_layer = {item["id"]: item for item in layers.get("layers", [])}
+    require(EV_LAYER in by_layer, "EV charger layer contract is missing")
+    require(by_layer[EV_LAYER].get("current_feature_count") == 784, "EV layer count drift")
+
+    run = client.post_json(
+        "/models/ev/runs",
+        {"spatial_selection": {"type": "all"}, "parameters": {}},
+        timeout=300,
+    )
+    require(run.get("status") == "succeeded", "EV layer run failed")
+    require(run.get("release_commit") == EV_RELEASE_COMMIT, "EV run identity drift")
+    output_links = run.get("links", {}).get("outputs", [])
+    require(len(output_links) == 1, "EV run did not return one output")
+    output = client.get_json(f"/models/ev{output_links[0]}")
+    require(output.get("layer_id") == EV_LAYER, "EV output layer drift")
+    require(output.get("feature_count") == 784, "EV output feature count drift")
+    data_path = output.get("links", {}).get("data")
+    require(isinstance(data_path, str) and data_path.startswith("/outputs/"), "EV data link drift")
+    status, content, content_type = client.get(f"/models/ev{data_path}", timeout=300)
+    require(status == 200, "EV output data request failed")
+    require(content_type == "application/geo+json", "EV output media type drift")
+    require(len(content) == output["byte_size"], "EV output byte size drift")
+    require(hashlib.sha256(content).hexdigest() == output["sha256"], "EV output hash drift")
+
+
+def check_ev_layer(client: SmokeClient) -> None:
+    capabilities_query = urllib.parse.urlencode(
+        {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}
+    )
+    capabilities_path = f"/geoserver/wms?{capabilities_query}"
+    deadline = time.monotonic() + 300
+    while True:
+        status, body, _ = client.get(capabilities_path)
+        if status == 200 and EV_LAYER.encode() in body:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError("EV charger layer missing from WMS capabilities")
+        time.sleep(5)
+
+    describe_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "DescribeFeatureType",
+            "typeNames": EV_LAYER,
+        }
+    )
+    status, body, _ = client.get(f"/geoserver/rdp/ows?{describe_query}")
+    require(status == 200, "EV WFS DescribeFeatureType failed")
+    for field in (
+        "source_feature_id",
+        "address",
+        "connector_count",
+        "max_power_kw",
+        "profile_available",
+        "datacompleetheid",
+        "datacompleetheid_method_version",
+        "model_version",
+    ):
+        require(field.encode() in body, f"EV WFS schema is missing {field}")
+
+    feature_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": EV_LAYER,
+            "outputFormat": "application/json",
+            "cql_filter": f"source_feature_id='{EV_FIXTURE}'",
+        }
+    )
+    collection = client.get_json(f"/geoserver/rdp/ows?{feature_query}")
+    require(collection.get("numberReturned") == 1, "EV fixture charger is missing")
+    feature = collection["features"][0]
+    properties = feature["properties"]
+    require(properties["address"] == "Diamantweg 10", "EV fixture address drift")
+    require(properties["connector_count"] == 6, "EV fixture connector count drift")
+    require(properties["profile_available"] is True, "EV fixture profile link drift")
+    require(0 <= properties["datacompleetheid"] <= 3, "EV fixture quality drift")
+
+    lon, lat = feature["geometry"]["coordinates"][:2]
+    padding = 0.01
+    map_query = urllib.parse.urlencode(
+        {
+            "service": "WMS",
+            "version": "1.1.1",
+            "request": "GetMap",
+            "layers": f"rdp:{EV_LAYER}",
+            "styles": "",
+            "srs": "EPSG:4326",
+            "bbox": f"{lon-padding},{lat-padding},{lon+padding},{lat+padding}",
+            "width": 256,
+            "height": 256,
+            "format": "image/png",
+        }
+    )
+    status, image, content_type = client.get(f"/geoserver/rdp/wms?{map_query}")
+    require(status == 200, "EV WMS GetMap failed")
+    require(content_type == "image/png", f"Unexpected EV WMS content type: {content_type}")
+    require(image.startswith(b"\x89PNG") and len(image) > 500, "EV WMS map is empty")
+
+
+def check_consumption_model_api(client: SmokeClient) -> None:
+    readiness = client.get_json("/models/consumption/readyz", timeout=120)
+    require(readiness.get("status") == "ready", "Consumption model is not ready")
+    require(readiness.get("reasons") == [], "Consumption readiness reasons drift")
+    require(
+        readiness.get("release_commit") == CONSUMPTION_RELEASE_COMMIT,
+        "Consumption release identity drift",
+    )
+    require(
+        readiness.get("container_image") == CONSUMPTION_CONTAINER_IMAGE,
+        "Consumption image identity drift",
+    )
+    require(
+        readiness.get("runtime_state", {}).get("feature_count") == 67,
+        "Consumption source feature count drift",
+    )
+
+    metadata = client.get_json("/models/consumption/metadata")
+    require(metadata.get("model_id") == "consumption-map", "Consumption model ID drift")
+    require(metadata.get("model_version") == "0.4.0", "Consumption model version drift")
+    require(metadata.get("ready") is True, "Consumption metadata is not ready")
+
+    layers = client.get_json("/models/consumption/layers")
+    records = {item["layer_id"]: item for item in layers.get("layers", [])}
+    require(
+        "electricity_consumption_areas" in records,
+        "Consumption annual layer contract is missing",
+    )
+
+    accepted = client.post_json(
+        "/models/consumption/v1/runs",
+        {
+            "dataset_id": "alkmaar_2023",
+            "layer_ids": ["electricity_consumption_areas"],
+            "selection": {"municipality_code": "GM0361"},
+        },
+        timeout=300,
+        expected_status=202,
+    )
+    run_id = accepted.get("run_id")
+    require(isinstance(run_id, str) and run_id, "Consumption run ID is missing")
+    deadline = time.monotonic() + 60
+    while True:
+        run = client.get_json(f"/models/consumption/v1/runs/{run_id}")
+        if run.get("status") == "succeeded":
+            break
+        require(run.get("status") != "failed", "Consumption run failed")
+        require(time.monotonic() < deadline, "Consumption run timed out")
+        time.sleep(0.25)
+    require(run.get("release_commit") == CONSUMPTION_RELEASE_COMMIT, "Consumption run identity drift")
+    output_ids = run.get("output_ids", [])
+    require(len(output_ids) == 1, "Consumption run did not return one output")
+    output = client.get_json(f"/models/consumption/v1/outputs/{output_ids[0]}")
+    require(output.get("feature_count") == 67, "Consumption output feature count drift")
+    status, content, content_type = client.get(
+        f"/models/consumption/v1/outputs/{output_ids[0]}/data",
+        timeout=300,
+    )
+    require(status == 200, "Consumption output data request failed")
+    require(content_type == "application/geo+json", "Consumption media type drift")
+    require(content.endswith(b"\n"), "Consumption output lost canonical newline")
+    require(
+        hashlib.sha256(content).hexdigest() == output["semantic_sha256"],
+        "Consumption output byte hash drift",
+    )
+
+
+def check_congestion_model_api(client: SmokeClient) -> None:
+    readiness = client.get_json("/models/congestion/ready")
+    require(readiness.get("status") == "ready", "Congestion model is not ready")
+
+    metadata = client.get_json("/models/congestion/metadata")
+    require(
+        metadata.get("service") == "congestion-backend",
+        "Congestion service identity drift",
+    )
+    require(metadata.get("service_version") == "0.2.0", "Congestion version drift")
+    require(metadata.get("contract_version") == "1.0.0", "Congestion contract drift")
+    require(metadata.get("temporal_resolution") == "PT15M", "Congestion resolution drift")
+    require(metadata.get("canonical_unit") == "kW", "Congestion unit drift")
+    require(metadata.get("adapter_mode") == "http", "Congestion adapter mode drift")
+    require(metadata.get("synthetic") is False, "Congestion unexpectedly uses synthetic data")
+    require(
+        metadata.get("grid_hierarchy_contract", {}).get("api_contract_version")
+        == "2.2.0",
+        "Congestion strict Grid contract drift",
+    )
+    provisional = metadata.get("grid_hierarchy_contract", {}).get(
+        "provisional_opt_in", {}
+    )
+    require(
+        provisional.get("hierarchy_policy") == "nearest_electrical_root_v1",
+        "Congestion provisional Grid policy drift",
+    )
+    require(
+        provisional.get("api_contract_version") == "2.3.0"
+        and provisional.get("hierarchy_contract_version")
+        == "grid-feature-hierarchy-v2"
+        and provisional.get("reference_commit")
+        == "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+        and provisional.get("authority_status") == "provisional_estimated",
+        "Congestion provisional Grid contract drift",
+    )
+    require(
+        "two_stage_authoritative" in metadata.get("aggregation_modes", []),
+        "Congestion authoritative aggregation mode is missing",
+    )
+    require(
+        "two_stage_provisional_estimated"
+        in metadata.get("aggregation_modes", []),
+        "Congestion provisional aggregation mode is missing",
+    )
+
+    layers = client.get_json("/models/congestion/layers")
+    require(len(layers.get("layers", [])) == 1, "Congestion layer contract is missing")
+    aggregate = layers["layers"][0]
+    require(
+        aggregate.get("id") == "transformer_profile_aggregates",
+        "Congestion aggregate layer ID drift",
+    )
+    require(aggregate.get("resolution") == "PT15M", "Congestion layer resolution drift")
+    require(
+        aggregate.get("target_levels")
+        == ["lv_mv_transformer", "mv_hv_transformer"],
+        "Congestion target hierarchy drift",
+    )
+
+
+def check_transformer_profile_orchestration(client: SmokeClient) -> None:
+    response = client.post_json(
+        f"/policy-api/transformer-profiles/pc6/{ORCHESTRATION_PC6}",
+        {
+            "start": "2022-12-31T23:00:00Z",
+            "end": "2023-01-01T00:00:00Z",
+        },
+        timeout=300,
+        expected_status=200,
+    )
+    require(response.get("status") == "completed", "Transformer orchestration failed")
+    require(
+        response.get("grid_assignment", {}).get("hierarchy_policy")
+        == "nearest_electrical_root_v1",
+        "Grid hierarchy policy drift",
+    )
+    require(
+        response.get("congestion_aggregation", {}).get("aggregation_mode")
+        == "two_stage_provisional_estimated"
+        and response.get("congestion_aggregation", {}).get("hierarchy_policy")
+        == "nearest_electrical_root_v1",
+        "Congestion orchestration authority drift",
+    )
+    require(
+        response.get("feature", {}).get("source_feature_id") == ORCHESTRATION_PC6,
+        "Transformer orchestration feature drift",
+    )
+    profile = response.get("profile", {})
+    require(profile.get("model_id") == "consumption-map", "Profile model drift")
+    require(profile.get("model_version") == "0.4.0", "Profile version drift")
+    require(profile.get("resolution") == "PT15M", "Profile resolution drift")
+    for field in ("layer_version", "profile_version"):
+        value = profile.get(field)
+        require(
+            isinstance(value, str)
+            and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value),
+            f"Profile {field} is not an immutable SHA-256 identity",
+        )
+
+    result = response.get("result", {})
+    require(
+        result.get("aggregation_mode") == "two_stage_provisional_estimated",
+        "Provisional aggregation mode drift",
+    )
+    require(result.get("persistence") == "none", "Scenario persistence drift")
+    require(result.get("resolution") == "PT15M", "Aggregate resolution drift")
+    require(result.get("complete") is True, "Transformer hierarchy is incomplete")
+    require(
+        isinstance(result.get("overall_datacompleetheid"), int)
+        and not isinstance(result["overall_datacompleetheid"], bool)
+        and 0 <= result["overall_datacompleetheid"] <= 1,
+        "Aggregate datacompleetheid drift",
+    )
+    coverage = result.get("profile_coverage", [])
+    require(len(coverage) == 1 and coverage[0].get("complete") is True, "Profile coverage drift")
+
+    source_stage = result.get("source_to_lv_mv", {})
+    target_stage = result.get("lv_mv_to_mv_hv", {})
+    require(source_stage.get("complete") is True, "LV/MV aggregation is incomplete")
+    require(target_stage.get("complete") is True, "MV/HV aggregation is incomplete")
+    source_targets = source_stage.get("targets", [])
+    target_targets = target_stage.get("targets", [])
+    require(len(source_targets) == 3, "1483AA LV/MV transformer count drift")
+    require(len(target_targets) == 1, "1483AA MV/HV transformer count drift")
+    require(
+        target_targets[0].get("transformer_id")
+        == "grid-transformer-mv-hv-station-609006",
+        "1483AA provisional parent is not OS OTERLEEK",
+    )
+    require(
+        all(item.get("transformer_level") == "lv_mv_transformer" for item in source_targets),
+        "LV/MV target level drift",
+    )
+    require(
+        all(item.get("transformer_level") == "mv_hv_transformer" for item in target_targets),
+        "MV/HV target level drift",
+    )
+    for target in [*source_targets, *target_targets]:
+        points = target.get("points", [])
+        require(len(points) == 4, "Transformer profile PT15M interval count drift")
+        require(
+            all(
+                point.get("demand_power_kw", 0) > 0
+                and point.get("production_power_kw") == 0
+                and point.get("net_power_kw") == point.get("demand_power_kw")
+                for point in points
+            ),
+            "Consumption-only transformer profile values drifted",
+        )
+
+    source_totals = [
+        sum(target["points"][index]["net_power_kw"] for target in source_targets)
+        for index in range(4)
+    ]
+    target_totals = [
+        sum(target["points"][index]["net_power_kw"] for target in target_targets)
+        for index in range(4)
+    ]
+    require(
+        all(abs(source - target) <= 1e-9 for source, target in zip(source_totals, target_totals)),
+        "LV/MV and MV/HV aggregate totals diverged",
+    )
+    require(
+        len(result.get("hierarchy_resolutions", [])) == 3
+        and all(
+            item.get("status") == "available"
+            and item.get("complete") is True
+            and item.get("target_transformer_id")
+            == "grid-transformer-mv-hv-station-609006"
+            and item.get("datacompleetheid") == 1
+            for item in result["hierarchy_resolutions"]
+        ),
+        "Grid hierarchy contains an unresolved transformer parent",
+    )
+    require(
+        all(
+            len(item.get("evidence", [])) == 1
+            and item["evidence"][0].get("code")
+            == "grid_lv_mv_to_mv_hv_hierarchy"
+            and isinstance(item["evidence"][0].get("value"), dict)
+            for item in result["hierarchy_resolutions"]
+        ),
+        "Grid provisional hierarchy evidence is missing",
+    )
+    hierarchy_evidence = [
+        item["evidence"][0]["value"] for item in result["hierarchy_resolutions"]
+    ]
+    require(
+        {item.get("electrical_distance_edges") for item in hierarchy_evidence}
+        == {69, 72, 78}
+        and all(
+            item.get("hierarchy_policy_applied")
+            == "nearest_electrical_root_v1"
+            and item.get("hierarchy_authority_status") == "provisional_estimated"
+            and item.get("evidence_status") == "model_estimated_provisional"
+            and item.get("share_scope") == "provisional_lv_mv_to_mv_hv"
+            and item.get("root_bus_ids") == ["27999"]
+            and item.get("nearest_tied_root_bus_ids") == []
+            for item in hierarchy_evidence
+        ),
+        "Grid provisional hierarchy evidence drift",
+    )
+    hierarchy_contributions = target_targets[0].get("hierarchy_contributions", [])
+    require(
+        len(hierarchy_contributions) == 3
+        and all(
+            item.get("relation_scope")
+            == "provisional_estimated_electrical_parent"
+            and item.get("relation_share") == 1.0
+            and item.get("grid_model_git_sha")
+            == "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+            and item.get("hierarchy_datacompleetheid") == 1
+            for item in hierarchy_contributions
+        ),
+        "Congestion provisional hierarchy contribution drift",
+    )
+
+
+def check_consumption_layer(client: SmokeClient) -> None:
+    capabilities_query = urllib.parse.urlencode(
+        {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}
+    )
+    capabilities_path = f"/geoserver/wms?{capabilities_query}"
+    deadline = time.monotonic() + 300
+    while True:
+        status, body, _ = client.get(capabilities_path)
+        if status == 200 and CONSUMPTION_LAYER.encode() in body:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError("Consumption layer missing from WMS capabilities")
+        time.sleep(5)
+
+    describe_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "DescribeFeatureType",
+            "typeNames": CONSUMPTION_LAYER,
+        }
+    )
+    status, body, _ = client.get(f"/geoserver/rdp/ows?{describe_query}")
+    require(status == 200, "Consumption WFS DescribeFeatureType failed")
+    for field in (
+        "spatial_unit_type",
+        "spatial_unit_code",
+        "annual_electricity_consumption_kwh",
+        "residential_electricity_kwh",
+        "business_electricity_kwh",
+        "datacompleetheid",
+        "datacompleetheid_rule_version",
+        "model_version",
+    ):
+        require(field.encode() in body, f"Consumption WFS schema is missing {field}")
+
+    feature_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": CONSUMPTION_LAYER,
+            "outputFormat": "application/json",
+            "cql_filter": f"spatial_unit_code='{CONSUMPTION_FIXTURE}'",
+        }
+    )
+    collection = client.get_json(f"/geoserver/rdp/ows?{feature_query}")
+    require(collection.get("numberReturned") == 1, "Consumption fixture is missing")
+    feature = collection["features"][0]
+    properties = feature["properties"]
+    require(properties["name"] == "Boekelermeer-Zuid", "Consumption fixture name drift")
+    annual = properties["annual_electricity_consumption_kwh"]
+    require(isinstance(annual, (int, float)) and annual > 0, "Consumption fixture is empty")
+    require(0 <= properties["datacompleetheid"] <= 3, "Consumption quality drift")
+
+    null_query = urllib.parse.urlencode(
+        {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "GetFeature",
+            "typeNames": CONSUMPTION_LAYER,
+            "outputFormat": "application/json",
+            "cql_filter": "spatial_unit_code='BU03611000'",
+        }
+    )
+    null_collection = client.get_json(f"/geoserver/rdp/ows?{null_query}")
+    require(null_collection.get("numberReturned") == 1, "Consumption null fixture is missing")
+    require(
+        null_collection["features"][0]["properties"]["business_electricity_kwh"] is None,
+        "Consumption null sector value was coerced",
+    )
+
+    coordinates = list(flatten_coordinates(feature["geometry"]["coordinates"]))
+    xs = [coordinate[0] for coordinate in coordinates]
+    ys = [coordinate[1] for coordinate in coordinates]
+    padding = 0.001
+    map_query = urllib.parse.urlencode(
+        {
+            "service": "WMS",
+            "version": "1.1.1",
+            "request": "GetMap",
+            "layers": f"rdp:{CONSUMPTION_LAYER}",
+            "styles": "",
+            "srs": "EPSG:4326",
+            "bbox": f"{min(xs)-padding},{min(ys)-padding},{max(xs)+padding},{max(ys)+padding}",
+            "width": 256,
+            "height": 256,
+            "format": "image/png",
+        }
+    )
+    status, image, content_type = client.get(f"/geoserver/rdp/wms?{map_query}")
+    require(status == 200, "Consumption WMS GetMap failed")
+    require(content_type == "image/png", f"Unexpected Consumption WMS type: {content_type}")
+    require(
+        image.startswith(b"\x89PNG") and len(image) > 1000,
+        "Consumption WMS map is empty",
+    )
+
+
 def check_dashboard_and_simulation(client: SmokeClient) -> None:
     status, dashboard, _ = client.get("/dashboard/")
     require(status == 200, "Dashboard did not load")
@@ -1079,6 +1612,10 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(b"grid_mv_hv_transformer_reach" in script, "Dashboard is not configured for MV/HV reach WFS")
     require(b"grid_lv_mv_transformer_reach" in script, "Dashboard is not configured for LV/MV reach WFS")
     require(b"public_wind_turbines" in script, "Dashboard is not configured for Wind WFS")
+    require(
+        b"consumption_electricity_areas" in script,
+        "Dashboard is not configured for Consumption WFS",
+    )
     for layer_id in HEAT_LAYERS:
         require(layer_id.encode() in script, f"Dashboard is not configured for {layer_id}")
     require(b"alkmaar_energy_map.geojson" in script, "Static fallback is missing")
@@ -1090,6 +1627,10 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require("layer:policy-tool:pc6-energy" in records, "PC6 registry record is missing")
     require("layer:pv-map:capacity" in records, "PV registry record is missing")
     require("layer:ev-map:public-chargers" in records, "EV registry record is missing")
+    require(
+        "layer:consumption-map:electricity-areas" in records,
+        "Consumption registry record is missing",
+    )
     require("layer:grid-model:lines" in records, "Grid lines registry record is missing")
     require(
         "layer:grid-model:transformers" in records,
@@ -1116,7 +1657,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
         ("layer:grid-model:lv-mv-transformer-reach", "rdp:grid_lv_mv_transformer_reach"),
     ):
         record = records[local_id]
-        require(record["model_version"] == "2.0.0", f"{local_id} version drift")
+        require(record["model_version"] == "2.1.0", f"{local_id} version drift")
         require(record["services"]["qualified_layer"] == qualified_layer, f"{local_id} layer drift")
     pv_record = records["layer:pv-map:capacity"]
     require(pv_record["model_version"] == "0.3.0", "PV registry version drift")
@@ -1140,6 +1681,25 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(
         ev_record["services"]["qualified_layer"] == "rdp:public_ev_chargers",
         "EV registry GeoServer layer drift",
+    )
+    consumption_record = records["layer:consumption-map:electricity-areas"]
+    require(
+        consumption_record["model_version"] == "0.4.0",
+        "Consumption registry version drift",
+    )
+    require(
+        consumption_record["crs"] == "EPSG:4326",
+        "Consumption registry CRS drift",
+    )
+    require(
+        consumption_record["data_quality"]["method_version"]
+        == "datacompleetheid-qualitative-v1",
+        "Consumption registry quality method drift",
+    )
+    require(
+        consumption_record["services"]["qualified_layer"]
+        == "rdp:consumption_electricity_areas",
+        "Consumption registry GeoServer layer drift",
     )
     wind_record = records["layer:wind-turbine-map:public-turbines"]
     require(wind_record["model_version"] == "0.2.0", "Wind registry version drift")
@@ -1192,13 +1752,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1")
     parser.add_argument(
+        "--host-header",
+        help="Optional HTTP Host header for smoke clients running inside Compose.",
+    )
+    parser.add_argument(
         "--expected-grid-data-mode",
         choices=("real_source", "fixture"),
         default="real_source",
     )
     args = parser.parse_args()
 
-    client = SmokeClient(args.base_url)
+    client = SmokeClient(args.base_url, host_header=args.host_header)
     wait_until_ready(client, "/dashboard/")
     wait_until_ready(client, "/policy-api/")
     wait_until_ready(client, "/models/pv/ready", timeout=1800)
@@ -1206,6 +1770,8 @@ def main() -> int:
     wait_until_ready(client, "/models/wind/ready", timeout=300)
     wait_until_ready(client, "/models/heat/ready", timeout=300)
     wait_until_ready(client, "/models/ev/ready", timeout=300)
+    wait_until_ready(client, "/models/consumption/readyz", timeout=300)
+    wait_until_ready(client, "/models/congestion/ready", timeout=300)
     wait_until_ready(
         client, "/geoserver/wms?service=WMS&version=1.3.0&request=GetCapabilities"
     )
@@ -1214,14 +1780,21 @@ def main() -> int:
     check_wind_model_api(client)
     check_heat_model_api(client)
     check_ev_model_api(client)
+    check_consumption_model_api(client)
+    check_congestion_model_api(client)
     check_pc6_layer(client)
     check_pv_layer(client)
     check_grid_layers(client)
     check_wind_layer(client)
     check_heat_layers(client)
     check_ev_layer(client)
+    check_consumption_layer(client)
+    check_transformer_profile_orchestration(client)
     check_dashboard_and_simulation(client)
-    print("Integrated PC6, PV capacity, grid, Wind, Heat, and EV layer smoke test passed")
+    print(
+        "Integrated PC6, PV capacity, Grid, Wind, Heat, EV, Consumption, "
+        "and Congestion smoke test passed"
+    )
     return 0
 
 

@@ -29,10 +29,25 @@
       "spatial_resolution": "pc6",
       "temporal_resolution": "annual",
       "attributes": [
-        {"name": "postcode6", "type": "string"},
-        {"name": "p6_gasm3_2023", "type": "number", "unit": "m3/year"},
-        {"name": "p6_kwh_2023", "type": "number", "unit": "kWh/year"},
-        {"name": "p6_kwh_productie_2023", "type": "number", "unit": "kWh/year"}
+        {
+          "name": "postcode6",
+          "type": "string"
+        },
+        {
+          "name": "p6_gasm3_2023",
+          "type": "number",
+          "unit": "m3/year"
+        },
+        {
+          "name": "p6_kwh_2023",
+          "type": "number",
+          "unit": "kWh/year"
+        },
+        {
+          "name": "p6_kwh_productie_2023",
+          "type": "number",
+          "unit": "kWh/year"
+        }
       ],
       "data_quality": {
         "datacompleetheid": 2,
@@ -83,18 +98,56 @@
       "spatial_resolution": "cbs_buurt",
       "temporal_resolution": "static",
       "attributes": [
-        {"name": "feature_id", "type": "string"},
-        {"name": "feature_uri", "type": "uri"},
-        {"name": "cbs_buurt_code", "type": "string"},
-        {"name": "buurt_name", "type": "string"},
-        {"name": "pv_capacity_kwp", "type": "number", "unit": "kWp"},
-        {"name": "datacompleetheid", "type": "integer"},
-        {"name": "datacompleetheid_label", "type": "string"},
-        {"name": "datacompleetheid_method_version", "type": "string"},
-        {"name": "last_updated", "type": "datetime"},
-        {"name": "source_last_updated", "type": "datetime", "nullable": true},
-        {"name": "model_version", "type": "string"},
-        {"name": "metadata_contract_version", "type": "string"}
+        {
+          "name": "feature_id",
+          "type": "string"
+        },
+        {
+          "name": "feature_uri",
+          "type": "uri"
+        },
+        {
+          "name": "cbs_buurt_code",
+          "type": "string"
+        },
+        {
+          "name": "buurt_name",
+          "type": "string"
+        },
+        {
+          "name": "pv_capacity_kwp",
+          "type": "number",
+          "unit": "kWp"
+        },
+        {
+          "name": "datacompleetheid",
+          "type": "integer"
+        },
+        {
+          "name": "datacompleetheid_label",
+          "type": "string"
+        },
+        {
+          "name": "datacompleetheid_method_version",
+          "type": "string"
+        },
+        {
+          "name": "last_updated",
+          "type": "datetime"
+        },
+        {
+          "name": "source_last_updated",
+          "type": "datetime",
+          "nullable": true
+        },
+        {
+          "name": "model_version",
+          "type": "string"
+        },
+        {
+          "name": "metadata_contract_version",
+          "type": "string"
+        }
       ],
       "data_quality": {
         "kind": "qualitative_confidence",
@@ -130,8 +183,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.0.0",
-      "metadata_contract_version": "2.0.1",
+      "model_version": "2.1.0",
+      "metadata_contract_version": "2.3.0",
       "table": "grid_lines",
       "geoserver_layer": "grid_lines",
       "source": {
@@ -139,9 +192,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "4059f6fbe066cc959ee7751779807b28ba1feae8",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
-        "container_digest": "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
+        "release_commit": "972f9c390e1bf3d86cc87e0b34e500db7e0168a9",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0",
+        "container_digest": "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -196,6 +249,23 @@
           "name": "serving_transformer_id",
           "type": "string",
           "nullable": true
+        },
+        {
+          "name": "connected_mv_hv_transformer_ids",
+          "type": "array"
+        },
+        {
+          "name": "serving_mv_hv_transformer_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "root_bus_ids",
+          "type": "array"
+        },
+        {
+          "name": "source_station_objectids",
+          "type": "array"
         },
         {
           "name": "datacompleetheid",
@@ -256,8 +326,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.0.0",
-      "metadata_contract_version": "2.0.1",
+      "model_version": "2.1.0",
+      "metadata_contract_version": "2.3.0",
       "table": "grid_transformers",
       "geoserver_layer": "grid_transformers",
       "source": {
@@ -265,9 +335,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "4059f6fbe066cc959ee7751779807b28ba1feae8",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
-        "container_digest": "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
+        "release_commit": "972f9c390e1bf3d86cc87e0b34e500db7e0168a9",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0",
+        "container_digest": "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -323,6 +393,42 @@
           "type": "number",
           "unit": "kVA",
           "nullable": true
+        },
+        {
+          "name": "upstream_mapping_status",
+          "type": "string"
+        },
+        {
+          "name": "upstream_mapping_method",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "upstream_mv_hv_transformer_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "upstream_root_bus_id",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "upstream_source_station_objectid",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "upstream_candidate_root_bus_ids",
+          "type": "array"
+        },
+        {
+          "name": "upstream_candidate_mv_hv_transformer_ids",
+          "type": "array"
+        },
+        {
+          "name": "upstream_topology_path_edge_ids",
+          "type": "array"
         },
         {
           "name": "datacompleetheid",
@@ -383,8 +489,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.0.0",
-      "metadata_contract_version": "2.0.1",
+      "model_version": "2.1.0",
+      "metadata_contract_version": "2.3.0",
       "table": "grid_lv_mv_transformer_reach",
       "geoserver_layer": "grid_lv_mv_transformer_reach",
       "source": {
@@ -392,9 +498,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "4059f6fbe066cc959ee7751779807b28ba1feae8",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
-        "container_digest": "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
+        "release_commit": "972f9c390e1bf3d86cc87e0b34e500db7e0168a9",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0",
+        "container_digest": "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -592,8 +698,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.0.0",
-      "metadata_contract_version": "2.0.1",
+      "model_version": "2.1.0",
+      "metadata_contract_version": "2.3.0",
       "table": "grid_mv_hv_transformer_reach",
       "geoserver_layer": "grid_mv_hv_transformer_reach",
       "source": {
@@ -601,9 +707,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "4059f6fbe066cc959ee7751779807b28ba1feae8",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
-        "container_digest": "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4",
+        "release_commit": "972f9c390e1bf3d86cc87e0b34e500db7e0168a9",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0",
+        "container_digest": "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -1476,6 +1582,133 @@
       },
       "style": {
         "style_status": "dashboard_potential_heat_sources",
+        "default_visible": false
+      },
+      "actions": [
+        "inspect_feature",
+        "open_model_metadata"
+      ]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/consumption-map/electricity-areas",
+      "local_id": "layer:consumption-map:electricity-areas",
+      "title": "Annual Electricity Consumption Areas",
+      "description": "Modelled annual building electricity consumption at native CBS buurt support, plus one explicit wijk-supported business residual.",
+      "model": "consumption",
+      "group": "consumption",
+      "model_id": "consumption-map",
+      "model_version": "0.4.0",
+      "metadata_contract_version": "reformers-consumption-v1",
+      "table": "consumption_electricity_areas",
+      "geoserver_layer": "consumption_electricity_areas",
+      "source": {
+        "type": "model_api",
+        "base_url": "http://consumption-api:8080",
+        "metadata_url": "/models/consumption/metadata",
+        "repository": "https://github.com/JortGroen/concumption-map",
+        "release_commit": "e5f44368b01bee9f4a77a409e6894f22f57f9684",
+        "container_image": "ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e",
+        "source_cache_image": "ghcr.io/jortgroen/consumption-map-source-cache@sha256:f4bcf9c44b39ee4e1e244502a220296d1a0cdfa9ed2bb21bf2667654f391ef59",
+        "source_cache_sha256": "6b05e30599e6790713fd10c713ee1e7374efdbcee38e9c256e6b542111fd6861",
+        "crs": "EPSG:4326",
+        "native_crs": "urn:ogc:def:crs:OGC::CRS84",
+        "dataset_id": "alkmaar_2023",
+        "municipality_code": "GM0361",
+        "reference_year": 2023
+      },
+      "feature_id_property": "feature_id",
+      "source_feature_id_property": "spatial_unit_code",
+      "feature_uri_property": "feature_uri",
+      "geometry_type": "MultiPolygon",
+      "selectable_feature_type": "cbs_buurt_or_wijk",
+      "spatial_resolution": "native_cbs_buurt_and_wijk",
+      "temporal_resolution": "annual",
+      "attributes": [
+        {
+          "name": "feature_id",
+          "type": "string"
+        },
+        {
+          "name": "spatial_unit_type",
+          "type": "string"
+        },
+        {
+          "name": "spatial_unit_code",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "annual_electricity_consumption_kwh",
+          "type": "number",
+          "unit": "kWh/year"
+        },
+        {
+          "name": "residential_electricity_kwh",
+          "type": "number",
+          "unit": "kWh/year",
+          "nullable": true
+        },
+        {
+          "name": "business_electricity_kwh",
+          "type": "number",
+          "unit": "kWh/year",
+          "nullable": true
+        },
+        {
+          "name": "services_commerce_electricity_kwh",
+          "type": "number",
+          "unit": "kWh/year",
+          "nullable": true
+        },
+        {
+          "name": "unknown_industrial_business_electricity_kwh",
+          "type": "number",
+          "unit": "kWh/year",
+          "nullable": true
+        },
+        {
+          "name": "datacompleetheid",
+          "type": "integer"
+        },
+        {
+          "name": "datacompleetheid_label",
+          "type": "string"
+        },
+        {
+          "name": "datacompleetheid_rule_version",
+          "type": "string"
+        },
+        {
+          "name": "source_reference_period",
+          "type": "string"
+        },
+        {
+          "name": "model_version",
+          "type": "string"
+        }
+      ],
+      "data_quality": {
+        "kind": "qualitative_confidence",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-qualitative-v1",
+        "owner": "consumption-map",
+        "scale": {
+          "0": "fully assumption-based",
+          "1": "some evidence with many assumptions",
+          "2": "quite accurate with documented assumptions or missing values",
+          "3": "all relevant data available and very accurate"
+        }
+      },
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=consumption_electricity_areas&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:consumption_electricity_areas"
+      },
+      "style": {
+        "style_status": "dashboard_annual_consumption",
         "default_visible": false
       },
       "actions": [

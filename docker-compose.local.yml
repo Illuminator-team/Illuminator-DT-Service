@@ -68,10 +68,22 @@ services:
       traefik.http.routers.ev-api.entrypoints: web
       traefik.http.routers.ev-api.tls: "false"
 
+  consumption-api:
+    labels:
+      traefik.http.routers.consumption-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/consumption`)
+      traefik.http.routers.consumption-api.entrypoints: web
+      traefik.http.routers.consumption-api.tls: "false"
+
   layer-publisher:
     environment:
       WIND_EXPECTED_DATA_MODE: fixture
       HEAT_EXPECTED_DATA_MODE: fixture
+
+  congestion-backend:
+    labels:
+      traefik.http.routers.congestion-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/congestion`)
+      traefik.http.routers.congestion-api.entrypoints: web
+      traefik.http.routers.congestion-api.tls: "false"
 
   grafana:
     environment:

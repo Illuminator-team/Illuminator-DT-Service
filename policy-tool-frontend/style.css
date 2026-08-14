@@ -548,6 +548,10 @@ button {
     grid-template-columns: minmax(0, 1fr);
 }
 
+.consumption-grid {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .info.legend i.point-legend {
     border-radius: 50%;
 }

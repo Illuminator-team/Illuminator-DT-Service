@@ -331,6 +331,16 @@ different from an intersection- or topology-backed match. The layer metadata
 MUST state the coverage of the supplied source-feature dataset; it MUST NOT
 imply coverage outside that input.
 
+For multi-stage network assignments, the API MUST distinguish absolute source
+shares from parent relations so downstream aggregation cannot apply a share
+twice. Every parent relation MUST expose its authority status, scope, method and
+method version, path evidence, candidate targets, tie state, provenance, and
+`datacompleetheid`. A provisional policy MUST require explicit caller opt-in and
+return a result label that remains visibly different from an authoritative
+result. Omitted policy SHOULD use the strict fail-closed behavior. Missing paths,
+ties, mixed policies, incompatible versions, or falsely authoritative markers
+MUST fail rather than silently selecting a target.
+
 A spatial input used during initialization MUST be validated, normalized, and
 content-hashed. Its source identity, checksum, and feature count MUST participate
 in the initialization fingerprint and reusable-cache check. Changing the input

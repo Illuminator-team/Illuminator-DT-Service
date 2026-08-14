@@ -1,9 +1,12 @@
 import copy
 import hashlib
+import importlib.util
 import json
 import sys
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 
@@ -19,12 +22,12 @@ from postgis_sql import (  # noqa: E402
 )
 
 
-RELEASE_COMMIT = "4059f6fbe066cc959ee7751779807b28ba1feae8"
-CONTAINER_DIGEST = "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4"
+RELEASE_COMMIT = "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+CONTAINER_DIGEST = "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0"
 IMAGE_IDENTITY = f"ghcr.io/jortgroen/liander-grid-model-api@{CONTAINER_DIGEST}"
-MODEL_VERSION = "2.0.0"
-CONTRACT_VERSION = "2.0.1"
-METHOD_VERSION = "2.0.0"
+MODEL_VERSION = "2.1.0"
+CONTRACT_VERSION = "2.3.0"
+METHOD_VERSION = "2.1.0"
 GRID_DATA_VERSION = "grid-acceptance-version"
 BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 RUN_ID = "11111111-1111-4111-8111-111111111111"
@@ -33,6 +36,37 @@ TRANSFORMER_OUTPUT_ID = "33333333-3333-4333-8333-333333333333"
 LV_MV_REACH_OUTPUT_ID = "44444444-4444-4444-8444-444444444444"
 MV_HV_REACH_OUTPUT_ID = "55555555-5555-4555-8555-555555555555"
 TIMESTAMP = "2026-08-08T07:00:00+00:00"
+
+
+def load_grid_postgis_module():
+    psycopg2 = types.ModuleType("psycopg2")
+    psycopg2.connect = None
+    extras = types.ModuleType("psycopg2.extras")
+    extras.Json = object
+    extras.execute_values = None
+    spec = importlib.util.spec_from_file_location(
+        "grid_postgis_under_test", ROOT / "layer-publisher" / "grid_postgis.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    with patch.dict(
+        sys.modules,
+        {"psycopg2": psycopg2, "psycopg2.extras": extras},
+    ):
+        spec.loader.exec_module(module)
+    return module
+
+
+class SchemaCursor:
+    def __init__(self, columns):
+        self.columns = columns
+        self.statements = []
+
+    def execute(self, statement, parameters=None):
+        self.statements.append((" ".join(statement.split()), parameters))
+
+    def fetchall(self):
+        return [(column,) for column in self.columns]
 
 
 def common_properties(component_id, component_type, output_id, voltage_level="lv"):
@@ -78,6 +112,14 @@ def line_feature(component_id="grid-line-acceptance"):
             "evidence_status": "registered",
             "connected_transformer_ids": ["grid-transformer-trafo_MV_LV_1157"],
             "serving_transformer_id": "grid-transformer-trafo_MV_LV_1157",
+            "connected_mv_hv_transformer_ids": [
+                "grid-transformer-mv-hv-station-alkmaar"
+            ],
+            "serving_mv_hv_transformer_id": (
+                "grid-transformer-mv-hv-station-alkmaar"
+            ),
+            "root_bus_ids": ["42"],
+            "source_station_objectids": ["station-alkmaar"],
         }
     )
     return {
@@ -106,6 +148,20 @@ def transformer_feature():
             "in_service": True,
             "source_station_objectid": None,
             "source_station_name": None,
+            "upstream_mapping_status": "available",
+            "upstream_mapping_method": (
+                "electrical-connected-component-single-root-v1"
+            ),
+            "upstream_mv_hv_transformer_id": (
+                "grid-transformer-mv-hv-station-alkmaar"
+            ),
+            "upstream_root_bus_id": "42",
+            "upstream_source_station_objectid": "station-alkmaar",
+            "upstream_candidate_root_bus_ids": ["42"],
+            "upstream_candidate_mv_hv_transformer_ids": [
+                "grid-transformer-mv-hv-station-alkmaar"
+            ],
+            "upstream_topology_path_edge_ids": ["line_1", "trafo_38"],
         }
     )
     return {
@@ -569,10 +625,91 @@ class GridContractTest(unittest.TestCase):
             "4cf159559528c56ee43ccee79e2d851535761eee0d5aef9580b5204534ff3a12",
         )
 
+    def test_orchestration_fixture_is_the_checked_1483aa_model_fixture(self):
+        fixture = (
+            ROOT
+            / "tests"
+            / "fixtures"
+            / "grid"
+            / "pc6_1483aa_grid_fixture.json"
+        )
+        text = fixture.read_text(encoding="utf-8")
+        payload = json.loads(text)
+        provenance = payload["provenance"]
+
+        self.assertEqual(
+            payload["fixture_id"], "pc6-1483aa-provisional-hierarchy-v1"
+        )
+        self.assertEqual(provenance["expected_pc6_id"], "1483AA")
+        self.assertEqual(
+            provenance["expected_counts"],
+            {
+                "buses": 261,
+                "external_grids": 7,
+                "lines": 119,
+                "mv_hv_station_connections": 7,
+                "pc6": 1,
+                "switches": 138,
+                "transformers": 3,
+            },
+        )
+        shares = provenance["expected_lv_mv_transformer_shares"]
+        self.assertAlmostEqual(sum(shares.values()), 1.0, places=6)
+        self.assertEqual(provenance["expected_mv_hv_root_bus_id"], "27999")
+        self.assertEqual(provenance["expected_mv_hv_station_name"], "OS OTERLEEK")
+        self.assertEqual(
+            {
+                key: value["selected_distance_edges"]
+                for key, value in provenance[
+                    "nearest_electrical_root_evidence"
+                ].items()
+            },
+            {
+                "trafo_MV_LV_1272": 72,
+                "trafo_MV_LV_1418": 78,
+                "trafo_MV_LV_787": 69,
+            },
+        )
+        self.assertEqual(
+            hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "76064f56b4e6380214ea21686b5f55272cbba41992307d6acbafb19b77dfe061",
+        )
+
     def test_grid_geometry_sql_templates_are_balanced(self):
         for template in (multiline_values_template(2), point_values_template(2), values_template(2)):
             self.assertEqual(template.count("("), template.count(")"))
             self.assertEqual(template.count("%s"), 3)
+
+    def test_grid_table_is_recreated_when_lineage_columns_are_missing(self):
+        grid_postgis = load_grid_postgis_module()
+        required = set(grid_postgis.GRID_LAYER_SQL["grid_lines"]["fields"])
+        old_columns = required - {
+            "connected_mv_hv_transformer_ids",
+            "serving_mv_hv_transformer_id",
+            "root_bus_ids",
+            "source_station_objectids",
+        }
+        old_cursor = SchemaCursor(old_columns)
+
+        grid_postgis.create_grid_table(old_cursor, "grid_lines", "grid_lines")
+
+        self.assertTrue(
+            any(
+                statement == "DROP TABLE public.grid_lines"
+                for statement, _parameters in old_cursor.statements
+            )
+        )
+
+        current_cursor = SchemaCursor(required)
+        grid_postgis.create_grid_table(
+            current_cursor, "grid_lines", "grid_lines"
+        )
+        self.assertFalse(
+            any(
+                statement.startswith("DROP TABLE")
+                for statement, _parameters in current_cursor.statements
+            )
+        )
 
 
 if __name__ == "__main__":

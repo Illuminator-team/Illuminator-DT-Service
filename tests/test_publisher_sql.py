@@ -43,6 +43,17 @@ class PublisherSqlTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be positive"):
             values_template(0)
 
+    def test_point_values_template_is_balanced(self):
+        template = point_values_template(2)
+
+        self.assertEqual(
+            template,
+            "(%s,%s,ST_CollectionExtract(ST_MakeValid("
+            "ST_SetSRID(ST_GeomFromGeoJSON(%s),4326)),1))",
+        )
+        self.assertEqual(template.count("("), template.count(")"))
+        self.assertEqual(template.count("%s"), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

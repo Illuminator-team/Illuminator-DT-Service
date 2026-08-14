@@ -1,10 +1,14 @@
 import json
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from orchestration import ModelApiClient, OrchestrationError, TransformerProfileOrchestrator
 
 app = FastAPI()
 
@@ -23,6 +27,17 @@ PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 LAYER_REGISTRY_PATH = Path(
     os.getenv("LAYER_REGISTRY_PATH", "/app/config/layer-manifest.json")
 )
+PC6_GEOMETRY_PATH = Path(
+    os.getenv("PC6_GEOMETRY_PATH", "/app/config/alkmaar_energy_map.geojson")
+)
+GRID_API_URL = os.getenv("GRID_API_URL", "http://grid-api:8080")
+CONGESTION_API_URL = os.getenv("CONGESTION_API_URL", "http://congestion-backend:8080")
+CONSUMPTION_API_URL = os.getenv("CONSUMPTION_API_URL", "http://consumption-api:8080")
+
+
+class TransformerProfileScenario(BaseModel):
+    start: datetime = datetime.fromisoformat("2022-12-31T23:00:00+00:00")
+    end: datetime = datetime.fromisoformat("2023-01-01T00:00:00+00:00")
 
 @app.get("/")
 def home():
@@ -64,6 +79,26 @@ def layers():
         "contract_version": manifest["contract_version"],
         "layers": records,
     }
+
+
+@app.post("/transformer-profiles/pc6/{pc6}")
+def transformer_profiles_pc6(
+    pc6: str, scenario: TransformerProfileScenario
+):
+    orchestrator = TransformerProfileOrchestrator(
+        consumption_client=ModelApiClient(CONSUMPTION_API_URL, "consumption"),
+        grid_client=ModelApiClient(GRID_API_URL, "grid"),
+        congestion_client=ModelApiClient(CONGESTION_API_URL, "congestion"),
+        pc6_geometry_path=PC6_GEOMETRY_PATH,
+    )
+    try:
+        return orchestrator.aggregate_pc6(
+            pc6,
+            start=scenario.start,
+            end=scenario.end,
+        )
+    except OrchestrationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.as_detail()) from exc
 
 @app.get("/simulate/{pc6}")
 async def run_simulation(pc6: str, electrification: float = 0.0):
