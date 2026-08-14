@@ -10,7 +10,7 @@ This repository is based on the step-by-step tutorial for the [Rapid Deployment 
 
 You need to have [Docker](https://docs.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) installed.
 
-The pinned PV and Liander Grid model images are private GitHub Container Registry packages. Before
+The pinned PV, Liander Grid, Consumption, and EV model images are private GitHub Container Registry packages. Before
 a local first start, authenticate Docker with a separately managed GitHub token
 limited to `read:packages`; do not store that token in this repository:
 
@@ -37,13 +37,17 @@ Start the local stack with isolated GeoServer and Illuminator output volumes:
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
-The first start pulls the PV and Grid models by their verified immutable GHCR
+The first start pulls the PV, Grid, Consumption, and EV models by their verified immutable GHCR
 digests. PV runs its one-shot public-source initializer, which can download
 substantial source data and take more than ten minutes; the `pv-raw-cache`
 volume is reused on later starts. The local override initializes Grid from the
 checked-in 22-line/1-transformer Alkmaar acceptance fixture. The production
 Compose path instead runs the model-owned `north-holland-towns` source
 initializer and persists its result in `grid-model-data`.
+Consumption initializes its reviewed 2023 Alkmaar source cache through a
+network-free one-shot image and validates it with the model-owned initializer
+before the API starts. The `consumption-model-data` volume is reused on later
+starts.
 
 Local endpoints:
 
@@ -51,6 +55,8 @@ Local endpoints:
 - GeoServer: https://localhost/geoserver/web/
 - PV model API: https://localhost/models/pv/docs
 - Grid model API: https://localhost/models/grid/docs
+- Consumption model metadata: https://localhost/models/consumption/metadata
+- EV model API: https://localhost/models/ev/docs
 - Grafana: https://localhost/grafana/
 - Redis Insight: http://localhost:5540/
 - Traefik dashboard: http://localhost:8080/dashboard/
@@ -63,8 +69,13 @@ from GeoServer WFS without substituting consumption data when it is unavailable.
 The independent `rdp:grid_lines` and `rdp:grid_transformers` layers are likewise
 loaded from GeoServer WFS. Selecting either Grid layer changes the map and
 feature details while leaving the congestion scenario controls available.
+The `rdp:public_ev_chargers` layer adds individually selectable public charging
+locations without changing or replacing the legacy congestion workflow.
+The new `rdp:consumption_electricity_areas` layer is shown beside the legacy
+PC6 layer; it does not replace the policy-tool backend or its scenario controls.
+It preserves the model's native buurt/wijk support and nullable sector values.
 
-Run the PC6, PV, and Grid publication contracts and frontend layer-adapter tests:
+Run the cumulative publication contracts and frontend layer-adapter tests:
 
 ```shell
 python -m unittest discover -s tests -p "test_*.py"

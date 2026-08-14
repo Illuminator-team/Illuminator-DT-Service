@@ -9,6 +9,8 @@
     const PV_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=pv_capacity&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_LINES_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lines&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_TRANSFORMERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_transformers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const EV_CHARGERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_ev_chargers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const CONSUMPTION_AREAS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=consumption_electricity_areas&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const FALLBACK_URL = 'data/alkmaar_energy_map.geojson';
     const FALLBACK_QUALITY = Object.freeze({
         datacompleetheid: 2,
@@ -73,9 +75,21 @@
         return { data, source: 'geoserver_wfs', fallbackReason: null };
     }
 
+    async function loadEvChargersFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, EV_CHARGERS_WFS_URL, 'EV chargers GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
+    async function loadConsumptionAreasFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, CONSUMPTION_AREAS_WFS_URL, 'Consumption areas GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
     return {
         FALLBACK_QUALITY,
         FALLBACK_URL,
+        CONSUMPTION_AREAS_WFS_URL,
+        EV_CHARGERS_WFS_URL,
         GRID_LINES_WFS_URL,
         GRID_TRANSFORMERS_WFS_URL,
         PV_WFS_URL,
@@ -83,6 +97,8 @@
         addFallbackQuality,
         loadGridLinesFeatureCollection,
         loadGridTransformersFeatureCollection,
+        loadConsumptionAreasFeatureCollection,
+        loadEvChargersFeatureCollection,
         loadPc6FeatureCollection,
         loadPvFeatureCollection,
         validateFeatureCollection

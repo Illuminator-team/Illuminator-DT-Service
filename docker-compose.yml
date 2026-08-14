@@ -4,6 +4,15 @@ x-pv-image: &pv-image
 x-grid-image: &grid-image
   image: ghcr.io/jortgroen/liander-grid-model-api@sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2
 
+x-ev-image: &ev-image
+  image: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+
+x-consumption-image: &consumption-image
+  image: ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba
+
+x-consumption-cache-image: &consumption-cache-image
+  image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:9fbdb8f0308f6db4427de594dfd1173b1feb0447a278b12ab7e63811fe5edee4
+
 x-pv-cache-image: &pv-cache-image
   image: ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b
 
@@ -56,6 +65,7 @@ services:
 
   pv-api:
     <<: *pv-image
+    init: true
     environment:
       PV_RAW_CACHE_DIR: /app/data/raw
       PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
@@ -107,6 +117,7 @@ services:
 
   grid-api:
     <<: *grid-image
+    init: true
     environment:
       GRID_API_DATA_DIR: /data
       GRID_API_CONTAINER_DIGEST: sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2
@@ -133,6 +144,116 @@ services:
       - "traefik.http.middlewares.grid-api-strip.stripprefix.prefixes=/models/grid"
       - "traefik.http.routers.grid-api.middlewares=grid-api-strip"
       - "traefik.http.services.grid-api.loadbalancer.server.port=8080"
+    restart: unless-stopped
+
+  ## -----------------------------------------------------
+  ## Expose the standalone public EV charging model API.
+  ## -----------------------------------------------------
+  ev-api:
+    <<: *ev-image
+    init: true
+    environment:
+      EV_RELEASE_COMMIT: 54a894cc7c96c7d8c27e344ee2724012d5ae4e3d
+      EV_IMAGE_IDENTITY: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+      EV_OUTPUT_DIR: /var/lib/ev-map/outputs
+    volumes:
+      - ev-generated-outputs:/var/lib/ev-map/outputs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/ready', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ev-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/ev`)"
+      - "traefik.http.routers.ev-api.entrypoints=web,websecure"
+      - "traefik.http.routers.ev-api.tls=true"
+      - "traefik.http.middlewares.ev-api-strip.stripprefix.prefixes=/models/ev"
+      - "traefik.http.routers.ev-api.middlewares=ev-api-strip"
+      - "traefik.http.services.ev-api.loadbalancer.server.port=8000"
+    restart: unless-stopped
+
+  ## --------------------------------------------------------------------
+  ## Initialize and expose the standalone annual Consumption Map API.
+  ## --------------------------------------------------------------------
+  consumption-source-cache-init:
+    <<: *consumption-cache-image
+    user: "10001:10001"
+    read_only: true
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - consumption-model-data:/var/lib/consumption-map
+    restart: "no"
+
+  consumption-runtime-init:
+    <<: *consumption-image
+    user: "10001:10001"
+    read_only: true
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    entrypoint:
+      - python
+      - -m
+      - consumption_map.rdp_cli
+    command:
+      - initialize
+      - --source
+      - /var/lib/consumption-map/bootstrap/consumption-source-cache-alkmaar-2023.zip
+      - --data-root
+      - /var/lib/consumption-map
+    depends_on:
+      consumption-source-cache-init:
+        condition: service_completed_successfully
+    volumes:
+      - consumption-model-data:/var/lib/consumption-map
+    restart: "no"
+
+  consumption-api:
+    <<: *consumption-image
+    init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba
+    depends_on:
+      consumption-runtime-init:
+        condition: service_completed_successfully
+    volumes:
+      - consumption-model-data:/var/lib/consumption-map
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8080/readyz', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.consumption-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/consumption`)"
+      - "traefik.http.routers.consumption-api.entrypoints=web,websecure"
+      - "traefik.http.routers.consumption-api.tls=true"
+      - "traefik.http.middlewares.consumption-api-strip.stripprefix.prefixes=/models/consumption"
+      - "traefik.http.routers.consumption-api.middlewares=consumption-api-strip"
+      - "traefik.http.services.consumption-api.loadbalancer.server.port=8080"
     restart: unless-stopped
 
 #  ------------------------------------END OF PLAYGROUND -------------------------------------
@@ -375,6 +496,12 @@ services:
       GRID_EXPECTED_CONTAINER_DIGEST: sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2
       GRID_EXPECTED_DATA_MODE: real_source
       GRID_EXPORT_BBOX: 4.65,52.55,4.95,52.75
+      EV_API_URL: http://ev-api:8000
+      EV_EXPECTED_RELEASE_COMMIT: 54a894cc7c96c7d8c27e344ee2724012d5ae4e3d
+      EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+      CONSUMPTION_API_URL: http://consumption-api:8080
+      CONSUMPTION_EXPECTED_RELEASE_COMMIT: 833f2a072d191bfb58374451a76f4d3b50db2756
+      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:9d183b4ac2045d05227bbafd97b1a6ffe7824008d79b2b33422ea494521b6bba
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
@@ -388,6 +515,10 @@ services:
       pv-api:
         condition: service_healthy
       grid-api:
+        condition: service_healthy
+      ev-api:
+        condition: service_healthy
+      consumption-api:
         condition: service_healthy
     networks:
       - default
@@ -421,3 +552,5 @@ volumes:
   pv-raw-cache:
   pv-generated-outputs:
   grid-model-data:
+  ev-generated-outputs:
+  consumption-model-data:

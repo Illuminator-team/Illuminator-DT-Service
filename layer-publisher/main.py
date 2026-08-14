@@ -8,8 +8,15 @@ from xml.sax.saxutils import escape
 
 import psycopg2
 import requests
+from consumption import (
+    ConsumptionArtifact,
+    fetch_consumption_artifact,
+    get_consumption_readiness_signature,
+)
+from ev import EvArtifact, fetch_ev_artifact, get_ev_readiness_signature
 from grid import GridArtifact, fetch_grid_artifact, get_grid_readiness_signature
 from grid_postgis import sync_grid_layer
+from model_postgis import sync_model_layer
 from pc6 import Pc6Record, get_layer_config, load_manifest, load_pc6_records
 from postgis_sql import values_template
 from psycopg2.extras import execute_values
@@ -60,6 +67,10 @@ GRID_CONFIGS = {
     "grid_lines": GRID_LINES_CONFIG,
     "grid_transformers": GRID_TRANSFORMERS_CONFIG,
 }
+EV_CONFIG = get_layer_config(MANIFEST, "layer:ev-map:public-chargers")
+CONSUMPTION_CONFIG = get_layer_config(
+    MANIFEST, "layer:consumption-map:electricity-areas"
+)
 PC6_SOURCE_PATH = Path(os.getenv("PC6_SOURCE_PATH", PC6_CONFIG["source"]["path"]))
 PV_API_URL = os.getenv("PV_API_URL", PV_CONFIG["source"]["base_url"]).rstrip("/")
 PV_EXPECTED_RELEASE_COMMIT = os.getenv(
@@ -83,6 +94,24 @@ GRID_EXPORT_BBOX = bbox_env(
     "GRID_EXPORT_BBOX",
     GRID_LINES_CONFIG["source"]["production_selection"]["bbox"],
 )
+EV_API_URL = os.getenv("EV_API_URL", EV_CONFIG["source"]["base_url"]).rstrip("/")
+EV_EXPECTED_RELEASE_COMMIT = os.getenv(
+    "EV_EXPECTED_RELEASE_COMMIT", EV_CONFIG["source"]["release_commit"]
+)
+EV_EXPECTED_CONTAINER_IMAGE = os.getenv(
+    "EV_EXPECTED_CONTAINER_IMAGE", EV_CONFIG["source"]["container_image"]
+)
+CONSUMPTION_API_URL = os.getenv(
+    "CONSUMPTION_API_URL", CONSUMPTION_CONFIG["source"]["base_url"]
+).rstrip("/")
+CONSUMPTION_EXPECTED_RELEASE_COMMIT = os.getenv(
+    "CONSUMPTION_EXPECTED_RELEASE_COMMIT",
+    CONSUMPTION_CONFIG["source"]["release_commit"],
+)
+CONSUMPTION_EXPECTED_CONTAINER_IMAGE = os.getenv(
+    "CONSUMPTION_EXPECTED_CONTAINER_IMAGE",
+    CONSUMPTION_CONFIG["source"]["container_image"],
+)
 
 GEOSERVER_REST_URL = os.getenv(
     "GEOSERVER_REST_URL", "http://geo:8080/geoserver/rest"
@@ -95,6 +124,9 @@ WORKSPACE = os.getenv("GEOSERVER_WORKSPACE", MANIFEST["workspace"])
 DATASTORE = os.getenv("GEOSERVER_DATASTORE", MANIFEST["datastore"])
 PUBLISH_INTERVAL_SECONDS = int(os.getenv("PUBLISH_INTERVAL_SECONDS", "10"))
 PUBLISH_ONCE = os.getenv("PUBLISH_ONCE", "false").lower() == "true"
+GEOSERVER_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv("GEOSERVER_REQUEST_TIMEOUT_SECONDS", "90")
+)
 
 DB_CONN = {
     "host": os.getenv("POSTGRES_HOST", "timescale"),
@@ -111,6 +143,10 @@ PV_LAYER = PV_CONFIG["geoserver_layer"]
 GRID_TABLES = {
     layer_id: config["table"] for layer_id, config in GRID_CONFIGS.items()
 }
+EV_TABLE = EV_CONFIG["table"]
+EV_LAYER = EV_CONFIG["geoserver_layer"]
+CONSUMPTION_TABLE = CONSUMPTION_CONFIG["table"]
+CONSUMPTION_LAYER = CONSUMPTION_CONFIG["geoserver_layer"]
 SOLAR_TABLE = "solar_panel_layer"
 SOLAR_LAYER = "solar_panel_layer"
 
@@ -166,13 +202,28 @@ def wait_for_postgres(attempts: int = 180) -> None:
 
 
 def geoserver_request(method: str, path: str, **kwargs: Any) -> requests.Response:
-    return requests.request(
-        method,
-        f"{GEOSERVER_REST_URL}/{path.lstrip('/')}",
-        auth=GEOSERVER_AUTH,
-        timeout=30,
-        **kwargs,
-    )
+    attempts = 3 if method.upper() == "GET" else 1
+    for attempt in range(1, attempts + 1):
+        try:
+            return requests.request(
+                method,
+                f"{GEOSERVER_REST_URL}/{path.lstrip('/')}",
+                auth=GEOSERVER_AUTH,
+                timeout=GEOSERVER_REQUEST_TIMEOUT_SECONDS,
+                **kwargs,
+            )
+        except requests.RequestException:
+            if attempt == attempts:
+                raise
+            LOGGER.warning(
+                "GeoServer %s %s failed during startup; retrying (%s/%s)",
+                method,
+                path,
+                attempt,
+                attempts,
+            )
+            time.sleep(2 * attempt)
+    raise AssertionError("unreachable")
 
 
 def wait_for_geoserver(attempts: int = 600) -> None:
@@ -595,6 +646,66 @@ def publish_grid() -> GridArtifact:
     return artifact
 
 
+def publish_ev() -> EvArtifact:
+    artifact = fetch_ev_artifact(
+        EV_API_URL,
+        expected_release_commit=EV_EXPECTED_RELEASE_COMMIT,
+        expected_container_image=EV_EXPECTED_CONTAINER_IMAGE,
+        expected_model_version=EV_CONFIG["model_version"],
+        expected_metadata_contract_version=EV_CONFIG["metadata_contract_version"],
+        expected_quality_method_version=EV_CONFIG["data_quality"]["method_version"],
+    )
+    stats = sync_model_layer(
+        DB_CONN,
+        table=EV_TABLE,
+        layer_id="public_ev_chargers",
+        records=artifact.records,
+    )
+    ensure_feature_type(EV_LAYER, EV_CONFIG["title"], EV_CONFIG["source"]["crs"])
+    LOGGER.info(
+        "EV charger layer synchronized: total=%s changed=%s deleted=%s output=%s",
+        stats["total"],
+        stats["changed"],
+        stats["deleted"],
+        artifact.output_id,
+    )
+    return artifact
+
+
+def publish_consumption() -> ConsumptionArtifact:
+    artifact = fetch_consumption_artifact(
+        CONSUMPTION_API_URL,
+        expected_release_commit=CONSUMPTION_EXPECTED_RELEASE_COMMIT,
+        expected_container_image=CONSUMPTION_EXPECTED_CONTAINER_IMAGE,
+        expected_model_version=CONSUMPTION_CONFIG["model_version"],
+        expected_metadata_contract_version=CONSUMPTION_CONFIG[
+            "metadata_contract_version"
+        ],
+        expected_quality_rule_version=CONSUMPTION_CONFIG["data_quality"][
+            "method_version"
+        ],
+    )
+    stats = sync_model_layer(
+        DB_CONN,
+        table=CONSUMPTION_TABLE,
+        layer_id="electricity_consumption_areas",
+        records=artifact.records,
+    )
+    ensure_feature_type(
+        CONSUMPTION_LAYER,
+        CONSUMPTION_CONFIG["title"],
+        CONSUMPTION_CONFIG["source"]["crs"],
+    )
+    LOGGER.info(
+        "Consumption area layer synchronized: total=%s changed=%s deleted=%s output=%s",
+        stats["total"],
+        stats["changed"],
+        stats["deleted"],
+        artifact.output_id,
+    )
+    return artifact
+
+
 def create_solar_table() -> None:
     with psycopg2.connect(**DB_CONN) as connection:
         with connection.cursor() as cursor:
@@ -665,6 +776,8 @@ def run() -> None:
     publish_pc6()
     publish_pv()
     publish_grid()
+    publish_ev()
+    publish_consumption()
     create_solar_table()
     ensure_feature_type(SOLAR_LAYER, "Tutorial Solar Panel", "EPSG:4326")
     try:
@@ -678,6 +791,10 @@ def run() -> None:
     last_pc6_signature = source_signature(PC6_SOURCE_PATH)
     last_pv_signature = get_pv_readiness_signature(PV_API_URL)
     last_grid_signature = get_grid_readiness_signature(GRID_API_URL)
+    last_ev_signature = get_ev_readiness_signature(EV_API_URL)
+    last_consumption_signature = get_consumption_readiness_signature(
+        CONSUMPTION_API_URL
+    )
     while True:
         time.sleep(PUBLISH_INTERVAL_SECONDS)
         current_signature = source_signature(PC6_SOURCE_PATH)
@@ -692,6 +809,28 @@ def run() -> None:
         except (RuntimeError, ValueError):
             LOGGER.warning(
                 "Could not check or refresh the PV capacity layer",
+                exc_info=True,
+            )
+        try:
+            current_ev_signature = get_ev_readiness_signature(EV_API_URL)
+            if current_ev_signature != last_ev_signature:
+                publish_ev()
+                last_ev_signature = current_ev_signature
+        except (requests.RequestException, RuntimeError, TypeError, ValueError):
+            LOGGER.warning(
+                "Could not check or refresh the EV charger layer",
+                exc_info=True,
+            )
+        try:
+            current_consumption_signature = get_consumption_readiness_signature(
+                CONSUMPTION_API_URL
+            )
+            if current_consumption_signature != last_consumption_signature:
+                publish_consumption()
+                last_consumption_signature = current_consumption_signature
+        except (requests.RequestException, RuntimeError, TypeError, ValueError):
+            LOGGER.warning(
+                "Could not check or refresh the Consumption area layer",
                 exc_info=True,
             )
         try:
