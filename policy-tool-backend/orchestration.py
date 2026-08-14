@@ -15,6 +15,8 @@ import requests
 
 PT15M = timedelta(minutes=15)
 PC6_PATTERN = re.compile(r"^[1-9][0-9]{3}[A-Z]{2}$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+GIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 CONSUMPTION_LAYER_ID = "residential_electricity_pc6_profiles_pt15m"
 CONSUMPTION_MODEL_ID = "consumption-map"
 CONSUMPTION_MODEL_VERSION = "0.4.0"
@@ -48,6 +50,17 @@ class CompletedRun:
     run_id: str
     output_id: str
     record: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ConsumptionProfileIdentity:
+    model_id: str
+    model_version: str
+    layer_id: str
+    layer_version: str
+    profile_id: str
+    profile_version: str
+    release_commit: str
 
 
 class ModelApiClient:
@@ -121,6 +134,138 @@ class ModelApiClient:
             raise self._contract_error("output byte-size verification failed")
         return document
 
+    def get_consumption_profile_identity(
+        self,
+        *,
+        pc6: str,
+        profile_id: str,
+        start: datetime,
+        end: datetime,
+    ) -> ConsumptionProfileIdentity:
+        feature_id = f"consumption-residential-electricity-pc6-{pc6.lower()}"
+        payload = {
+            "dataset_id": "alkmaar_2023",
+            "layer_ids": [CONSUMPTION_LAYER_ID],
+            "selection": {"feature_ids": [feature_id]},
+            "time": {
+                "start": iso_z(start),
+                "end_exclusive": iso_z(end),
+                "resolution": "PT15M",
+            },
+        }
+        run = self._json_request("POST", "/runs", json=payload)
+        if run.get("status") != "succeeded":
+            raise self._contract_error("profile run did not succeed synchronously")
+        run_id = self._required_string(run, "run_id", "profile run")
+        output_ids = run.get("output_ids")
+        if (
+            not isinstance(output_ids, list)
+            or len(output_ids) != 1
+            or not isinstance(output_ids[0], str)
+            or not output_ids[0]
+        ):
+            raise self._contract_error("profile run must contain exactly one output ID")
+        output_id = output_ids[0]
+        metadata = self._json_request("GET", f"/outputs/{output_id}")
+        expected_interval_count = int((end - start) / PT15M)
+        if (
+            metadata.get("output_id") != output_id
+            or metadata.get("run_id") != run_id
+            or metadata.get("status") != "available"
+            or metadata.get("layer_id") != CONSUMPTION_LAYER_ID
+            or metadata.get("media_type") != "application/json"
+            or metadata.get("data_url") != f"/outputs/{output_id}/data"
+            or metadata.get("profile_count") != 1
+            or metadata.get("interval_count_per_profile")
+            != expected_interval_count
+            or metadata.get("value_count") != expected_interval_count
+        ):
+            raise self._contract_error("profile output metadata is inconsistent")
+
+        document = self._json_request("GET", f"/outputs/{output_id}/data")
+        canonical = (
+            json.dumps(
+                document,
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+        if metadata.get("semantic_sha256") != hashlib.sha256(canonical).hexdigest():
+            raise self._contract_error("profile output checksum verification failed")
+        if (
+            document.get("metadata_contract_version") != "reformers-consumption-v1"
+            or document.get("model_id") != CONSUMPTION_MODEL_ID
+            or document.get("model_version") != CONSUMPTION_MODEL_VERSION
+            or document.get("dataset_id") != "alkmaar_2023"
+            or document.get("layer_id") != CONSUMPTION_LAYER_ID
+            or document.get("interval_count_per_profile")
+            != expected_interval_count
+        ):
+            raise self._contract_error("profile identity is incompatible")
+        requested_period = document.get("requested_period")
+        if (
+            not isinstance(requested_period, dict)
+            or not same_instant(requested_period.get("start_inclusive"), start)
+            or not same_instant(requested_period.get("end_exclusive"), end)
+            or requested_period.get("resolution") != "PT15M"
+            or requested_period.get("interval_semantics")
+            != "start_inclusive_end_exclusive"
+            or requested_period.get("interval_count") != expected_interval_count
+        ):
+            raise self._contract_error("profile output time window drifted")
+        layer_version = document.get("layer_version")
+        if not isinstance(layer_version, str) or not SHA256_PATTERN.fullmatch(
+            layer_version
+        ):
+            raise self._contract_error("profile layer version is invalid")
+        profiles = document.get("profiles")
+        matches = (
+            [
+                item
+                for item in profiles
+                if isinstance(item, dict)
+                and item.get("feature_id") == feature_id
+                and item.get("spatial_unit_code") == pc6
+                and item.get("profile_id") == profile_id
+            ]
+            if isinstance(profiles, list)
+            else []
+        )
+        if len(matches) != 1:
+            raise self._contract_error("requested profile identity is missing")
+        intervals = matches[0].get("intervals")
+        if not isinstance(intervals, list) or len(intervals) != expected_interval_count:
+            raise self._contract_error("requested profile interval count drifted")
+        profile_version = matches[0].get("profile_version")
+        if not isinstance(profile_version, str) or not SHA256_PATTERN.fullmatch(
+            profile_version
+        ):
+            raise self._contract_error("profile version is invalid")
+        provenance = document.get("provenance")
+        if not isinstance(provenance, dict):
+            raise self._contract_error("profile provenance is missing")
+        release_commit = provenance.get("release_commit")
+        if (
+            release_commit != CONSUMPTION_RELEASE_COMMIT
+            or not isinstance(release_commit, str)
+            or not GIT_SHA_PATTERN.fullmatch(release_commit)
+            or provenance.get("profile_source_artifact_semantic_sha256")
+            != layer_version
+        ):
+            raise self._contract_error("profile provenance identity drifted")
+        return ConsumptionProfileIdentity(
+            model_id=CONSUMPTION_MODEL_ID,
+            model_version=CONSUMPTION_MODEL_VERSION,
+            layer_id=CONSUMPTION_LAYER_ID,
+            layer_version=layer_version,
+            profile_id=profile_id,
+            profile_version=profile_version,
+            release_commit=release_commit,
+        )
+
     def _completed_run(self, record: dict[str, Any], run_id: str) -> CompletedRun:
         outputs = record.get("outputs")
         if not isinstance(outputs, list) or len(outputs) != 1:
@@ -178,10 +323,12 @@ class TransformerProfileOrchestrator:
     def __init__(
         self,
         *,
+        consumption_client: ModelApiClient,
         grid_client: ModelApiClient,
         congestion_client: ModelApiClient,
         pc6_geometry_path: Path,
     ) -> None:
+        self.consumption_client = consumption_client
         self.grid_client = grid_client
         self.congestion_client = congestion_client
         self.pc6_geometry_path = pc6_geometry_path
@@ -199,30 +346,36 @@ class TransformerProfileOrchestrator:
             self.pc6_geometry_path, normalized_pc6
         )
         selection_bbox = geometry_bbox(geometry)
+        profile_id = residential_pc6_profile_id(normalized_pc6)
+        profile_identity = self.consumption_client.get_consumption_profile_identity(
+            pc6=normalized_pc6,
+            profile_id=profile_id,
+            start=start_utc,
+            end=end_utc,
+        )
 
         grid_payload = {
             "operation": "assign_feature_hierarchy",
             "selection": {"type": "bbox", "bbox": selection_bbox},
             "source": {
-                "source_model_id": "legacy-policy-tool",
-                "source_model_version": "legacy-pc6-1",
-                "source_layer_id": "policy_tool_pc6_energy",
-                "source_layer_version": "2023",
-                "source_release_id": f"sha256:{artifact_sha256}",
-                "source_artifact_sha256": artifact_sha256,
+                "source_model_id": profile_identity.model_id,
+                "source_model_version": profile_identity.model_version,
+                "source_layer_id": profile_identity.layer_id,
+                "source_layer_version": profile_identity.layer_version,
+                "source_release_id": profile_identity.release_commit,
+                "source_artifact_sha256": profile_identity.layer_version,
             },
             "features": [
                 {
                     "source_feature_id": normalized_pc6,
                     "source_feature_type": "pc6",
-                    "source_feature_version": "pc6-2023",
+                    "source_feature_version": profile_identity.profile_version,
                     "geometry": geometry,
                 }
             ],
         }
         grid_run = self.grid_client.create_completed_run(grid_payload)
 
-        profile_id = residential_pc6_profile_id(normalized_pc6)
         congestion_payload = {
             "aggregation_mode": "two_stage_authoritative",
             "target_level": "mv_hv_transformer",
@@ -259,10 +412,12 @@ class TransformerProfileOrchestrator:
             },
             "profile": {
                 "model_id": CONSUMPTION_MODEL_ID,
-                "model_version": CONSUMPTION_MODEL_VERSION,
-                "release_commit": CONSUMPTION_RELEASE_COMMIT,
+                "model_version": profile_identity.model_version,
+                "release_commit": profile_identity.release_commit,
                 "layer_id": CONSUMPTION_LAYER_ID,
+                "layer_version": profile_identity.layer_version,
                 "profile_id": profile_id,
+                "profile_version": profile_identity.profile_version,
                 "start": iso_z(start_utc),
                 "end": iso_z(end_utc),
                 "resolution": "PT15M",
@@ -316,6 +471,20 @@ def residential_pc6_profile_id(pc6: str) -> str:
 
 def iso_z(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def same_instant(value: Any, expected: datetime) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (
+        parsed.tzinfo is not None
+        and parsed.utcoffset() is not None
+        and parsed.astimezone(UTC) == expected.astimezone(UTC)
+    )
 
 
 def load_pc6_geometry(path: Path, pc6: str) -> tuple[dict[str, Any], str]:
