@@ -18,11 +18,12 @@ GRID_MV_HV_REACH_LAYER = "grid_mv_hv_transformer_reach"
 GRID_LV_MV_REACH_LAYER = "grid_lv_mv_transformer_reach"
 WIND_LAYER = "public_wind_turbines"
 EV_LAYER = "public_ev_chargers"
+CONSUMPTION_LAYER = "consumption_electricity_areas"
 PV_FIXTURE = "BU03610302"
 PV_RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
 PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
-GRID_RELEASE_COMMIT = "f023242f16d12435ce01c41fd1fdb6487b4bfc30"
-GRID_CONTAINER_DIGEST = "sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa"
+GRID_RELEASE_COMMIT = "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+GRID_CONTAINER_DIGEST = "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0"
 GRID_BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
 WIND_FIXTURE = "wind-turbine-2811"
@@ -69,11 +70,13 @@ CONSUMPTION_RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
 CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e"
 CONSUMPTION_FIXTURE = "BU03610308"
 FIXTURE = "1842EM"
+ORCHESTRATION_PC6 = "1483AA"
 
 
 class SmokeClient:
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, *, host_header: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
+        self.host_header = host_header
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
@@ -82,9 +85,12 @@ class SmokeClient:
         )
 
     def get(self, path: str, timeout: int = 60) -> tuple[int, bytes, str]:
+        headers = {"Accept": "*/*", "User-Agent": "rdp-integration-smoke/1.0"}
+        if self.host_header is not None:
+            headers["Host"] = self.host_header
         request = urllib.request.Request(
             f"{self.base_url}{path}",
-            headers={"Accept": "*/*", "User-Agent": "rdp-integration-smoke/1.0"},
+            headers=headers,
         )
         with self.opener.open(request, timeout=timeout) as response:
             return response.status, response.read(), response.headers.get_content_type()
@@ -102,15 +108,18 @@ class SmokeClient:
         timeout: int = 60,
         expected_status: int = 201,
     ) -> dict:
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "rdp-integration-smoke/1.0",
+        }
+        if self.host_header is not None:
+            headers["Host"] = self.host_header
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             method="POST",
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "User-Agent": "rdp-integration-smoke/1.0",
-            },
+            headers=headers,
         )
         with self.opener.open(request, timeout=timeout) as response:
             require(
@@ -753,6 +762,7 @@ def check_ev_layer(client: SmokeClient) -> None:
 def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     root = client.get_json("/models/grid/")
     require(root.get("status") == "alive", "Grid model liveness failed")
+    require(root.get("api_version") == "2.3.0", "Grid API version drift")
 
     readiness = client.get_json("/models/grid/ready", timeout=120)
     require(readiness.get("status") == "ready", "Grid model is not ready")
@@ -767,6 +777,15 @@ def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     )
 
     metadata = client.get_json("/models/grid/metadata")
+    require(metadata.get("contract_version") == "2.3.0", "Grid contract drift")
+    require(
+        metadata.get("model", {}).get("version") == "2.1.0",
+        "Grid model version drift",
+    )
+    require(
+        metadata.get("method", {}).get("version") == "2.1.0",
+        "Grid method version drift",
+    )
     release = metadata.get("release", {})
     require(
         release.get("git_commit") == GRID_RELEASE_COMMIT,
@@ -1254,7 +1273,7 @@ def check_congestion_model_api(client: SmokeClient) -> None:
         metadata.get("service") == "congestion-backend",
         "Congestion service identity drift",
     )
-    require(metadata.get("service_version") == "0.1.0", "Congestion version drift")
+    require(metadata.get("service_version") == "0.2.0", "Congestion version drift")
     require(metadata.get("contract_version") == "1.0.0", "Congestion contract drift")
     require(metadata.get("temporal_resolution") == "PT15M", "Congestion resolution drift")
     require(metadata.get("canonical_unit") == "kW", "Congestion unit drift")
@@ -1263,11 +1282,32 @@ def check_congestion_model_api(client: SmokeClient) -> None:
     require(
         metadata.get("grid_hierarchy_contract", {}).get("api_contract_version")
         == "2.2.0",
-        "Congestion Grid contract drift",
+        "Congestion strict Grid contract drift",
+    )
+    provisional = metadata.get("grid_hierarchy_contract", {}).get(
+        "provisional_opt_in", {}
+    )
+    require(
+        provisional.get("hierarchy_policy") == "nearest_electrical_root_v1",
+        "Congestion provisional Grid policy drift",
+    )
+    require(
+        provisional.get("api_contract_version") == "2.3.0"
+        and provisional.get("hierarchy_contract_version")
+        == "grid-feature-hierarchy-v2"
+        and provisional.get("reference_commit")
+        == "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+        and provisional.get("authority_status") == "provisional_estimated",
+        "Congestion provisional Grid contract drift",
     )
     require(
         "two_stage_authoritative" in metadata.get("aggregation_modes", []),
         "Congestion authoritative aggregation mode is missing",
+    )
+    require(
+        "two_stage_provisional_estimated"
+        in metadata.get("aggregation_modes", []),
+        "Congestion provisional aggregation mode is missing",
     )
 
     layers = client.get_json("/models/congestion/layers")
@@ -1282,6 +1322,165 @@ def check_congestion_model_api(client: SmokeClient) -> None:
         aggregate.get("target_levels")
         == ["lv_mv_transformer", "mv_hv_transformer"],
         "Congestion target hierarchy drift",
+    )
+
+
+def check_transformer_profile_orchestration(client: SmokeClient) -> None:
+    response = client.post_json(
+        f"/policy-api/transformer-profiles/pc6/{ORCHESTRATION_PC6}",
+        {
+            "start": "2022-12-31T23:00:00Z",
+            "end": "2023-01-01T00:00:00Z",
+        },
+        timeout=300,
+        expected_status=200,
+    )
+    require(response.get("status") == "completed", "Transformer orchestration failed")
+    require(
+        response.get("grid_assignment", {}).get("hierarchy_policy")
+        == "nearest_electrical_root_v1",
+        "Grid hierarchy policy drift",
+    )
+    require(
+        response.get("congestion_aggregation", {}).get("aggregation_mode")
+        == "two_stage_provisional_estimated"
+        and response.get("congestion_aggregation", {}).get("hierarchy_policy")
+        == "nearest_electrical_root_v1",
+        "Congestion orchestration authority drift",
+    )
+    require(
+        response.get("feature", {}).get("source_feature_id") == ORCHESTRATION_PC6,
+        "Transformer orchestration feature drift",
+    )
+    profile = response.get("profile", {})
+    require(profile.get("model_id") == "consumption-map", "Profile model drift")
+    require(profile.get("model_version") == "0.4.0", "Profile version drift")
+    require(profile.get("resolution") == "PT15M", "Profile resolution drift")
+    for field in ("layer_version", "profile_version"):
+        value = profile.get(field)
+        require(
+            isinstance(value, str)
+            and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value),
+            f"Profile {field} is not an immutable SHA-256 identity",
+        )
+
+    result = response.get("result", {})
+    require(
+        result.get("aggregation_mode") == "two_stage_provisional_estimated",
+        "Provisional aggregation mode drift",
+    )
+    require(result.get("persistence") == "none", "Scenario persistence drift")
+    require(result.get("resolution") == "PT15M", "Aggregate resolution drift")
+    require(result.get("complete") is True, "Transformer hierarchy is incomplete")
+    require(
+        isinstance(result.get("overall_datacompleetheid"), int)
+        and not isinstance(result["overall_datacompleetheid"], bool)
+        and 0 <= result["overall_datacompleetheid"] <= 1,
+        "Aggregate datacompleetheid drift",
+    )
+    coverage = result.get("profile_coverage", [])
+    require(len(coverage) == 1 and coverage[0].get("complete") is True, "Profile coverage drift")
+
+    source_stage = result.get("source_to_lv_mv", {})
+    target_stage = result.get("lv_mv_to_mv_hv", {})
+    require(source_stage.get("complete") is True, "LV/MV aggregation is incomplete")
+    require(target_stage.get("complete") is True, "MV/HV aggregation is incomplete")
+    source_targets = source_stage.get("targets", [])
+    target_targets = target_stage.get("targets", [])
+    require(len(source_targets) == 3, "1483AA LV/MV transformer count drift")
+    require(len(target_targets) == 1, "1483AA MV/HV transformer count drift")
+    require(
+        target_targets[0].get("transformer_id")
+        == "grid-transformer-mv-hv-station-609006",
+        "1483AA provisional parent is not OS OTERLEEK",
+    )
+    require(
+        all(item.get("transformer_level") == "lv_mv_transformer" for item in source_targets),
+        "LV/MV target level drift",
+    )
+    require(
+        all(item.get("transformer_level") == "mv_hv_transformer" for item in target_targets),
+        "MV/HV target level drift",
+    )
+    for target in [*source_targets, *target_targets]:
+        points = target.get("points", [])
+        require(len(points) == 4, "Transformer profile PT15M interval count drift")
+        require(
+            all(
+                point.get("demand_power_kw", 0) > 0
+                and point.get("production_power_kw") == 0
+                and point.get("net_power_kw") == point.get("demand_power_kw")
+                for point in points
+            ),
+            "Consumption-only transformer profile values drifted",
+        )
+
+    source_totals = [
+        sum(target["points"][index]["net_power_kw"] for target in source_targets)
+        for index in range(4)
+    ]
+    target_totals = [
+        sum(target["points"][index]["net_power_kw"] for target in target_targets)
+        for index in range(4)
+    ]
+    require(
+        all(abs(source - target) <= 1e-9 for source, target in zip(source_totals, target_totals)),
+        "LV/MV and MV/HV aggregate totals diverged",
+    )
+    require(
+        len(result.get("hierarchy_resolutions", [])) == 3
+        and all(
+            item.get("status") == "available"
+            and item.get("complete") is True
+            and item.get("target_transformer_id")
+            == "grid-transformer-mv-hv-station-609006"
+            and item.get("datacompleetheid") == 1
+            for item in result["hierarchy_resolutions"]
+        ),
+        "Grid hierarchy contains an unresolved transformer parent",
+    )
+    require(
+        all(
+            len(item.get("evidence", [])) == 1
+            and item["evidence"][0].get("code")
+            == "grid_lv_mv_to_mv_hv_hierarchy"
+            and isinstance(item["evidence"][0].get("value"), dict)
+            for item in result["hierarchy_resolutions"]
+        ),
+        "Grid provisional hierarchy evidence is missing",
+    )
+    hierarchy_evidence = [
+        item["evidence"][0]["value"] for item in result["hierarchy_resolutions"]
+    ]
+    require(
+        {item.get("electrical_distance_edges") for item in hierarchy_evidence}
+        == {69, 72, 78}
+        and all(
+            item.get("hierarchy_policy_applied")
+            == "nearest_electrical_root_v1"
+            and item.get("hierarchy_authority_status") == "provisional_estimated"
+            and item.get("evidence_status") == "model_estimated_provisional"
+            and item.get("share_scope") == "provisional_lv_mv_to_mv_hv"
+            and item.get("root_bus_ids") == ["27999"]
+            and item.get("nearest_tied_root_bus_ids") == []
+            for item in hierarchy_evidence
+        ),
+        "Grid provisional hierarchy evidence drift",
+    )
+    hierarchy_contributions = target_targets[0].get("hierarchy_contributions", [])
+    require(
+        len(hierarchy_contributions) == 3
+        and all(
+            item.get("relation_scope")
+            == "provisional_estimated_electrical_parent"
+            and item.get("relation_share") == 1.0
+            and item.get("grid_model_git_sha")
+            == "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+            and item.get("hierarchy_datacompleetheid") == 1
+            for item in hierarchy_contributions
+        ),
+        "Congestion provisional hierarchy contribution drift",
     )
 
 
@@ -1458,7 +1657,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
         ("layer:grid-model:lv-mv-transformer-reach", "rdp:grid_lv_mv_transformer_reach"),
     ):
         record = records[local_id]
-        require(record["model_version"] == "2.0.0", f"{local_id} version drift")
+        require(record["model_version"] == "2.1.0", f"{local_id} version drift")
         require(record["services"]["qualified_layer"] == qualified_layer, f"{local_id} layer drift")
     pv_record = records["layer:pv-map:capacity"]
     require(pv_record["model_version"] == "0.3.0", "PV registry version drift")
@@ -1553,13 +1752,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1")
     parser.add_argument(
+        "--host-header",
+        help="Optional HTTP Host header for smoke clients running inside Compose.",
+    )
+    parser.add_argument(
         "--expected-grid-data-mode",
         choices=("real_source", "fixture"),
         default="real_source",
     )
     args = parser.parse_args()
 
-    client = SmokeClient(args.base_url)
+    client = SmokeClient(args.base_url, host_header=args.host_header)
     wait_until_ready(client, "/dashboard/")
     wait_until_ready(client, "/policy-api/")
     wait_until_ready(client, "/models/pv/ready", timeout=1800)
@@ -1586,6 +1789,7 @@ def main() -> int:
     check_heat_layers(client)
     check_ev_layer(client)
     check_consumption_layer(client)
+    check_transformer_profile_orchestration(client)
     check_dashboard_and_simulation(client)
     print(
         "Integrated PC6, PV capacity, Grid, Wind, Heat, EV, Consumption, "

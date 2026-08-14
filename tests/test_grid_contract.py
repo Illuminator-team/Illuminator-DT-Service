@@ -22,12 +22,12 @@ from postgis_sql import (  # noqa: E402
 )
 
 
-RELEASE_COMMIT = "f023242f16d12435ce01c41fd1fdb6487b4bfc30"
-CONTAINER_DIGEST = "sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa"
+RELEASE_COMMIT = "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+CONTAINER_DIGEST = "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0"
 IMAGE_IDENTITY = f"ghcr.io/jortgroen/liander-grid-model-api@{CONTAINER_DIGEST}"
-MODEL_VERSION = "2.0.0"
-CONTRACT_VERSION = "2.2.0"
-METHOD_VERSION = "2.0.0"
+MODEL_VERSION = "2.1.0"
+CONTRACT_VERSION = "2.3.0"
+METHOD_VERSION = "2.1.0"
 GRID_DATA_VERSION = "grid-acceptance-version"
 BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 RUN_ID = "11111111-1111-4111-8111-111111111111"
@@ -623,6 +623,56 @@ class GridContractTest(unittest.TestCase):
                 fixture.read_text(encoding="utf-8").encode("utf-8")
             ).hexdigest(),
             "4cf159559528c56ee43ccee79e2d851535761eee0d5aef9580b5204534ff3a12",
+        )
+
+    def test_orchestration_fixture_is_the_checked_1483aa_model_fixture(self):
+        fixture = (
+            ROOT
+            / "tests"
+            / "fixtures"
+            / "grid"
+            / "pc6_1483aa_grid_fixture.json"
+        )
+        text = fixture.read_text(encoding="utf-8")
+        payload = json.loads(text)
+        provenance = payload["provenance"]
+
+        self.assertEqual(
+            payload["fixture_id"], "pc6-1483aa-provisional-hierarchy-v1"
+        )
+        self.assertEqual(provenance["expected_pc6_id"], "1483AA")
+        self.assertEqual(
+            provenance["expected_counts"],
+            {
+                "buses": 261,
+                "external_grids": 7,
+                "lines": 119,
+                "mv_hv_station_connections": 7,
+                "pc6": 1,
+                "switches": 138,
+                "transformers": 3,
+            },
+        )
+        shares = provenance["expected_lv_mv_transformer_shares"]
+        self.assertAlmostEqual(sum(shares.values()), 1.0, places=6)
+        self.assertEqual(provenance["expected_mv_hv_root_bus_id"], "27999")
+        self.assertEqual(provenance["expected_mv_hv_station_name"], "OS OTERLEEK")
+        self.assertEqual(
+            {
+                key: value["selected_distance_edges"]
+                for key, value in provenance[
+                    "nearest_electrical_root_evidence"
+                ].items()
+            },
+            {
+                "trafo_MV_LV_1272": 72,
+                "trafo_MV_LV_1418": 78,
+                "trafo_MV_LV_787": 69,
+            },
+        )
+        self.assertEqual(
+            hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "76064f56b4e6380214ea21686b5f55272cbba41992307d6acbafb19b77dfe061",
         )
 
     def test_grid_geometry_sql_templates_are_balanced(self):

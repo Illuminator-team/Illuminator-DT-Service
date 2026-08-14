@@ -43,7 +43,7 @@ Decisions made so far:
 - Model and scenario runs are synchronous in the first working version, but every run still gets a `run_id`, status, timestamps, inputs, output links, and metadata so the same contract can become asynchronous later.
 - Scenario execution uses one versioned JSON envelope sent to the policy-tool backend. The backend owns shared time settings, layer-native spatial selections, enabled-model routing, and requested outputs; each model owns and versions the parameters inside its own block and exposes their schema through its API metadata/OpenAPI. The policy backend validates the shared envelope and delegates or schema-validates model-specific parameters without absorbing their domain meaning.
 - There is no single canonical scenario area. Spatial selections use stable layer-native `layer_id` and `feature_id` references, with geometry type, selectable feature type, and CRS supplied by layer metadata. The first types are CBS buurt for PV, an individual public charger for EV, and an individual grid asset or transformer for grid/congestion workflows. The renewed consumption model declares whether its first selectable layer uses PC6 or CBS buurt. Custom geometry and additional types can be added later without changing the common reference shape.
-- The grid model owns the complete grid-connection calculation and its assignment records for points, areas, profiles, and grid components. Its output is authoritative for downstream services; this integration does not prescribe or reimplement the connection algorithm. Integrated records live in a grid-owned table in the existing RDP PostGIS database.
+- The grid model owns the complete grid-connection calculation and its assignment records for points, areas, profiles, and grid components. Downstream services use the grid response without reimplementing the connection algorithm, while preserving whether each relation is authoritative, provisional, or unavailable. Integrated records will live in a grid-owned table in the existing RDP PostGIS database when persistence is enabled.
 - In the MVP, the shared layer publisher calls the grid model's assignment-refresh API after successfully publishing a changed source layer. Later this direct call should become a Redis layer-update event without changing assignment ownership.
 - The congestion model consumes grid-assignment records for profile aggregation and congestion calculations; it does not implement the spatial matching algorithm.
 - Point and area connection rules, including cases with multiple LV components inside CBS buurten or PC6 areas, remain internal to the grid model. The congestion model consumes the returned assignment or connection result without choosing the rule.
@@ -78,7 +78,7 @@ Decisions made so far:
 - The baseline migration must preserve the existing feature selection, sliders, policy-backend profile calculation, and chart workflow. It does not split the policy backend or change model calculations.
 - After that baseline PR, PV remains the first new standalone model layer to add.
 - Current residential-load behavior can stay in the policy-tool backend during transition, but it is legacy behavior that will be replaced by the independently renewed `consumption-model-service`; do not treat extraction or cleanup of the old calculation code as the target architecture.
-- The intended congestion responsibility associated with the policy tool needs a follow-up `congestion-model-service`, which owns profile aggregation, grid assignment consumption, and congestion indicators. The current checked-in backend does not yet implement transformer-level congestion calculation.
+- The standalone `congestion-backend` now owns profile aggregation and Grid-assignment consumption. The first integration increment produces transient LV/MV and MV/HV profiles; transformer capacity/headroom comparison and congestion indicators remain follow-up work.
 - The first `congestion-model-service` vertical slice consumes aligned 15-minute model profiles and existing grid-assignment records, aggregates the profiles per transformer, and returns the resulting transformer profile transiently with stable identifiers, units, source versions, timestamps, provenance, and `datacompleetheid`. It declares `persistence: none` while preserving the adapter boundary for later storage. It does not yet classify congestion or compare the profile with transformer capacity; those follow after aggregation is reliable.
 - During prototyping, each model may own its external data/API connections behind isolated input adapters and local caches. Promote a connection to the existing RDP crawler/data services only when its contract is stable and it is shared by multiple models or needs centralized scheduling, caching, retries, provenance, or credential management. After promotion, keep standalone development working through the same adapter boundary with local fixtures or caches.
 - GeoServer publishing should use a shared layer-publishing path instead of every model implementing its own publishing logic.
@@ -537,9 +537,20 @@ This gives the dashboard a quick working contract while keeping a clear path to 
 
 ## Grid Assignment Mapping
 
-The grid model shares the grid topology, assets, geometry, voltage level, capacity, and other grid metadata. It also owns the existing grid-connection logic for consumption, PV, EV, and other source features because it owns the authoritative grid representation and valid connection targets.
+The grid model shares the grid topology, assets, geometry, voltage level, capacity, and other grid metadata. It also owns the existing grid-connection logic for consumption, PV, EV, and other source features because it owns the grid representation and valid connection targets. A Grid-produced relation is only called authoritative when its own evidence supports that label.
 
 The grid model exposes its connection result through its API and/or assignment records using stable source and grid-object references. Its own repository and API contract define the algorithm and required inputs. The congestion model consumes these results to aggregate profiles and calculate congestion; it does not duplicate or reinterpret the grid-connection logic.
+
+Current 1483AA working increment:
+
+- the policy backend requests Grid policy `nearest_electrical_root_v1` explicitly;
+- Grid first applies the absolute PC6-to-LV/MV shares, then selects one MV/HV root per LV/MV transformer by shortest electrical graph path;
+- all three fixture transformers select OS OTERLEEK (`grid-transformer-mv-hv-station-609006`) with path lengths 72, 78, and 69 edges;
+- because open Liander topology does not provide the switch/feeder state needed to prove a unique operational parent, these relations use scope `provisional_estimated_electrical_parent` and `datacompleetheid: 1`;
+- Congestion applies each source share and parent relation once, conserves every PT15M total, and returns `two_stage_provisional_estimated`;
+- omitted policy remains strict and fails closed when Grid cannot establish one authoritative root.
+
+Professional target: obtain sufficient switch/feeder state or another validated parent source so the strict single-root policy can produce authoritative relations. The provisional policy remains explicit and separately labelled; it is never silently upgraded to authoritative.
 
 MVP mapping record:
 
@@ -600,7 +611,7 @@ Geonovum alignment guardrail:
 
 - treat assignments as explicit relationships between geo-objects, not as hidden assumptions;
 - prefer persistent identifiers for both source features and grid assets;
-- retain the grid model method/version and any distance, share, confidence, and provenance fields its authoritative contract exposes;
+- retain the grid model method/version, authority status, and any distance, share, confidence, and provenance fields its contract exposes;
 - keep the structure compatible with later OGC API Joins-style linking between profile/scenario tables and geo-objects.
 
 ## Datacompleetheid
@@ -1063,7 +1074,7 @@ This is consistent with NLDT guardrails: work from use cases, avoid pre-optimiza
 8. Inventory current policy-tool backend code into API/orchestration glue, consumption/profile behavior, and data ingestion, and document the missing transformer-level congestion capability; use the inventory to protect boundaries and compatibility, not as a commitment to extract orchestration.
 9. Keep the current policy-tool backend name and legacy profile/orchestration behavior in code until PV is working as the first new model layer.
 10. Start phase 2 with the first `congestion-model-service` vertical slice: consume grid assignments and aligned 15-minute model profiles, aggregate them per transformer, and return the transient transformer profile with provenance and quality metadata while declaring `persistence: none`.
-11. Integrate the grid model's existing grid-connection API/output and authoritative assignment records, with incremental refresh on relevant layer updates and consumption by the congestion model; do not implement a competing matching rule in this repository.
+11. Integrate the grid model's existing grid-connection API/output and explicitly qualified assignment records, with incremental refresh on relevant layer updates and consumption by the congestion model; do not implement a competing matching rule in this repository.
 12. Once transformer profile aggregation is reliable, add transformer capacity/headroom comparison and the first congestion indicators as a separate increment.
 13. Start phase 3 by adding scenario sliders/buttons and `POST /scenarios` flow once phase 2 outputs are stable enough.
 14. Keep the first scenario implementation transient. Introduce durable Postgres/Timescale/PostGIS storage, downloadable exports, retention rules, and GeoServer-visible scenario result layers only through a later explicit decision, using the existing persistence-ready contract.

@@ -30,7 +30,7 @@ CONSUMPTION_PROFILE_VERSION = "8" * 64
 CONSUMPTION_RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
 CONGESTION_IMAGE = (
     "ghcr.io/jortgroen/congestion-backend@sha256:"
-    "3f23bd186c4b719b4dda90d15f447c4825afff4bdf3013e23c524f45bf3926d1"
+    "a939d2c991fa56d697cba5a547f758e776d8e2f93d787ed0e8c08b6533f9e5b2"
 )
 START = datetime(2022, 12, 31, 23, 0, tzinfo=UTC)
 END = datetime(2023, 1, 1, 0, 0, tzinfo=UTC)
@@ -191,7 +191,8 @@ class TransformerProfileOrchestrationTest(unittest.TestCase):
             }
         )
         aggregate = {
-            "aggregation_mode": "two_stage_authoritative",
+            "aggregation_mode": "two_stage_provisional_estimated",
+            "overall_datacompleetheid": 1,
             "complete": True,
             "lv_mv_source_aggregation": {
                 "targets": [{"target_id": "lv-mv-1", "datacompleetheid": 2}]
@@ -223,6 +224,9 @@ class TransformerProfileOrchestrationTest(unittest.TestCase):
 
         grid_payload = grid_session.requests[0][2]
         self.assertEqual(grid_payload["operation"], "assign_feature_hierarchy")
+        self.assertEqual(
+            grid_payload["hierarchy_policy"], "nearest_electrical_root_v1"
+        )
         self.assertEqual(
             grid_payload["selection"]["bbox"],
             geometry_bbox(grid_payload["features"][0]["geometry"]),
@@ -256,6 +260,9 @@ class TransformerProfileOrchestrationTest(unittest.TestCase):
             congestion_payload["aggregation_mode"], "two_stage_authoritative"
         )
         self.assertEqual(
+            congestion_payload["hierarchy_policy"], "nearest_electrical_root_v1"
+        )
+        self.assertEqual(
             congestion_payload["grid_assignment_output_id"], GRID_OUTPUT_ID
         )
         self.assertEqual(
@@ -264,6 +271,14 @@ class TransformerProfileOrchestrationTest(unittest.TestCase):
         )
         self.assertEqual(congestion_payload["profiles"][0]["start"], "2022-12-31T23:00:00Z")
         self.assertEqual(congestion_payload["profiles"][0]["end"], "2023-01-01T00:00:00Z")
+        self.assertEqual(
+            response["congestion_aggregation"]["aggregation_mode"],
+            "two_stage_provisional_estimated",
+        )
+        self.assertEqual(
+            response["congestion_aggregation"]["hierarchy_policy"],
+            "nearest_electrical_root_v1",
+        )
 
     def test_rejects_invalid_window_before_calling_upstreams(self):
         grid_session = FakeSession({})
@@ -343,6 +358,58 @@ class TransformerProfileOrchestrationTest(unittest.TestCase):
                 "1483AA", start=START, end=END
             )
 
+    def test_rejects_congestion_result_that_claims_authoritative_hierarchy(self):
+        grid_session = FakeSession(
+            {
+                ("POST", "/runs"): FakeResponse(
+                    completed_run(GRID_RUN_ID, GRID_OUTPUT_ID)
+                )
+            }
+        )
+        aggregate = {
+            "aggregation_mode": "two_stage_authoritative",
+            "overall_datacompleetheid": 1,
+        }
+        congestion_session = FakeSession(
+            {
+                ("POST", "/runs"): FakeResponse(
+                    completed_run(CONGESTION_RUN_ID, CONGESTION_OUTPUT_ID)
+                ),
+                **output_routes(aggregate),
+            }
+        )
+
+        with self.assertRaisesRegex(OrchestrationError, "authority mode"):
+            self._orchestrator(grid_session, congestion_session).aggregate_pc6(
+                "1483AA", start=START, end=END
+            )
+
+    def test_rejects_provisional_result_with_overstated_completeness(self):
+        grid_session = FakeSession(
+            {
+                ("POST", "/runs"): FakeResponse(
+                    completed_run(GRID_RUN_ID, GRID_OUTPUT_ID)
+                )
+            }
+        )
+        aggregate = {
+            "aggregation_mode": "two_stage_provisional_estimated",
+            "overall_datacompleetheid": 2,
+        }
+        congestion_session = FakeSession(
+            {
+                ("POST", "/runs"): FakeResponse(
+                    completed_run(CONGESTION_RUN_ID, CONGESTION_OUTPUT_ID)
+                ),
+                **output_routes(aggregate),
+            }
+        )
+
+        with self.assertRaisesRegex(OrchestrationError, "datacompleetheid"):
+            self._orchestrator(grid_session, congestion_session).aggregate_pc6(
+                "1483AA", start=START, end=END
+            )
+
     def test_stops_before_grid_when_consumption_identity_drifts(self):
         consumption_session = FakeSession(
             consumption_routes(semantic_sha256="0" * 64)
@@ -403,6 +470,7 @@ class TransformerProfileOrchestrationTest(unittest.TestCase):
     def test_compose_wires_hardened_consumption_grid_congestion_flow(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
         local = (ROOT / "docker-compose.local.yml").read_text(encoding="utf-8")
+        ci = (ROOT / "docker-compose.ci.yml").read_text(encoding="utf-8")
         congestion = compose.split("  congestion-backend:", 1)[1].split(
             "  ##", 1
         )[0]
@@ -427,6 +495,17 @@ class TransformerProfileOrchestrationTest(unittest.TestCase):
         self.assertIn("GRID_API_URL=http://grid-api:8080", policy)
         self.assertIn("alkmaar_energy_map.geojson:/app/config/", policy)
         self.assertIn("traefik.http.routers.congestion-api.rule", local)
+        self.assertIn("orchestration-grid-init:", ci)
+        self.assertIn("orchestration-grid-api:", ci)
+        self.assertIn("pc6_1483aa_grid_fixture.json", ci)
+        self.assertIn(
+            "GRID_API_BASE_URL: http://orchestration-grid-api:8080",
+            ci,
+        )
+        self.assertIn(
+            "GRID_API_URL: http://orchestration-grid-api:8080",
+            ci,
+        )
 
     def _orchestrator(
         self, grid_session, congestion_session, consumption_session=None

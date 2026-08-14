@@ -21,6 +21,8 @@ CONSUMPTION_LAYER_ID = "residential_electricity_pc6_profiles_pt15m"
 CONSUMPTION_MODEL_ID = "consumption-map"
 CONSUMPTION_MODEL_VERSION = "0.4.0"
 CONSUMPTION_RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
+GRID_HIERARCHY_POLICY = "nearest_electrical_root_v1"
+PROVISIONAL_AGGREGATION_MODE = "two_stage_provisional_estimated"
 
 
 class OrchestrationError(RuntimeError):
@@ -356,6 +358,7 @@ class TransformerProfileOrchestrator:
 
         grid_payload = {
             "operation": "assign_feature_hierarchy",
+            "hierarchy_policy": GRID_HIERARCHY_POLICY,
             "selection": {"type": "bbox", "bbox": selection_bbox},
             "source": {
                 "source_model_id": profile_identity.model_id,
@@ -378,6 +381,7 @@ class TransformerProfileOrchestrator:
 
         congestion_payload = {
             "aggregation_mode": "two_stage_authoritative",
+            "hierarchy_policy": GRID_HIERARCHY_POLICY,
             "target_level": "mv_hv_transformer",
             "persistence": "none",
             "grid_assignment_output_id": grid_run.output_id,
@@ -397,6 +401,23 @@ class TransformerProfileOrchestrator:
         result = self.congestion_client.get_verified_json_output(
             congestion_run.output_id
         )
+        if result.get("aggregation_mode") != PROVISIONAL_AGGREGATION_MODE:
+            raise OrchestrationError(
+                "upstream_contract_invalid",
+                "congestion returned an unexpected hierarchy authority mode.",
+                service="congestion",
+            )
+        completeness = result.get("overall_datacompleetheid")
+        if (
+            not isinstance(completeness, int)
+            or isinstance(completeness, bool)
+            or not 0 <= completeness <= 1
+        ):
+            raise OrchestrationError(
+                "upstream_contract_invalid",
+                "congestion returned invalid provisional datacompleetheid.",
+                service="congestion",
+            )
 
         return {
             "status": "completed",
@@ -426,11 +447,13 @@ class TransformerProfileOrchestrator:
                 "run_id": grid_run.run_id,
                 "output_id": grid_run.output_id,
                 "operation": "assign_feature_hierarchy",
+                "hierarchy_policy": GRID_HIERARCHY_POLICY,
             },
             "congestion_aggregation": {
                 "run_id": congestion_run.run_id,
                 "output_id": congestion_run.output_id,
-                "aggregation_mode": "two_stage_authoritative",
+                "aggregation_mode": PROVISIONAL_AGGREGATION_MODE,
+                "hierarchy_policy": GRID_HIERARCHY_POLICY,
             },
             "result": result,
         }

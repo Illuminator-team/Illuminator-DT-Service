@@ -1,4 +1,44 @@
 services:
+  reverse-proxy:
+    ports: !override
+      - "18080:80"
+      - "18443:443"
+      - "18081:8080"
+
+  timescale:
+    ports: !override
+      - "15432:5432"
+
+  redis-insight:
+    profiles:
+      - extended-rdp
+    ports: !override
+      - "15540:5540"
+
+  grafana:
+    profiles:
+      - extended-rdp
+
+  data-sync-service:
+    profiles:
+      - extended-rdp
+
+  weather-data-service:
+    profiles:
+      - extended-rdp
+
+  frequency-data-service:
+    profiles:
+      - extended-rdp
+
+  pv-sim-service:
+    profiles:
+      - extended-rdp
+
+  illuminator-service:
+    profiles:
+      - extended-rdp
+
   grid-init:
     command:
       - python
@@ -15,3 +55,60 @@ services:
     environment:
       GRID_EXPECTED_DATA_MODE: fixture
       GRID_EXPORT_BBOX: 4.74454,52.629131,4.835248,52.644642
+
+  orchestration-grid-init:
+    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
+    command:
+      - python
+      - -m
+      - grid_api
+      - initialize
+      - --fixture
+      - /fixtures/pc6_1483aa_grid_fixture.json
+      - --allow-fixture
+    environment:
+      GRID_API_DATA_DIR: /data
+    volumes:
+      - orchestration-grid-model-data:/data
+      - ./tests/fixtures/grid/pc6_1483aa_grid_fixture.json:/fixtures/pc6_1483aa_grid_fixture.json:ro
+    restart: "no"
+
+  orchestration-grid-api:
+    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
+    init: true
+    environment:
+      GRID_API_DATA_DIR: /data
+      GRID_API_CONTAINER_DIGEST: sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
+    volumes:
+      - orchestration-grid-model-data:/data
+    depends_on:
+      orchestration-grid-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8080/ready', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 20
+    restart: unless-stopped
+
+  congestion-backend:
+    environment:
+      GRID_API_BASE_URL: http://orchestration-grid-api:8080
+    depends_on:
+      orchestration-grid-api:
+        condition: service_healthy
+
+  policy-tool-backend:
+    environment:
+      GRID_API_URL: http://orchestration-grid-api:8080
+    depends_on:
+      orchestration-grid-api:
+        condition: service_healthy
+
+volumes:
+  orchestration-grid-model-data:

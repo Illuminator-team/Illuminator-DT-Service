@@ -2,10 +2,10 @@ x-pv-image: &pv-image
   image: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
 
 x-grid-image: &grid-image
-  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa
+  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
 
 x-congestion-image: &congestion-image
-  image: ghcr.io/jortgroen/congestion-backend@sha256:3f23bd186c4b719b4dda90d15f447c4825afff4bdf3013e23c524f45bf3926d1
+  image: ghcr.io/jortgroen/congestion-backend@sha256:a939d2c991fa56d697cba5a547f758e776d8e2f93d787ed0e8c08b6533f9e5b2
 
 x-wind-image: &wind-image
   image: ghcr.io/jortgroen/wind-turbine-map-api@sha256:820822bfa5300bc8e2126482147b1d430d075c1834bd080999334825caa21828
@@ -138,7 +138,7 @@ services:
     init: true
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa
+      GRID_API_CONTAINER_DIGEST: sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
     volumes:
       - grid-model-data:/data
     depends_on:
@@ -670,8 +670,8 @@ services:
       PV_EXPECTED_RELEASE_COMMIT: bd29351e108d9db002b9e54d5c7fb2356416a306
       PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
       GRID_API_URL: http://grid-api:8080
-      GRID_EXPECTED_RELEASE_COMMIT: f023242f16d12435ce01c41fd1fdb6487b4bfc30
-      GRID_EXPECTED_CONTAINER_DIGEST: sha256:8b89a7cd323f33f13ff1477ffe7ff7e256c38a908161155b98583e9f8b06a4fa
+      GRID_EXPECTED_RELEASE_COMMIT: 972f9c390e1bf3d86cc87e0b34e500db7e0168a9
+      GRID_EXPECTED_CONTAINER_DIGEST: sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
       GRID_EXPECTED_DATA_MODE: real_source
       GRID_EXPORT_BBOX: 4.60,52.50,4.98,52.88
       WIND_API_URL: http://wind-api:8080
