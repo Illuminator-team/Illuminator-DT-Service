@@ -282,7 +282,7 @@ class EvContractTest(unittest.TestCase):
         self.assertIn("EV_IMAGE_IDENTITY", service)
         self.assertIn("ev.py", dockerfile)
         self.assertIn("ev_postgis.py", dockerfile)
-        self.assertNotIn("consumption-api", compose)
+        self.assertNotIn("consumption-api", service)
 
 
 if __name__ == "__main__":

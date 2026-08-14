@@ -68,13 +68,11 @@ services:
       traefik.http.routers.ev-api.entrypoints: web
       traefik.http.routers.ev-api.tls: "false"
 
-  ev-api:
-    labels:
-      traefik.http.routers.ev-api.rule: Host(`localhost`) && PathPrefix(`/models/ev`)
-
   consumption-api:
     labels:
-      traefik.http.routers.consumption-api.rule: Host(`localhost`) && PathPrefix(`/models/consumption`)
+      traefik.http.routers.consumption-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/consumption`)
+      traefik.http.routers.consumption-api.entrypoints: web
+      traefik.http.routers.consumption-api.tls: "false"
 
   layer-publisher:
     environment:

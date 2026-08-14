@@ -8,6 +8,11 @@ from xml.sax.saxutils import escape
 
 import psycopg2
 import requests
+from consumption import (
+    ConsumptionArtifact,
+    fetch_consumption_artifact,
+    get_consumption_readiness_signature,
+)
 from ev import EvArtifact, fetch_ev_artifact, get_ev_readiness_signature
 from ev_postgis import sync_ev_layer
 from grid import GridArtifact, fetch_grid_artifact, get_grid_readiness_signature
@@ -86,6 +91,9 @@ HEAT_CONFIGS = {
     for layer_id in HEAT_LAYER_IDS
 }
 EV_CONFIG = get_layer_config(MANIFEST, "layer:ev-map:public-chargers")
+CONSUMPTION_CONFIG = get_layer_config(
+    MANIFEST, "layer:consumption-map:electricity-areas"
+)
 PC6_SOURCE_PATH = Path(os.getenv("PC6_SOURCE_PATH", PC6_CONFIG["source"]["path"]))
 PV_API_URL = os.getenv("PV_API_URL", PV_CONFIG["source"]["base_url"]).rstrip("/")
 PV_EXPECTED_RELEASE_COMMIT = os.getenv(
@@ -142,6 +150,17 @@ EV_EXPECTED_RELEASE_COMMIT = os.getenv(
 EV_EXPECTED_CONTAINER_IMAGE = os.getenv(
     "EV_EXPECTED_CONTAINER_IMAGE", EV_CONFIG["source"]["container_image"]
 )
+CONSUMPTION_API_URL = os.getenv(
+    "CONSUMPTION_API_URL", CONSUMPTION_CONFIG["source"]["base_url"]
+).rstrip("/")
+CONSUMPTION_EXPECTED_RELEASE_COMMIT = os.getenv(
+    "CONSUMPTION_EXPECTED_RELEASE_COMMIT",
+    CONSUMPTION_CONFIG["source"]["release_commit"],
+)
+CONSUMPTION_EXPECTED_CONTAINER_IMAGE = os.getenv(
+    "CONSUMPTION_EXPECTED_CONTAINER_IMAGE",
+    CONSUMPTION_CONFIG["source"]["container_image"],
+)
 
 GEOSERVER_REST_URL = os.getenv(
     "GEOSERVER_REST_URL", "http://geo:8080/geoserver/rest"
@@ -180,6 +199,8 @@ HEAT_TABLES = {
 }
 EV_TABLE = EV_CONFIG["table"]
 EV_LAYER = EV_CONFIG["geoserver_layer"]
+CONSUMPTION_TABLE = CONSUMPTION_CONFIG["table"]
+CONSUMPTION_LAYER = CONSUMPTION_CONFIG["geoserver_layer"]
 SOLAR_TABLE = "solar_panel_layer"
 SOLAR_LAYER = "solar_panel_layer"
 
@@ -891,6 +912,7 @@ def run() -> None:
     publish_wind()
     publish_heat()
     publish_ev()
+    publish_consumption()
     create_solar_table()
     ensure_feature_type(SOLAR_LAYER, "Tutorial Solar Panel", "EPSG:4326")
     try:
@@ -911,6 +933,9 @@ def run() -> None:
         HEAT_API_URL, expected_data_mode=HEAT_EXPECTED_DATA_MODE
     )
     last_ev_signature = get_ev_readiness_signature(EV_API_URL)
+    last_consumption_signature = get_consumption_readiness_signature(
+        CONSUMPTION_API_URL
+    )
     while True:
         time.sleep(PUBLISH_INTERVAL_SECONDS)
         current_signature = source_signature(PC6_SOURCE_PATH)
@@ -925,16 +950,6 @@ def run() -> None:
         except (RuntimeError, ValueError):
             LOGGER.warning(
                 "Could not check or refresh the PV capacity layer",
-                exc_info=True,
-            )
-        try:
-            current_ev_signature = get_ev_readiness_signature(EV_API_URL)
-            if current_ev_signature != last_ev_signature:
-                publish_ev()
-                last_ev_signature = current_ev_signature
-        except (requests.RequestException, RuntimeError, TypeError, ValueError):
-            LOGGER.warning(
-                "Could not check or refresh the EV charger layer",
                 exc_info=True,
             )
         try:

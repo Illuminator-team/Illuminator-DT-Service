@@ -16,9 +16,6 @@ x-heat-image: &heat-image
 x-ev-image: &ev-image
   image: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
 
-x-ev-image: &ev-image
-  image: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
-
 x-consumption-image: &consumption-image
   image: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
 
@@ -289,6 +286,44 @@ services:
       - "traefik.http.services.heat-api.loadbalancer.server.port=8080"
     restart: unless-stopped
 
+  ## ----------------------------------------------------------------
+  ## Aggregate model profiles over explicit Grid assignments.
+  ## ----------------------------------------------------------------
+  congestion-backend:
+    <<: *congestion-image
+    init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      CONGESTION_ADAPTER_MODE: http
+      GRID_API_BASE_URL: http://grid-api:8080
+      CONSUMPTION_API_BASE_URL: http://consumption-api:8080
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8080/ready', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.congestion-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/congestion`)"
+      - "traefik.http.routers.congestion-api.entrypoints=web,websecure"
+      - "traefik.http.routers.congestion-api.tls=true"
+      - "traefik.http.middlewares.congestion-api-strip.stripprefix.prefixes=/models/congestion"
+      - "traefik.http.routers.congestion-api.middlewares=congestion-api-strip"
+      - "traefik.http.services.congestion-api.loadbalancer.server.port=8080"
+    restart: unless-stopped
+
   ## -----------------------------------------------------
   ## Expose the standalone public EV charging model API.
   ## -----------------------------------------------------
@@ -319,6 +354,84 @@ services:
       - "traefik.http.middlewares.ev-api-strip.stripprefix.prefixes=/models/ev"
       - "traefik.http.routers.ev-api.middlewares=ev-api-strip"
       - "traefik.http.services.ev-api.loadbalancer.server.port=8000"
+    restart: unless-stopped
+
+  ## --------------------------------------------------------------------
+  ## Initialize and expose the standalone annual Consumption Map API.
+  ## --------------------------------------------------------------------
+  consumption-source-cache-init:
+    <<: *consumption-cache-image
+    user: "10001:10001"
+    read_only: true
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - consumption-model-data:/var/lib/consumption-map
+    restart: "no"
+
+  consumption-runtime-init:
+    <<: *consumption-image
+    user: "10001:10001"
+    read_only: true
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    entrypoint:
+      - python
+      - -m
+      - consumption_map.rdp_cli
+    command:
+      - initialize
+      - --source
+      - /var/lib/consumption-map/bootstrap/consumption-source-cache-alkmaar-2023.zip
+      - --data-root
+      - /var/lib/consumption-map
+    depends_on:
+      consumption-source-cache-init:
+        condition: service_completed_successfully
+    volumes:
+      - consumption-model-data:/var/lib/consumption-map
+    restart: "no"
+
+  consumption-api:
+    <<: *consumption-image
+    init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
+    depends_on:
+      consumption-runtime-init:
+        condition: service_completed_successfully
+    volumes:
+      - consumption-model-data:/var/lib/consumption-map
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8080/readyz', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.consumption-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/consumption`)"
+      - "traefik.http.routers.consumption-api.entrypoints=web,websecure"
+      - "traefik.http.routers.consumption-api.tls=true"
+      - "traefik.http.middlewares.consumption-api-strip.stripprefix.prefixes=/models/consumption"
+      - "traefik.http.routers.consumption-api.middlewares=consumption-api-strip"
+      - "traefik.http.services.consumption-api.loadbalancer.server.port=8080"
     restart: unless-stopped
 
 #  ------------------------------------END OF PLAYGROUND -------------------------------------
@@ -573,6 +686,9 @@ services:
       EV_API_URL: http://ev-api:8000
       EV_EXPECTED_RELEASE_COMMIT: 54a894cc7c96c7d8c27e344ee2724012d5ae4e3d
       EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+      CONSUMPTION_API_URL: http://consumption-api:8080
+      CONSUMPTION_EXPECTED_RELEASE_COMMIT: e5f44368b01bee9f4a77a409e6894f22f57f9684
+      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
@@ -592,6 +708,8 @@ services:
       heat-api:
         condition: service_healthy
       ev-api:
+        condition: service_healthy
+      consumption-api:
         condition: service_healthy
     networks:
       - default
@@ -628,3 +746,4 @@ volumes:
   wind-model-data:
   heat-model-data:
   ev-generated-outputs:
+  consumption-model-data:

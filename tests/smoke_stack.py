@@ -65,6 +65,9 @@ HEAT_PC6_FIXTURE = "pc6-1812ab"
 EV_RELEASE_COMMIT = "54a894cc7c96c7d8c27e344ee2724012d5ae4e3d"
 EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec"
 EV_FIXTURE = "NL-ALL-NLLOC018787"
+CONSUMPTION_RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
+CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e"
+CONSUMPTION_FIXTURE = "BU03610308"
 FIXTURE = "1842EM"
 
 
@@ -1410,6 +1413,10 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(b"grid_mv_hv_transformer_reach" in script, "Dashboard is not configured for MV/HV reach WFS")
     require(b"grid_lv_mv_transformer_reach" in script, "Dashboard is not configured for LV/MV reach WFS")
     require(b"public_wind_turbines" in script, "Dashboard is not configured for Wind WFS")
+    require(
+        b"consumption_electricity_areas" in script,
+        "Dashboard is not configured for Consumption WFS",
+    )
     for layer_id in HEAT_LAYERS:
         require(layer_id.encode() in script, f"Dashboard is not configured for {layer_id}")
     require(b"alkmaar_energy_map.geojson" in script, "Static fallback is missing")
@@ -1421,6 +1428,10 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require("layer:policy-tool:pc6-energy" in records, "PC6 registry record is missing")
     require("layer:pv-map:capacity" in records, "PV registry record is missing")
     require("layer:ev-map:public-chargers" in records, "EV registry record is missing")
+    require(
+        "layer:consumption-map:electricity-areas" in records,
+        "Consumption registry record is missing",
+    )
     require("layer:grid-model:lines" in records, "Grid lines registry record is missing")
     require(
         "layer:grid-model:transformers" in records,
@@ -1471,6 +1482,25 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(
         ev_record["services"]["qualified_layer"] == "rdp:public_ev_chargers",
         "EV registry GeoServer layer drift",
+    )
+    consumption_record = records["layer:consumption-map:electricity-areas"]
+    require(
+        consumption_record["model_version"] == "0.4.0",
+        "Consumption registry version drift",
+    )
+    require(
+        consumption_record["crs"] == "EPSG:4326",
+        "Consumption registry CRS drift",
+    )
+    require(
+        consumption_record["data_quality"]["method_version"]
+        == "datacompleetheid-qualitative-v1",
+        "Consumption registry quality method drift",
+    )
+    require(
+        consumption_record["services"]["qualified_layer"]
+        == "rdp:consumption_electricity_areas",
+        "Consumption registry GeoServer layer drift",
     )
     wind_record = records["layer:wind-turbine-map:public-turbines"]
     require(wind_record["model_version"] == "0.2.0", "Wind registry version drift")
@@ -1537,6 +1567,8 @@ def main() -> int:
     wait_until_ready(client, "/models/wind/ready", timeout=300)
     wait_until_ready(client, "/models/heat/ready", timeout=300)
     wait_until_ready(client, "/models/ev/ready", timeout=300)
+    wait_until_ready(client, "/models/consumption/readyz", timeout=300)
+    wait_until_ready(client, "/models/congestion/ready", timeout=300)
     wait_until_ready(
         client, "/geoserver/wms?service=WMS&version=1.3.0&request=GetCapabilities"
     )
@@ -1545,14 +1577,20 @@ def main() -> int:
     check_wind_model_api(client)
     check_heat_model_api(client)
     check_ev_model_api(client)
+    check_consumption_model_api(client)
+    check_congestion_model_api(client)
     check_pc6_layer(client)
     check_pv_layer(client)
     check_grid_layers(client)
     check_wind_layer(client)
     check_heat_layers(client)
     check_ev_layer(client)
+    check_consumption_layer(client)
     check_dashboard_and_simulation(client)
-    print("Integrated PC6, PV capacity, grid, Wind, Heat, and EV layer smoke test passed")
+    print(
+        "Integrated PC6, PV capacity, Grid, Wind, Heat, EV, Consumption, "
+        "and Congestion smoke test passed"
+    )
     return 0
 
 

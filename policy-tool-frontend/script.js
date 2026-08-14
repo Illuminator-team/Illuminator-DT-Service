@@ -18,6 +18,7 @@ let gridMvHvReachLayer;
 let gridHasFit = false;
 let windTurbinesLayer;
 let evChargersLayer;
+let consumptionAreasLayer;
 const heatMapLayers = {};
 let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
@@ -31,6 +32,7 @@ const gridLayerSources = {
 const gridCanvasRenderer = L.canvas({ padding: 0.5 });
 let windTurbinesLayerSource = 'loading';
 let evChargersLayerSource = 'loading';
+let consumptionAreasLayerSource = 'loading';
 const heatLayerSources = Object.fromEntries(
     Pc6MapData.HEAT_LAYER_IDS.map((layerId) => [layerId, 'loading'])
 );
@@ -256,6 +258,20 @@ function evChargerStyle(feature) {
     };
 }
 
+function consumptionAreaStyle(feature) {
+    const isWijk = feature.properties.spatial_unit_type === 'wijk';
+    const annualConsumption = feature.properties.annual_electricity_consumption_kwh ??
+        feature.properties.annual_electricity_kwh;
+    return {
+        fillColor: getConsumptionColor(Number(annualConsumption || 0)),
+        weight: isWijk ? 2.5 : 0.9,
+        opacity: 0.85,
+        color: isWijk ? '#3f2b63' : '#ffffff',
+        dashArray: isWijk ? '6 4' : null,
+        fillOpacity: isWijk ? 0.3 : 0.68
+    };
+}
+
 function getReachColor(componentId) {
     const colors = ['#16845b', '#9b5d18', '#7a4c9f', '#227ca3', '#a33f50', '#587c2d', '#8b6d1f'];
     const hash = String(componentId || '').split('').reduce(
@@ -340,6 +356,8 @@ function updateLayerStatus(layerName, source, fallbackReason = null) {
         windTurbinesLayerSource = source;
     } else if (layerName === 'ev_chargers') {
         evChargersLayerSource = source;
+    } else if (layerName === 'consumption_areas') {
+        consumptionAreasLayerSource = source;
     } else if (Pc6MapData.HEAT_LAYER_IDS.includes(layerName)) {
         heatLayerSources[layerName] = source;
     } else {
@@ -360,6 +378,7 @@ function refreshLayerStatus() {
         pv_capacity: pvLayerSource,
         grid_network: getGridNetworkSource(),
         ev_chargers: evChargersLayerSource,
+        consumption_areas: consumptionAreasLayerSource,
         public_wind_turbines: windTurbinesLayerSource,
         ...heatLayerSources
     };
@@ -372,13 +391,15 @@ function updateLayerQualitySummary() {
     const isPvCapacity = currentMetric === 'pv_capacity';
     const isGrid = currentMetric === 'grid_network';
     const isEv = currentMetric === 'ev_chargers';
+    const isConsumption = currentMetric === 'consumption_areas';
     const isWind = currentMetric === 'public_wind_turbines';
     const isHeat = Pc6MapData.HEAT_LAYER_IDS.includes(currentMetric);
     label.textContent = (isGrid || isWind || isHeat)
         ? 'Datacompleetheid per component'
         : isEv ? 'Datacompleetheid 0-2/3'
+            : isConsumption ? 'Datacompleetheid 1-2/3'
             : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
-    meter.title = (isPvCapacity || isGrid || isWind || isHeat || isEv)
+    meter.title = (isPvCapacity || isGrid || isWind || isHeat || isEv || isConsumption)
         ? 'Feature-level confidence varies across this layer'
         : 'Layer-level confidence';
 }
@@ -440,6 +461,7 @@ function setActiveMapLayer(fitActive = false) {
         pc6: pc6Layer,
         pv_capacity: pvLayer,
         ev_chargers: evChargersLayer,
+        consumption_areas: consumptionAreasLayer,
         public_wind_turbines: windTurbinesLayer,
         ...heatMapLayers
     };
@@ -554,6 +576,30 @@ async function loadMap() {
         const control = document.getElementById('r-ev-chargers');
         control.disabled = true;
         control.parentElement.title = 'EV charger layer is unavailable';
+    }
+
+    try {
+        const result = await Pc6MapData.loadConsumptionAreasFeatureCollection(fetch);
+        consumptionAreasLayer = L.geoJSON(result.data, {
+            style: consumptionAreaStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 2.5, color: '#2f3640' }),
+                    mouseout: (event) => consumptionAreasLayer.resetStyle(event.target),
+                    click: (event) => {
+                        updateConsumptionSidePanel(feature.properties);
+                        map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 15 });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('consumption_areas', result.source);
+    } catch (error) {
+        console.error('Consumption area data load failed:', error);
+        updateLayerStatus('consumption_areas', 'failed', error.message);
+        const control = document.getElementById('r-consumption-areas');
+        control.disabled = true;
+        control.parentElement.title = 'Consumption map layer is unavailable';
     }
 
     try {
@@ -797,11 +843,6 @@ function updateLegend() {
             const config = HEAT_LAYER_UI[currentMetric];
             div.innerHTML = '<div class="legend-title">HEAT EVIDENCE</div>';
             div.innerHTML += `<i style="background:${config.color}"></i> ${config.title}<br>`;
-            return div;
-        }
-        if (currentMetric === 'ev_chargers') {
-            div.innerHTML = '<div class="legend-title">PUBLIC EV CHARGERS</div>';
-            div.innerHTML += '<i class="point-legend" style="background:#008b8b"></i> Charging location<br>';
             return div;
         }
         if (currentMetric === 'consumption_areas') {
@@ -1114,6 +1155,51 @@ function updateEvSidePanel(prop) {
             Profile: ${prop.profile_available ? 'PT15M profile available' : 'No profile available'}<br>
             Model version: ${escapeHtml(prop.model_version)}<br>
             <a href="/models/ev/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function updateConsumptionSidePanel(prop) {
+    const formatEnergy = (value) => value == null
+        ? 'Not available at this spatial level'
+        : `${Number(value).toLocaleString('nl-NL', { maximumFractionDigits: 0 })} kWh/year`;
+    const unitType = String(prop.spatial_unit_type || '').toUpperCase();
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">${escapeHtml(prop.name)}</div>
+        <div class="feature-identifier">${escapeHtml(prop.spatial_unit_code)} · ${escapeHtml(unitType)}</div>
+        <div class="data-grid consumption-grid">
+            <div class="data-column">
+                <div class="column-header">Annual electricity</div>
+                <div class="data-group">
+                    <div class="data-label">Combined</div>
+                    <div class="data-value">${formatEnergy(
+                        prop.annual_electricity_consumption_kwh ?? prop.annual_electricity_kwh
+                    )}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Residential</div>
+                    <div class="data-value">${formatEnergy(prop.residential_electricity_kwh)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Business</div>
+                    <div class="data-value">${formatEnergy(prop.business_electricity_kwh)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Services / commerce</div>
+                    <div class="data-value">${formatEnergy(prop.services_commerce_electricity_kwh)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Unknown industrial / business</div>
+                    <div class="data-value">${formatEnergy(prop.unknown_industrial_business_electricity_kwh)}</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>CONSUMPTION MODEL</strong><br>
+            Reference period: ${escapeHtml(prop.source_reference_period)}<br>
+            Spatial allocation: ${escapeHtml(prop.allocation_method)}<br>
+            <a href="/models/consumption/metadata" target="_blank" rel="noopener">Model metadata</a>
         </div>
     `;
 }
