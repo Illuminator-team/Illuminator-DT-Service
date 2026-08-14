@@ -1,50 +1,47 @@
 services:
   policy-tool-frontend:
     labels:
-      traefik.http.routers.dashboard.rule: Host(`localhost`) && PathPrefix(`/dashboard`)
+      traefik.http.routers.dashboard.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/dashboard`)
+      traefik.http.routers.dashboard.entrypoints: web
+      traefik.http.routers.dashboard.tls: "false"
 
   policy-tool-backend:
     labels:
-      traefik.http.routers.policy-router.rule: Host(`localhost`) && PathPrefix(`/policy-api`)
+      traefik.http.routers.policy-router.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/policy-api`)
+      traefik.http.routers.policy-router.entrypoints: web
+      traefik.http.routers.policy-router.tls: "false"
 
   pv-api:
     labels:
-      traefik.http.routers.pv-api.rule: Host(`localhost`) && PathPrefix(`/models/pv`)
-
-  grid-init:
-    command:
-      - python
-      - -m
-      - grid_api
-      - initialize
-      - --fixture
-      - /fixtures/alkmaar_grid_fixture.json
-      - --allow-fixture
-    volumes:
-      - ./tests/fixtures/grid/alkmaar_grid_fixture.json:/fixtures/alkmaar_grid_fixture.json:ro
+      traefik.http.routers.pv-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/pv`)
+      traefik.http.routers.pv-api.entrypoints: web
+      traefik.http.routers.pv-api.tls: "false"
 
   grid-api:
     labels:
-      traefik.http.routers.grid-api.rule: Host(`localhost`) && PathPrefix(`/models/grid`)
+      traefik.http.routers.grid-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/grid`)
+      traefik.http.routers.grid-api.entrypoints: web
+      traefik.http.routers.grid-api.tls: "false"
 
   ev-api:
     labels:
-      traefik.http.routers.ev-api.rule: Host(`localhost`) && PathPrefix(`/models/ev`)
+      traefik.http.routers.ev-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/ev`)
+      traefik.http.routers.ev-api.entrypoints: web
+      traefik.http.routers.ev-api.tls: "false"
 
   consumption-api:
     labels:
-      traefik.http.routers.consumption-api.rule: Host(`localhost`) && PathPrefix(`/models/consumption`)
-
-  layer-publisher:
-    environment:
-      GRID_EXPECTED_DATA_MODE: fixture
-      GRID_EXPORT_BBOX: 4.774287,52.629131,4.779526,52.635583
+      traefik.http.routers.consumption-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/consumption`)
+      traefik.http.routers.consumption-api.entrypoints: web
+      traefik.http.routers.consumption-api.tls: "false"
 
   grafana:
     environment:
-      GF_SERVER_ROOT_URL: https://localhost/grafana
+      GF_SERVER_ROOT_URL: http://illuminator.localhost/grafana
     labels:
-      traefik.http.routers.grafana.rule: Host(`localhost`) && (Path(`/grafana`) || PathPrefix(`/grafana/`))
+      traefik.http.routers.grafana.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && (Path(`/grafana`) || PathPrefix(`/grafana/`))
+      traefik.http.routers.grafana.entrypoints: web
+      traefik.http.routers.grafana.tls: "false"
 
   geo:
     environment:
@@ -53,7 +50,21 @@ services:
     volumes:
       - geoserver-local-data:/opt/geoserver/data_dir
     labels:
-      traefik.http.routers.geoserver.rule: Host(`localhost`) && PathPrefix(`/geoserver`)
+      traefik.http.routers.geoserver.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/geoserver`)
+      traefik.http.routers.geoserver.entrypoints: web
+      traefik.http.routers.geoserver.tls: "false"
+
+  reverse-proxy:
+    command:
+      - "--log.level=INFO"
+      - "--entryPoints.web.address=:80"
+      - "--entryPoints.websecure.address=:443"
+      - "--providers.docker.exposedByDefault=false"
+      - "--providers.docker.watch=true"
+      - "--providers.file.filename=/etc/traefik/dynamic_conf.yml"
+      - "--providers.docker=true"
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
 
   illuminator-service:
     volumes:

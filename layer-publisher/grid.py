@@ -10,7 +10,12 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 
-GRID_LAYER_IDS = ("grid_lines", "grid_transformers")
+GRID_LAYER_IDS = (
+    "grid_lines",
+    "grid_transformers",
+    "grid_lv_mv_transformer_reach",
+    "grid_mv_hv_transformer_reach",
+)
 GRID_MEDIA_TYPE = "application/geo+json"
 GRID_MODEL_ID = "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology"
 GRID_COMPONENT_URI_PREFIX = "https://reformers01.ewi.tudelft.nl/id/grid-component/"
@@ -68,9 +73,46 @@ GRID_TRANSFORMER_FIELDS = (
     "source_station_name",
 )
 
+GRID_REACH_FIELDS = (
+    *GRID_COMMON_FIELDS,
+    "transformer_type",
+    "pc6_id",
+    "reach_level",
+    "reach_method",
+    "share_scope",
+    "dominant_transformer_id",
+    "dominant_transformer_name",
+    "dominant_transformer_share",
+    "dominant_transformer_share_percent",
+    "dominant_root_bus_id",
+    "runner_up_transformer_id",
+    "runner_up_transformer_name",
+    "runner_up_transformer_share",
+    "runner_up_transformer_share_percent",
+    "runner_up_root_bus_id",
+    "share_margin",
+    "share_margin_percentage_points",
+    "entity_count",
+    "has_overlap",
+    "is_ambiguous",
+    "ambiguity_reason",
+    "ranked_shares",
+    "matched_lv_cable_length_m",
+    "match_method",
+    "fallback_used",
+    "fallback_bus_id",
+    "fallback_distance_m",
+    "match_evidence",
+    "pc6_source_id",
+    "pc6_source_sha256",
+    "evidence_status",
+)
+
 GRID_LAYER_FIELDS = {
     "grid_lines": GRID_LINE_FIELDS,
     "grid_transformers": GRID_TRANSFORMER_FIELDS,
+    "grid_lv_mv_transformer_reach": GRID_REACH_FIELDS,
+    "grid_mv_hv_transformer_reach": GRID_REACH_FIELDS,
 }
 
 GRID_RUN_PROVENANCE_FIELDS = frozenset(
@@ -124,6 +166,41 @@ def _nullable_string(value: object, field: str, feature_id: str) -> str | None:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{feature_id}: {field} must be null or a non-empty string")
     return value
+
+
+def _nullable_identifier(
+    value: object,
+    field: str,
+    feature_id: str,
+) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError(f"{feature_id}: {field} must be null or an identifier")
+    identifier = str(value).strip()
+    if not identifier:
+        raise ValueError(f"{feature_id}: {field} must be null or an identifier")
+    return identifier
+
+
+def _boolean(value: object, field: str, feature_id: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{feature_id}: {field} must be boolean")
+    return value
+
+
+def _share(
+    value: object,
+    field: str,
+    feature_id: str,
+    *,
+    percent: bool = False,
+    nullable: bool = False,
+) -> float | None:
+    number = _number(value, field, feature_id, nullable=nullable)
+    if number is not None and number > (100 if percent else 1):
+        raise ValueError(f"{feature_id}: {field} is outside its allowed range")
+    return number
 
 
 def _number(
@@ -184,11 +261,13 @@ def _validate_geometry(
     feature_id: str,
 ) -> dict[str, Any]:
     document = _mapping(geometry, f"{feature_id}.geometry")
-    allowed = (
-        {"LineString", "MultiLineString"}
-        if layer_id == "grid_lines"
-        else {"Point"}
-    )
+    allowed_by_layer = {
+        "grid_lines": {"LineString", "MultiLineString"},
+        "grid_transformers": {"Point"},
+        "grid_lv_mv_transformer_reach": {"Polygon", "MultiPolygon"},
+        "grid_mv_hv_transformer_reach": {"Polygon", "MultiPolygon"},
+    }
+    allowed = allowed_by_layer[layer_id]
     if document.get("type") not in allowed:
         raise ValueError(f"{feature_id}: unexpected geometry type for {layer_id}")
     for longitude, latitude in _coordinate_pairs(document.get("coordinates"), feature_id):
@@ -327,14 +406,13 @@ def load_grid_records(
         if normalized["output_id"] != expected_output_id:
             raise ValueError(f"{feature_id}: output identity drift")
 
-        normalized["model_component_name"] = _nullable_string(
-            properties.get("model_component_name"), "model_component_name", feature_id
-        )
-        in_service = properties.get("in_service")
-        if in_service is not None and not isinstance(in_service, bool):
-            raise ValueError(f"{feature_id}: in_service must be boolean or null")
-
         if layer_id == "grid_lines":
+            normalized["model_component_name"] = _nullable_string(
+                properties.get("model_component_name"), "model_component_name", feature_id
+            )
+            in_service = properties.get("in_service")
+            if in_service is not None and not isinstance(in_service, bool):
+                raise ValueError(f"{feature_id}: in_service must be boolean or null")
             if properties.get("component_type") not in {
                 "lv_cable", "mv_cable", "hv_cable", "unknown_cable"
             }:
@@ -357,7 +435,13 @@ def load_grid_records(
                 "serving_transformer_id",
                 feature_id,
             )
-        else:
+        elif layer_id == "grid_transformers":
+            normalized["model_component_name"] = _nullable_string(
+                properties.get("model_component_name"), "model_component_name", feature_id
+            )
+            in_service = properties.get("in_service")
+            if in_service is not None and not isinstance(in_service, bool):
+                raise ValueError(f"{feature_id}: in_service must be boolean or null")
             if properties.get("component_type") not in {
                 "lv_mv_transformer", "mv_hv_transformer"
             }:
@@ -376,6 +460,202 @@ def load_grid_records(
                 normalized[field] = _nullable_string(
                     properties.get(field), field, feature_id
                 )
+
+        else:
+            reach_contract = {
+                "grid_lv_mv_transformer_reach": {
+                    "level": "lv_mv",
+                    "voltage": "lv",
+                    "method": "pc6_lv_cable_length_share_v2",
+                },
+                "grid_mv_hv_transformer_reach": {
+                    "level": "mv_hv",
+                    "voltage": "mv",
+                    "method": "pc6_lv_cable_share_by_electrical_root_v2",
+                },
+            }[layer_id]
+            level = reach_contract["level"]
+            if properties.get("component_type") != f"{level}_transformer_reach":
+                raise ValueError(f"{feature_id}: transformer reach component type drift")
+            if (
+                properties.get("transformer_type") != level
+                or properties.get("reach_level") != level
+                or properties.get("voltage_level") != reach_contract["voltage"]
+            ):
+                raise ValueError(f"{feature_id}: transformer reach level drift")
+            if properties.get("reach_method") != reach_contract["method"]:
+                raise ValueError(f"{feature_id}: transformer reach method drift")
+            if properties.get("share_scope") != "absolute_pc6_to_target":
+                raise ValueError(f"{feature_id}: transformer share scope drift")
+
+            pc6_id = _string(properties, "pc6_id", feature_id)
+            if not re.fullmatch(r"[1-9][0-9]{3}[A-Z]{2}", pc6_id):
+                raise ValueError(f"{feature_id}: invalid normalized PC6 identifier")
+            expected_feature_id = (
+                f"grid-{level.replace('_', '-')}-transformer-reach-pc6-{pc6_id}"
+            )
+            if feature_id != expected_feature_id:
+                raise ValueError(f"{feature_id}: PC6 reach identity drift")
+            normalized["pc6_id"] = pc6_id
+            normalized["reach_level"] = level
+            normalized["reach_method"] = reach_contract["method"]
+            normalized["share_scope"] = "absolute_pc6_to_target"
+
+            for field in ("dominant_transformer_id", "dominant_transformer_name"):
+                normalized[field] = _string(properties, field, feature_id)
+            for field in (
+                "runner_up_transformer_id",
+                "runner_up_transformer_name",
+                "ambiguity_reason",
+            ):
+                normalized[field] = _nullable_string(
+                    properties.get(field), field, feature_id
+                )
+            for field in (
+                "dominant_root_bus_id",
+                "runner_up_root_bus_id",
+                "fallback_bus_id",
+            ):
+                normalized[field] = _nullable_identifier(
+                    properties.get(field), field, feature_id
+                )
+
+            normalized["dominant_transformer_share"] = _share(
+                properties.get("dominant_transformer_share"),
+                "dominant_transformer_share",
+                feature_id,
+            )
+            normalized["dominant_transformer_share_percent"] = _share(
+                properties.get("dominant_transformer_share_percent"),
+                "dominant_transformer_share_percent",
+                feature_id,
+                percent=True,
+            )
+            normalized["runner_up_transformer_share"] = _share(
+                properties.get("runner_up_transformer_share"),
+                "runner_up_transformer_share",
+                feature_id,
+                nullable=True,
+            )
+            normalized["runner_up_transformer_share_percent"] = _share(
+                properties.get("runner_up_transformer_share_percent"),
+                "runner_up_transformer_share_percent",
+                feature_id,
+                percent=True,
+                nullable=True,
+            )
+            normalized["share_margin"] = _share(
+                properties.get("share_margin"), "share_margin", feature_id
+            )
+            normalized["share_margin_percentage_points"] = _share(
+                properties.get("share_margin_percentage_points"),
+                "share_margin_percentage_points",
+                feature_id,
+                percent=True,
+            )
+            normalized["matched_lv_cable_length_m"] = _number(
+                properties.get("matched_lv_cable_length_m"),
+                "matched_lv_cable_length_m",
+                feature_id,
+                nullable=True,
+            )
+            normalized["fallback_distance_m"] = _number(
+                properties.get("fallback_distance_m"),
+                "fallback_distance_m",
+                feature_id,
+                nullable=True,
+            )
+
+            entity_count = properties.get("entity_count")
+            if (
+                isinstance(entity_count, bool)
+                or not isinstance(entity_count, int)
+                or entity_count < 1
+            ):
+                raise ValueError(f"{feature_id}: invalid transformer share count")
+            normalized["entity_count"] = entity_count
+            for field in ("has_overlap", "is_ambiguous", "fallback_used"):
+                normalized[field] = _boolean(properties.get(field), field, feature_id)
+            if normalized["has_overlap"] != (entity_count > 1):
+                raise ValueError(f"{feature_id}: transformer overlap flag drift")
+            if normalized["is_ambiguous"] and not normalized["has_overlap"]:
+                raise ValueError(f"{feature_id}: ambiguity requires multiple shares")
+
+            ranked_shares = properties.get("ranked_shares")
+            if not isinstance(ranked_shares, list) or len(ranked_shares) != entity_count:
+                raise ValueError(f"{feature_id}: incomplete ranked transformer shares")
+            share_total = 0.0
+            for expected_rank, item in enumerate(ranked_shares, start=1):
+                share = _mapping(item, f"{feature_id}.ranked_shares[{expected_rank}]")
+                if share.get("rank") != expected_rank:
+                    raise ValueError(f"{feature_id}: transformer share rank drift")
+                _string(share, "transformer_id", feature_id)
+                _string(share, "transformer_name", feature_id)
+                expected_target_type = (
+                    "lv_mv_transformer"
+                    if level == "lv_mv"
+                    else "mv_hv_transformer_root"
+                )
+                if share.get("target_type") != expected_target_type:
+                    raise ValueError(f"{feature_id}: ranked transformer target drift")
+                share_total += _share(
+                    share.get("share"), "ranked share", feature_id
+                )
+                _share(
+                    share.get("share_percent"),
+                    "ranked share percent",
+                    feature_id,
+                    percent=True,
+                )
+                for field in (
+                    "lv_mv_transformer_ids",
+                    "mv_hv_transformer_ids",
+                    "root_bus_ids",
+                    "source_station_objectids",
+                ):
+                    identifiers = share.get(field)
+                    if not isinstance(identifiers, list) or not all(
+                        isinstance(item, str) and item for item in identifiers
+                    ):
+                        raise ValueError(
+                            f"{feature_id}: invalid ranked {field} evidence"
+                        )
+                methods = share.get("match_methods")
+                if not isinstance(methods, list) or not methods or not all(
+                    isinstance(item, str) and item for item in methods
+                ):
+                    raise ValueError(f"{feature_id}: invalid ranked match methods")
+            if abs(share_total - 1.0) > 0.0001:
+                raise ValueError(f"{feature_id}: transformer shares do not sum to one")
+            if ranked_shares[0]["transformer_id"] != properties["dominant_transformer_id"]:
+                raise ValueError(f"{feature_id}: dominant transformer rank drift")
+            normalized["ranked_shares"] = ranked_shares
+
+            normalized["match_method"] = _string(
+                properties, "match_method", feature_id
+            )
+            match_evidence = properties.get("match_evidence")
+            if not isinstance(match_evidence, dict) or not match_evidence:
+                raise ValueError(f"{feature_id}: invalid match evidence")
+            if match_evidence.get("share_scope") != "absolute_pc6_to_target":
+                raise ValueError(f"{feature_id}: match evidence share scope drift")
+            normalized["match_evidence"] = match_evidence
+            normalized["pc6_source_id"] = _string(
+                properties, "pc6_source_id", feature_id
+            )
+            source_hash = _string(properties, "pc6_source_sha256", feature_id)
+            if not re.fullmatch(r"[0-9a-f]{64}", source_hash):
+                raise ValueError(f"{feature_id}: invalid PC6 source hash")
+            normalized["pc6_source_sha256"] = source_hash
+            if normalized["fallback_used"] != (
+                normalized["fallback_bus_id"] is not None
+                and normalized["fallback_distance_m"] is not None
+            ):
+                raise ValueError(f"{feature_id}: fallback evidence drift")
+            if properties.get("evidence_status") != "model_estimated":
+                raise ValueError(f"{feature_id}: transformer reach evidence drift")
+            normalized["transformer_type"] = level
+            normalized["evidence_status"] = "model_estimated"
 
         geometry = _validate_geometry(
             feature_document.get("geometry"),
@@ -508,7 +788,7 @@ def fetch_grid_artifact(
     run_id = _string(run, "run_id", "POST /runs")
     outputs = run.get("outputs")
     if not isinstance(outputs, list) or {item.get("layer_id") for item in outputs} != set(GRID_LAYER_IDS):
-        raise ValueError("POST /runs must return both grid layer outputs")
+        raise ValueError("POST /runs must return all grid layer outputs")
 
     stored_run = _json_response(
         _request(session, "GET", f"{base_url}/runs/{run_id}", timeout=30),

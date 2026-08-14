@@ -62,30 +62,32 @@ jobs:
             -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 
       - name: Validate Docker Compose configuration
-        run: docker compose -f docker-compose.yml -f docker-compose.local.yml config --quiet
+        run: docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml config --quiet
 
       - name: Start integrated stack
-        run: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+        run: docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml up -d --build
 
       - name: Run cumulative model-layer smoke checks
-        run: python tests/smoke_stack.py --base-url https://localhost
+        run: python tests/smoke_stack.py --base-url http://127.0.0.1 --expected-grid-data-mode fixture
 
       - name: Verify repeatable publisher execution
         shell: bash
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.local.yml stop layer-publisher
-          output="$(docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm --no-deps -e PUBLISH_ONCE=true layer-publisher 2>&1)"
+          docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml stop layer-publisher
+          output="$(docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml run --rm --no-deps -e PUBLISH_ONCE=true layer-publisher 2>&1)"
           printf '%s\n' "${output}"
-          grep -Fq "grid_lines synchronized: total=22 changed=0 deleted=0" <<<"${output}"
-          grep -Fq "grid_transformers synchronized: total=1 changed=0 deleted=0" <<<"${output}"
+          grep -Fq "grid_lines synchronized: total=34 changed=0 deleted=0" <<<"${output}"
+          grep -Fq "grid_transformers synchronized: total=2 changed=0 deleted=0" <<<"${output}"
+          grep -Fq "grid_lv_mv_transformer_reach synchronized: total=2 changed=0 deleted=0" <<<"${output}"
+          grep -Fq "grid_mv_hv_transformer_reach synchronized: total=2 changed=0 deleted=0" <<<"${output}"
           grep -Fq "EV charger layer synchronized: total=784 changed=0 deleted=0" <<<"${output}"
           grep -Fq "Consumption area layer synchronized: total=67 changed=0 deleted=0" <<<"${output}"
-          docker compose -f docker-compose.yml -f docker-compose.local.yml up -d layer-publisher
+          docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml up -d layer-publisher
 
       - name: Show service logs on failure
         if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.local.yml logs --tail 200
+        run: docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml logs --tail 200
 
       - name: Stop integrated stack
         if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.local.yml down --volumes
+        run: docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml down --volumes

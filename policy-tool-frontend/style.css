@@ -192,6 +192,85 @@ input[type="range"].side-slider {
     left: 60px; 
 }
 
+.grid-visibility {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin: 12px 0 0;
+    padding: 10px 0 0;
+    border: 0;
+    border-top: 1px solid var(--border-muted);
+}
+
+.grid-visibility[hidden] {
+    display: none;
+}
+
+.grid-visibility legend {
+    width: 100%;
+    margin-bottom: 4px;
+    padding: 0;
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.visibility-item {
+    display: grid;
+    grid-template-columns: 16px 18px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    min-height: 22px;
+    cursor: pointer;
+    font-size: 10px;
+}
+
+.visibility-item input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--primary-dark);
+}
+
+.line-swatch {
+    display: block;
+    width: 18px;
+    height: 3px;
+}
+
+.point-swatch {
+    display: block;
+    width: 9px;
+    height: 9px;
+    margin-left: 4px;
+    border: 1px solid #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px #b7bcc0;
+}
+
+.area-swatch {
+    display: block;
+    width: 16px;
+    height: 10px;
+}
+
+.area-swatch-lv-mv {
+    border: 1px solid #7a4c9f;
+    background: rgba(122, 76, 159, 0.2);
+}
+
+.area-swatch-mv-hv {
+    border: 1px solid #16845b;
+    background: rgba(22, 132, 91, 0.2);
+}
+
+.swatch-lv { background: #c43d4f; }
+.swatch-mv { background: #2378a7; }
+.swatch-hv { background: #24292e; }
+.swatch-lv-mv { background: #7651a8; }
+.swatch-mv-hv { background: #e58c2c; }
+
 .layer-health {
     margin-top: 12px;
     padding-top: 10px;
@@ -221,6 +300,10 @@ input[type="range"].side-slider {
 }
 
 .layer-source-row:has([data-state="static_geojson"]) .source-indicator {
+    background: #c47a12;
+}
+
+.layer-source-row:has([data-state="partial"]) .source-indicator {
     background: #c47a12;
 }
 
@@ -452,6 +535,33 @@ button {
     overflow-wrap: anywhere;
     font-size: 12px;
     line-height: 1.45;
+}
+.share-value {
+    margin-top: 4px;
+    color: #16845b;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.reach-shares {
+    margin: 4px 0 24px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-muted);
+}
+
+.reach-share-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border-muted);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.reach-share-row span {
+    overflow-wrap: anywhere;
 }
 
 .legend-title {

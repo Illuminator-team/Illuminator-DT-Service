@@ -1,0 +1,17 @@
+services:
+  grid-init:
+    command:
+      - python
+      - -m
+      - grid_api
+      - initialize
+      - --fixture
+      - /fixtures/alkmaar_grid_fixture.json
+      - --allow-fixture
+    volumes:
+      - ./tests/fixtures/grid/alkmaar_grid_fixture.json:/fixtures/alkmaar_grid_fixture.json:ro
+
+  layer-publisher:
+    environment:
+      GRID_EXPECTED_DATA_MODE: fixture
+      GRID_EXPORT_BBOX: 4.74454,52.629131,4.835248,52.644642

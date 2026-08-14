@@ -6,11 +6,16 @@ import psycopg2
 from grid import (
     GRID_LAYER_FIELDS,
     GRID_LINE_FIELDS,
+    GRID_REACH_FIELDS,
     GRID_TRANSFORMER_FIELDS,
     GridArtifact,
     GridRecord,
 )
-from postgis_sql import multiline_values_template, point_values_template
+from postgis_sql import (
+    multiline_values_template,
+    point_values_template,
+    values_template,
+)
 from psycopg2.extras import Json, execute_values
 
 
@@ -65,6 +70,41 @@ GRID_TRANSFORMER_SQL_TYPES = {
     "source_station_name": "TEXT",
 }
 
+GRID_REACH_SQL_TYPES = {
+    **GRID_COMMON_SQL_TYPES,
+    "transformer_type": "TEXT NOT NULL",
+    "pc6_id": "TEXT UNIQUE NOT NULL",
+    "reach_level": "TEXT NOT NULL",
+    "reach_method": "TEXT NOT NULL",
+    "share_scope": "TEXT NOT NULL CHECK (share_scope = 'absolute_pc6_to_target')",
+    "dominant_transformer_id": "TEXT NOT NULL",
+    "dominant_transformer_name": "TEXT NOT NULL",
+    "dominant_transformer_share": "DOUBLE PRECISION NOT NULL CHECK (dominant_transformer_share BETWEEN 0 AND 1)",
+    "dominant_transformer_share_percent": "DOUBLE PRECISION NOT NULL CHECK (dominant_transformer_share_percent BETWEEN 0 AND 100)",
+    "dominant_root_bus_id": "TEXT",
+    "runner_up_transformer_id": "TEXT",
+    "runner_up_transformer_name": "TEXT",
+    "runner_up_transformer_share": "DOUBLE PRECISION CHECK (runner_up_transformer_share BETWEEN 0 AND 1)",
+    "runner_up_transformer_share_percent": "DOUBLE PRECISION CHECK (runner_up_transformer_share_percent BETWEEN 0 AND 100)",
+    "runner_up_root_bus_id": "TEXT",
+    "share_margin": "DOUBLE PRECISION NOT NULL CHECK (share_margin BETWEEN 0 AND 1)",
+    "share_margin_percentage_points": "DOUBLE PRECISION NOT NULL CHECK (share_margin_percentage_points BETWEEN 0 AND 100)",
+    "entity_count": "INTEGER NOT NULL CHECK (entity_count > 0)",
+    "has_overlap": "BOOLEAN NOT NULL",
+    "is_ambiguous": "BOOLEAN NOT NULL",
+    "ambiguity_reason": "TEXT",
+    "ranked_shares": "JSONB NOT NULL",
+    "matched_lv_cable_length_m": "DOUBLE PRECISION CHECK (matched_lv_cable_length_m >= 0)",
+    "match_method": "TEXT NOT NULL",
+    "fallback_used": "BOOLEAN NOT NULL",
+    "fallback_bus_id": "TEXT",
+    "fallback_distance_m": "DOUBLE PRECISION CHECK (fallback_distance_m >= 0)",
+    "match_evidence": "JSONB NOT NULL",
+    "pc6_source_id": "TEXT NOT NULL",
+    "pc6_source_sha256": "CHAR(64) NOT NULL",
+    "evidence_status": "TEXT NOT NULL",
+}
+
 GRID_LAYER_SQL = {
     "grid_lines": {
         "fields": GRID_LINE_FIELDS,
@@ -78,6 +118,18 @@ GRID_LAYER_SQL = {
         "geometry_type": "Point",
         "template": point_values_template,
     },
+    "grid_lv_mv_transformer_reach": {
+        "fields": GRID_REACH_FIELDS,
+        "types": GRID_REACH_SQL_TYPES,
+        "geometry_type": "MultiPolygon",
+        "template": values_template,
+    },
+    "grid_mv_hv_transformer_reach": {
+        "fields": GRID_REACH_FIELDS,
+        "types": GRID_REACH_SQL_TYPES,
+        "geometry_type": "MultiPolygon",
+        "template": values_template,
+    },
 }
 
 
@@ -87,6 +139,22 @@ def create_grid_table(cursor: Any, table: str, layer_id: str) -> None:
         f"{name} {config['types'][name]}" for name in config["fields"]
     )
     cursor.execute("CREATE EXTENSION IF NOT EXISTS postgis")
+    if layer_id == "grid_mv_hv_transformer_reach":
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = %s
+                  AND column_name = 'bus_count'
+            )
+            """,
+            (table,),
+        )
+        if cursor.fetchone()[0]:
+            cursor.execute(f"DROP TABLE public.{table}")
+
     cursor.execute(
         f"""
         CREATE TABLE IF NOT EXISTS public.{table} (
@@ -99,6 +167,20 @@ def create_grid_table(cursor: Any, table: str, layer_id: str) -> None:
         )
         """
     )
+    if layer_id in {
+        "grid_lv_mv_transformer_reach",
+        "grid_mv_hv_transformer_reach",
+    }:
+        cursor.execute(
+            f"""
+            ALTER TABLE public.{table}
+            ADD COLUMN IF NOT EXISTS share_scope TEXT NOT NULL
+            DEFAULT 'absolute_pc6_to_target'
+            """
+        )
+        cursor.execute(
+            f"ALTER TABLE public.{table} ALTER COLUMN share_scope DROP DEFAULT"
+        )
     cursor.execute(
         f"""
         CREATE INDEX IF NOT EXISTS idx_{table}_geom
@@ -115,7 +197,12 @@ def grid_record_values(
     values = []
     for field in GRID_LAYER_FIELDS[record.layer_id]:
         value = record.properties[field]
-        if field in {"connected_transformer_ids", "datacompleetheid_reason_codes"}:
+        if field in {
+            "connected_transformer_ids",
+            "datacompleetheid_reason_codes",
+            "ranked_shares",
+            "match_evidence",
+        }:
             value = Json(
                 value,
                 dumps=lambda item: json.dumps(item, separators=(",", ":")),
