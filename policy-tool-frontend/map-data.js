@@ -9,6 +9,8 @@
     const PV_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=pv_capacity&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_LINES_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lines&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_TRANSFORMERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_transformers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const GRID_LV_MV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lv_mv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const GRID_MV_HV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_mv_hv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const WIND_TURBINES_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_wind_turbines&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const HEAT_LAYER_IDS = Object.freeze([
         'reported_neighbourhood_heat_consumers',
@@ -90,6 +92,16 @@
         return { data, source: 'geoserver_wfs', fallbackReason: null };
     }
 
+    async function loadGridLvMvReachFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, GRID_LV_MV_REACH_WFS_URL, 'Grid LV/MV transformer reach GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
+    async function loadGridMvHvReachFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, GRID_MV_HV_REACH_WFS_URL, 'Grid MV/HV transformer reach GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
     async function loadWindTurbinesFeatureCollection(fetchImpl) {
         const data = await fetchCollection(fetchImpl, WIND_TURBINES_WFS_URL, 'Wind turbines GeoServer WFS');
         return { data, source: 'geoserver_wfs', fallbackReason: null };
@@ -112,6 +124,8 @@
         FALLBACK_QUALITY,
         FALLBACK_URL,
         GRID_LINES_WFS_URL,
+        GRID_LV_MV_REACH_WFS_URL,
+        GRID_MV_HV_REACH_WFS_URL,
         GRID_TRANSFORMERS_WFS_URL,
         HEAT_LAYER_IDS,
         HEAT_WFS_URLS,
@@ -120,6 +134,8 @@
         WFS_URL,
         addFallbackQuality,
         loadGridLinesFeatureCollection,
+        loadGridLvMvReachFeatureCollection,
+        loadGridMvHvReachFeatureCollection,
         loadGridTransformersFeatureCollection,
         loadHeatFeatureCollection,
         loadPc6FeatureCollection,

@@ -14,13 +14,15 @@ PC6_LAYER = "policy_tool_pc6_energy"
 PV_LAYER = "pv_capacity"
 GRID_LINES_LAYER = "grid_lines"
 GRID_TRANSFORMERS_LAYER = "grid_transformers"
+GRID_MV_HV_REACH_LAYER = "grid_mv_hv_transformer_reach"
+GRID_LV_MV_REACH_LAYER = "grid_lv_mv_transformer_reach"
 WIND_LAYER = "public_wind_turbines"
 PV_FIXTURE = "BU03610302"
 PV_RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
 PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
-GRID_RELEASE_COMMIT = "36bfcfbdca4030068a2ec1e2677bf2b334bb4a46"
-GRID_CONTAINER_DIGEST = "sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2"
-GRID_BBOX = [4.774287, 52.629131, 4.779526, 52.635583]
+GRID_RELEASE_COMMIT = "4059f6fbe066cc959ee7751779807b28ba1feae8"
+GRID_CONTAINER_DIGEST = "sha256:72923720f25979326c7cd7f99fe65cef60866de0b47cc5fed14e01b96d876ec4"
+GRID_BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
 WIND_FIXTURE = "wind-turbine-2811"
 WIND_RELEASE_COMMIT = "b89bd49c717a1e301954aa0b8c1bdb98a91f8d44"
@@ -616,13 +618,16 @@ def check_heat_layers(client: SmokeClient) -> None:
         require(image.startswith(b"\x89PNG") and len(image) > 500, f"{layer_id} WMS map is empty")
 
 
-def check_grid_model_api(client: SmokeClient) -> None:
+def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     root = client.get_json("/models/grid/")
     require(root.get("status") == "alive", "Grid model liveness failed")
 
     readiness = client.get_json("/models/grid/ready", timeout=120)
     require(readiness.get("status") == "ready", "Grid model is not ready")
-    require(readiness.get("data_mode") == "fixture", "Grid fixture mode drift")
+    require(
+        readiness.get("data_mode") == expected_data_mode,
+        f"Grid data mode drift: expected {expected_data_mode}",
+    )
     grid_data_version = readiness.get("grid_data_version")
     require(
         isinstance(grid_data_version, str) and grid_data_version.startswith("grid-"),
@@ -639,32 +644,59 @@ def check_grid_model_api(client: SmokeClient) -> None:
         release.get("container_digest") == GRID_CONTAINER_DIGEST,
         "Grid image identity drift",
     )
+    active_grid_data = metadata.get("active_grid_data", {})
     require(
-        metadata.get("active_grid_data", {}).get("data_mode") == "fixture",
+        active_grid_data.get("data_mode") == expected_data_mode,
         "Grid metadata data mode drift",
     )
 
     layers = client.get_json("/models/grid/layers")
     by_layer = {item["id"]: item for item in layers.get("layers", [])}
     require(
-        set(by_layer) == {GRID_LINES_LAYER, GRID_TRANSFORMERS_LAYER},
+        set(by_layer) == {
+            GRID_LINES_LAYER,
+            GRID_TRANSFORMERS_LAYER,
+            GRID_LV_MV_REACH_LAYER,
+            GRID_MV_HV_REACH_LAYER,
+        },
         "Grid layer contract drift",
     )
-    require(
-        by_layer[GRID_LINES_LAYER]["runtime"]["feature_count"] == 22,
-        "Grid line fixture count drift",
-    )
-    require(
-        by_layer[GRID_TRANSFORMERS_LAYER]["runtime"]["feature_count"] == 1,
-        "Grid transformer fixture count drift",
-    )
+    runtime_counts = {
+        layer_id: layer["runtime"]["feature_count"]
+        for layer_id, layer in by_layer.items()
+    }
+    for layer_id, feature_count in runtime_counts.items():
+        require(feature_count > 0, f"{layer_id} runtime is empty")
+        require(
+            feature_count == active_grid_data.get("feature_counts", {}).get(layer_id),
+            f"{layer_id} runtime count differs from active cache metadata",
+        )
+    if expected_data_mode == "fixture":
+        require(runtime_counts[GRID_LINES_LAYER] == 34, "Grid line fixture count drift")
+        require(
+            runtime_counts[GRID_TRANSFORMERS_LAYER] == 2,
+            "Grid transformer fixture count drift",
+        )
+        require(
+            runtime_counts[GRID_LV_MV_REACH_LAYER] == 2,
+            "Grid LV/MV reach fixture count drift",
+        )
+        require(
+            runtime_counts[GRID_MV_HV_REACH_LAYER] == 2,
+            "Grid MV/HV reach fixture count drift",
+        )
 
     run = client.post_json(
         "/models/grid/runs",
         {
             "operation": "export_layers",
             "selection": {"type": "bbox", "bbox": GRID_BBOX},
-            "layer_ids": [GRID_LINES_LAYER, GRID_TRANSFORMERS_LAYER],
+            "layer_ids": [
+                GRID_LINES_LAYER,
+                GRID_TRANSFORMERS_LAYER,
+                GRID_MV_HV_REACH_LAYER,
+                GRID_LV_MV_REACH_LAYER,
+            ],
             "voltage_levels": [],
             "component_ids": [],
         },
@@ -672,11 +704,23 @@ def check_grid_model_api(client: SmokeClient) -> None:
     )
     require(run.get("status") == "completed", "Grid export run failed")
     outputs = {item["layer_id"]: item for item in run.get("outputs", [])}
-    require(outputs[GRID_LINES_LAYER]["feature_count"] == 22, "Grid line export drift")
-    require(
-        outputs[GRID_TRANSFORMERS_LAYER]["feature_count"] == 1,
-        "Grid transformer export drift",
-    )
+    for layer_id, summary in outputs.items():
+        require(summary["feature_count"] > 0, f"{layer_id} bounded export is empty")
+    if expected_data_mode == "fixture":
+        require(outputs[GRID_LINES_LAYER]["feature_count"] == 34, "Grid line export drift")
+        require(
+            outputs[GRID_TRANSFORMERS_LAYER]["feature_count"] == 2,
+            "Grid transformer export drift",
+        )
+        require(
+            outputs[GRID_LV_MV_REACH_LAYER]["feature_count"] == 2,
+            "Grid LV/MV reach export drift",
+        )
+        require(
+            outputs[GRID_MV_HV_REACH_LAYER]["feature_count"] == 2,
+            "Grid MV/HV reach export drift",
+        )
+
     for layer_id, summary in outputs.items():
         output = client.get_json(f"/models/grid{summary['links']['self']}")
         require(output.get("media_type") == "application/geo+json", "Grid media type drift")
@@ -710,10 +754,13 @@ def check_grid_model_api(client: SmokeClient) -> None:
     assignments = client.get_json(f"/models/grid{match_output['links']['data']}")
     require(len(assignments.get("features", [])) == 1, "Grid match output drift")
     assignment = assignments["features"][0]["properties"]
-    require(
-        assignment.get("serving_transformer_id") == GRID_TRANSFORMER_FIXTURE,
-        "Grid matching transformer evidence drift",
-    )
+    serving_transformer_id = assignment.get("serving_transformer_id")
+    require(serving_transformer_id, "Grid matching transformer evidence is missing")
+    if expected_data_mode == "fixture":
+        require(
+            serving_transformer_id == GRID_TRANSFORMER_FIXTURE,
+            "Grid matching transformer evidence drift",
+        )
 
 
 def check_grid_layers(client: SmokeClient) -> None:
@@ -728,6 +775,8 @@ def check_grid_layers(client: SmokeClient) -> None:
             status == 200
             and GRID_LINES_LAYER.encode() in body
             and GRID_TRANSFORMERS_LAYER.encode() in body
+            and GRID_LV_MV_REACH_LAYER.encode() in body
+            and GRID_MV_HV_REACH_LAYER.encode() in body
         ):
             break
         if time.monotonic() >= deadline:
@@ -747,6 +796,32 @@ def check_grid_layers(client: SmokeClient) -> None:
             "component_id",
             "transformer_type",
             "rated_power_kva",
+            "datacompleetheid",
+            "grid_data_version",
+        ),
+        GRID_LV_MV_REACH_LAYER: (
+            "component_id",
+            "pc6_id",
+            "dominant_transformer_id",
+            "dominant_transformer_share",
+            "share_scope",
+            "ranked_shares",
+            "matched_lv_cable_length_m",
+            "fallback_used",
+            "match_evidence",
+            "datacompleetheid",
+            "grid_data_version",
+        ),
+        GRID_MV_HV_REACH_LAYER: (
+            "component_id",
+            "pc6_id",
+            "dominant_transformer_id",
+            "dominant_transformer_share",
+            "share_scope",
+            "ranked_shares",
+            "matched_lv_cable_length_m",
+            "fallback_used",
+            "match_evidence",
             "datacompleetheid",
             "grid_data_version",
         ),
@@ -788,6 +863,49 @@ def check_grid_layers(client: SmokeClient) -> None:
                 "Grid transformer ID drift",
             )
 
+        if layer_id in {
+            GRID_LV_MV_REACH_LAYER,
+            GRID_MV_HV_REACH_LAYER,
+        }:
+            shares = properties["ranked_shares"]
+            if isinstance(shares, str):
+                shares = json.loads(shares)
+            require(properties["pc6_id"], f"{layer_id} PC6 identity is missing")
+            require(
+                properties["share_scope"] == "absolute_pc6_to_target",
+                f"{layer_id} transformer share scope drift",
+            )
+            require(
+                len(shares) == properties["entity_count"],
+                f"{layer_id} ranked share count drift",
+            )
+            require(
+                abs(sum(float(item["share"]) for item in shares) - 1.0)
+                <= 0.0001,
+                f"{layer_id} transformer shares do not sum to one",
+            )
+            require(
+                shares[0]["transformer_id"]
+                == properties["dominant_transformer_id"],
+                f"{layer_id} dominant transformer drift",
+            )
+            for share in shares:
+                require(
+                    share.get("target_type")
+                    in {"lv_mv_transformer", "mv_hv_transformer_root"},
+                    f"{layer_id} ranked target type drift",
+                )
+                for evidence_field in (
+                    "lv_mv_transformer_ids",
+                    "mv_hv_transformer_ids",
+                    "root_bus_ids",
+                    "source_station_objectids",
+                    "match_methods",
+                ):
+                    require(
+                        isinstance(share.get(evidence_field), list),
+                        f"{layer_id} ranked {evidence_field} is missing",
+                    )
         coordinates = list(flatten_coordinates(feature["geometry"]["coordinates"]))
         xs = [coordinate[0] for coordinate in coordinates]
         ys = [coordinate[1] for coordinate in coordinates]
@@ -817,8 +935,13 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(status == 200, "Dashboard did not load")
     require(b"map-data.js" in dashboard, "Dashboard does not load its map data adapter")
     require(b"r-pv-capacity" in dashboard, "Dashboard PV layer control is missing")
-    require(b"r-grid-lines" in dashboard, "Dashboard grid lines control is missing")
-    require(b"r-grid-transformers" in dashboard, "Dashboard grid transformers control is missing")
+    require(b"r-grid-network" in dashboard, "Dashboard Grid control is missing")
+    for control_id in (
+        b"grid-lv-lines", b"grid-mv-lines", b"grid-hv-lines",
+        b"grid-lv-mv-transformers", b"grid-mv-hv-transformers",
+        b"grid-lv-mv-reach", b"grid-mv-hv-reach",
+    ):
+        require(control_id in dashboard, f"Dashboard Grid visibility control is missing: {control_id!r}")
     require(b"r-wind-turbines" in dashboard, "Dashboard Wind layer control is missing")
     require(b"heat-layer-select" in dashboard, "Dashboard Heat layer selector is missing")
     for layer_id in HEAT_LAYERS:
@@ -831,6 +954,8 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(b"pv_capacity" in script, "Dashboard is not configured for PV WFS")
     require(b"grid_lines" in script, "Dashboard is not configured for grid lines WFS")
     require(b"grid_transformers" in script, "Dashboard is not configured for transformers WFS")
+    require(b"grid_mv_hv_transformer_reach" in script, "Dashboard is not configured for MV/HV reach WFS")
+    require(b"grid_lv_mv_transformer_reach" in script, "Dashboard is not configured for LV/MV reach WFS")
     require(b"public_wind_turbines" in script, "Dashboard is not configured for Wind WFS")
     for layer_id in HEAT_LAYERS:
         require(layer_id.encode() in script, f"Dashboard is not configured for {layer_id}")
@@ -848,6 +973,14 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
         "Grid transformers registry record is missing",
     )
     require(
+        "layer:grid-model:lv-mv-transformer-reach" in records,
+        "Grid LV/MV reach registry record is missing",
+    )
+    require(
+        "layer:grid-model:mv-hv-transformer-reach" in records,
+        "Grid MV/HV reach registry record is missing",
+    )
+    require(
         "layer:wind-turbine-map:public-turbines" in records,
         "Wind registry record is missing",
     )
@@ -856,9 +989,11 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     for local_id, qualified_layer in (
         ("layer:grid-model:lines", "rdp:grid_lines"),
         ("layer:grid-model:transformers", "rdp:grid_transformers"),
+        ("layer:grid-model:mv-hv-transformer-reach", "rdp:grid_mv_hv_transformer_reach"),
+        ("layer:grid-model:lv-mv-transformer-reach", "rdp:grid_lv_mv_transformer_reach"),
     ):
         record = records[local_id]
-        require(record["model_version"] == "1.0.0", f"{local_id} version drift")
+        require(record["model_version"] == "2.0.0", f"{local_id} version drift")
         require(record["services"]["qualified_layer"] == qualified_layer, f"{local_id} layer drift")
     pv_record = records["layer:pv-map:capacity"]
     require(pv_record["model_version"] == "0.3.0", "PV registry version drift")
@@ -921,7 +1056,12 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base-url", default="https://localhost")
+    parser.add_argument("--base-url", default="http://127.0.0.1")
+    parser.add_argument(
+        "--expected-grid-data-mode",
+        choices=("real_source", "fixture"),
+        default="real_source",
+    )
     args = parser.parse_args()
 
     client = SmokeClient(args.base_url)
@@ -935,7 +1075,7 @@ def main() -> int:
         client, "/geoserver/wms?service=WMS&version=1.3.0&request=GetCapabilities"
     )
     check_pv_model_api(client)
-    check_grid_model_api(client)
+    check_grid_model_api(client, args.expected_grid_data_mode)
     check_wind_model_api(client)
     check_heat_model_api(client)
     check_pc6_layer(client)

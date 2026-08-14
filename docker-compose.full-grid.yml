@@ -1,0 +1,9 @@
+services:
+  layer-publisher:
+    environment:
+      GRID_EXPECTED_DATA_MODE: real_source
+
+volumes:
+  grid-model-data:
+    external: true
+    name: ${GRID_MODEL_DATA_VOLUME:?Set GRID_MODEL_DATA_VOLUME to a verified real-source Grid cache volume}

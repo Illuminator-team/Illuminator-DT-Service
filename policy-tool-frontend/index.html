@@ -33,12 +33,8 @@
             <label for="r-pv-capacity">PV CAPACITY (kWp)</label>
         </div>
         <div class="radio-item">
-            <input type="radio" name="layer" value="grid_lines" id="r-grid-lines">
-            <label for="r-grid-lines">GRID LINES</label>
-        </div>
-        <div class="radio-item">
-            <input type="radio" name="layer" value="grid_transformers" id="r-grid-transformers">
-            <label for="r-grid-transformers">GRID TRANSFORMERS</label>
+            <input type="radio" name="layer" value="grid_network" id="r-grid-network">
+            <label for="r-grid-network">ELECTRICITY GRID</label>
         </div>
         <div class="radio-item">
             <input type="radio" name="layer" value="public_wind_turbines" id="r-wind-turbines">
@@ -57,6 +53,44 @@
             </select>
         </div>
     </div>
+    <fieldset id="grid-visibility" class="grid-visibility" hidden>
+        <legend>Grid visibility</legend>
+        <label class="visibility-item" for="grid-lv-lines">
+            <input type="checkbox" id="grid-lv-lines" checked>
+            <span class="line-swatch swatch-lv" aria-hidden="true"></span>
+            <span>LV lines</span>
+        </label>
+        <label class="visibility-item" for="grid-mv-lines">
+            <input type="checkbox" id="grid-mv-lines" checked>
+            <span class="line-swatch swatch-mv" aria-hidden="true"></span>
+            <span>MV lines</span>
+        </label>
+        <label class="visibility-item" for="grid-hv-lines">
+            <input type="checkbox" id="grid-hv-lines" checked>
+            <span class="line-swatch swatch-hv" aria-hidden="true"></span>
+            <span>HV lines</span>
+        </label>
+        <label class="visibility-item" for="grid-lv-mv-transformers">
+            <input type="checkbox" id="grid-lv-mv-transformers" checked>
+            <span class="point-swatch swatch-lv-mv" aria-hidden="true"></span>
+            <span>LV/MV transformers</span>
+        </label>
+        <label class="visibility-item" for="grid-mv-hv-transformers">
+            <input type="checkbox" id="grid-mv-hv-transformers" checked>
+            <span class="point-swatch swatch-mv-hv" aria-hidden="true"></span>
+            <span>MV/HV transformers</span>
+        </label>
+        <label class="visibility-item" for="grid-lv-mv-reach">
+            <input type="checkbox" id="grid-lv-mv-reach">
+            <span class="area-swatch area-swatch-lv-mv" aria-hidden="true"></span>
+            <span>LV/MV reach (PC6 shares)</span>
+        </label>
+        <label class="visibility-item" for="grid-mv-hv-reach">
+            <input type="checkbox" id="grid-mv-hv-reach" checked>
+            <span class="area-swatch area-swatch-mv-hv" aria-hidden="true"></span>
+            <span>MV/HV reach (PC6 shares)</span>
+        </label>
+    </fieldset>
     <div class="layer-health" aria-live="polite">
         <div class="layer-source-row">
             <span class="source-indicator" aria-hidden="true"></span>

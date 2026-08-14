@@ -316,6 +316,29 @@ The layer contract MUST document:
 Do not invent a different schema for GeoServer. The shared publisher transforms
 or loads the same documented model output.
 
+### Spatial Assignment Shares
+
+When a model maps one source feature to one or more model entities, it MUST
+preserve the source feature geometry and stable source ID unless the contract
+explicitly defines a derived geometry. The output MUST include the full ranked
+share list, not only a dominant assignment. Shares MUST use one documented unit
+or weighting method, be normalized to sum to one, and provide dominant and
+runner-up fields only as convenient projections of that full list.
+
+The model MUST expose ambiguity, overlap, match evidence, and any fallback in
+machine-readable fields. A nearest-component fallback MUST remain visibly
+different from an intersection- or topology-backed match. The layer metadata
+MUST state the coverage of the supplied source-feature dataset; it MUST NOT
+imply coverage outside that input.
+
+A spatial input used during initialization MUST be validated, normalized, and
+content-hashed. Its source identity, checksum, and feature count MUST participate
+in the initialization fingerprint and reusable-cache check. Changing the input
+must invalidate the cached outputs. Deterministic fixtures SHOULD exercise a
+multi-entity split, an explicit fallback, and aggregation to a higher network
+level. Standalone rendering and API export MUST call the same assignment
+implementation.
+
 ### Profiles
 
 A phase-1 static layer does not need to calculate profiles. When a model does
