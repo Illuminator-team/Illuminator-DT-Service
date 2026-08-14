@@ -271,6 +271,31 @@ input[type="range"].side-slider {
 .swatch-lv-mv { background: #7651a8; }
 .swatch-mv-hv { background: #e58c2c; }
 
+.layer-select-item {
+    display: grid;
+    gap: 5px;
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid var(--border-muted);
+}
+
+.layer-select-item label {
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 800;
+}
+
+.layer-select-item select {
+    width: 100%;
+    min-width: 0;
+    padding: 6px 24px 6px 7px;
+    border: 1px solid var(--border-muted);
+    border-radius: 2px;
+    background: #ffffff;
+    color: var(--text-main);
+    font: inherit;
+}
+
 .layer-health {
     margin-top: 12px;
     padding-top: 10px;

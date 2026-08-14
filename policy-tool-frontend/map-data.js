@@ -11,6 +11,21 @@
     const GRID_TRANSFORMERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_transformers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_LV_MV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lv_mv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_MV_HV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_mv_hv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const WIND_TURBINES_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_wind_turbines&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const HEAT_LAYER_IDS = Object.freeze([
+        'reported_neighbourhood_heat_consumers',
+        'inferred_pc6_heat_consumers',
+        'registered_heat_network_developments',
+        'documented_actual_heat_sources',
+        'documented_large_heat_consumers',
+        'potential_heat_sources'
+    ]);
+    const HEAT_WFS_URLS = Object.freeze(Object.fromEntries(
+        HEAT_LAYER_IDS.map((layerId) => [
+            layerId,
+            `/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=${layerId}&outputFormat=application%2Fjson&srsName=EPSG%3A4326`
+        ])
+    ));
     const FALLBACK_URL = 'data/alkmaar_energy_map.geojson';
     const FALLBACK_QUALITY = Object.freeze({
         datacompleetheid: 2,
@@ -19,19 +34,21 @@
         evidence_summary: 'Combines real/open annual energy and building data with standard load profiles, enrichment, estimates, and assumptions.'
     });
 
-    function validateFeatureCollection(data, source) {
-        if (!data || data.type !== 'FeatureCollection' || !Array.isArray(data.features) || data.features.length === 0) {
-            throw new Error(`${source} did not return a non-empty GeoJSON FeatureCollection`);
+    function validateFeatureCollection(data, source, allowEmpty = false) {
+        const invalid = !data || data.type !== 'FeatureCollection' || !Array.isArray(data.features);
+        if (invalid || (!allowEmpty && data.features.length === 0)) {
+            const qualifier = allowEmpty ? 'valid' : 'non-empty';
+            throw new Error(`${source} did not return a ${qualifier} GeoJSON FeatureCollection`);
         }
         return data;
     }
 
-    async function fetchCollection(fetchImpl, url, source) {
+    async function fetchCollection(fetchImpl, url, source, allowEmpty = false) {
         const response = await fetchImpl(url, { headers: { Accept: 'application/geo+json, application/json' } });
         if (!response.ok) {
             throw new Error(`${source} returned HTTP ${response.status}`);
         }
-        return validateFeatureCollection(await response.json(), source);
+        return validateFeatureCollection(await response.json(), source, allowEmpty);
     }
 
     function addFallbackQuality(data) {
@@ -85,6 +102,24 @@
         return { data, source: 'geoserver_wfs', fallbackReason: null };
     }
 
+    async function loadWindTurbinesFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, WIND_TURBINES_WFS_URL, 'Wind turbines GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
+    async function loadHeatFeatureCollection(fetchImpl, layerId) {
+        if (!HEAT_LAYER_IDS.includes(layerId)) {
+            throw new Error(`Unknown Heat layer: ${layerId}`);
+        }
+        const data = await fetchCollection(
+            fetchImpl,
+            HEAT_WFS_URLS[layerId],
+            `${layerId} GeoServer WFS`,
+            true
+        );
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
     return {
         FALLBACK_QUALITY,
         FALLBACK_URL,
@@ -92,15 +127,20 @@
         GRID_LV_MV_REACH_WFS_URL,
         GRID_MV_HV_REACH_WFS_URL,
         GRID_TRANSFORMERS_WFS_URL,
+        HEAT_LAYER_IDS,
+        HEAT_WFS_URLS,
         PV_WFS_URL,
+        WIND_TURBINES_WFS_URL,
         WFS_URL,
         addFallbackQuality,
         loadGridLinesFeatureCollection,
         loadGridLvMvReachFeatureCollection,
         loadGridMvHvReachFeatureCollection,
         loadGridTransformersFeatureCollection,
+        loadHeatFeatureCollection,
         loadPc6FeatureCollection,
         loadPvFeatureCollection,
+        loadWindTurbinesFeatureCollection,
         validateFeatureCollection
     };
 }));

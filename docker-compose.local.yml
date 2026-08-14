@@ -23,6 +23,50 @@ services:
       traefik.http.routers.grid-api.entrypoints: web
       traefik.http.routers.grid-api.tls: "false"
 
+  wind-init:
+    command:
+      - python
+      - -m
+      - wind_turbine_map.api.initialize
+      - --mode
+      - fixture
+      - --allow-fixture
+      - --fixture
+      - /fixtures/alkmaar_wind_turbines_fixture.json
+    environment:
+      WIND_API_ALLOW_FIXTURE: "true"
+    volumes:
+      - ./tests/fixtures/wind/alkmaar_wind_turbines_fixture.json:/fixtures/alkmaar_wind_turbines_fixture.json:ro
+
+  wind-api:
+    environment:
+      WIND_API_ALLOW_FIXTURE: "true"
+    labels:
+      traefik.http.routers.wind-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/wind`)
+      traefik.http.routers.wind-api.entrypoints: web
+      traefik.http.routers.wind-api.tls: "false"
+
+  heat-init:
+    command:
+      - python
+      - -m
+      - heat_net_map.api
+      - initialize
+      - --mode
+      - fixture
+      - --allow-fixture
+
+  heat-api:
+    labels:
+      traefik.http.routers.heat-api.rule: (Host(`localhost`) || Host(`127.0.0.1`) || Host(`illuminator.localhost`)) && PathPrefix(`/models/heat`)
+      traefik.http.routers.heat-api.entrypoints: web
+      traefik.http.routers.heat-api.tls: "false"
+
+  layer-publisher:
+    environment:
+      WIND_EXPECTED_DATA_MODE: fixture
+      HEAT_EXPECTED_DATA_MODE: fixture
+
   grafana:
     environment:
       GF_SERVER_ROOT_URL: http://illuminator.localhost/grafana

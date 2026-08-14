@@ -164,6 +164,84 @@ test('does not substitute another layer when a grid WFS request fails', async ()
     );
 });
 
+test('loads Wind turbines as an independent GeoServer point layer', async () => {
+    const calls = [];
+    const payload = {
+        type: 'FeatureCollection',
+        features: [{
+            type: 'Feature',
+            id: 'wind-turbine-2811',
+            properties: {
+                feature_id: 'wind-turbine-2811',
+                capacity_kw: 2050,
+                datacompleetheid: 2
+            },
+            geometry: { type: 'Point', coordinates: [4.7523, 52.593] }
+        }]
+    };
+    const fetchImpl = async (url) => {
+        calls.push(url);
+        return response(true, 200, payload);
+    };
+
+    const result = await mapData.loadWindTurbinesFeatureCollection(fetchImpl);
+
+    assert.equal(result.source, 'geoserver_wfs');
+    assert.equal(result.data.features[0].properties.capacity_kw, 2050);
+    assert.deepEqual(calls, [mapData.WIND_TURBINES_WFS_URL]);
+});
+
+test('does not substitute another layer when Wind WFS fails', async () => {
+    await assert.rejects(
+        () => mapData.loadWindTurbinesFeatureCollection(
+            async () => response(false, 503, {})
+        ),
+        /HTTP 503/
+    );
+});
+
+test('loads every Heat evidence layer from its independent GeoServer WFS URL', async () => {
+    const calls = [];
+    const fetchImpl = async (url) => {
+        calls.push(url);
+        return response(true, 200, collection({
+            feature_id: 'fixture-heat-feature',
+            datacompleetheid: 2
+        }));
+    };
+
+    for (const layerId of mapData.HEAT_LAYER_IDS) {
+        const result = await mapData.loadHeatFeatureCollection(fetchImpl, layerId);
+        assert.equal(result.source, 'geoserver_wfs');
+    }
+
+    assert.deepEqual(
+        calls,
+        mapData.HEAT_LAYER_IDS.map((layerId) => mapData.HEAT_WFS_URLS[layerId])
+    );
+});
+
+test('accepts an empty Heat layer but never substitutes another model layer', async () => {
+    const empty = { type: 'FeatureCollection', features: [] };
+    const result = await mapData.loadHeatFeatureCollection(
+        async () => response(true, 200, empty),
+        'registered_heat_network_developments'
+    );
+    assert.equal(result.data.features.length, 0);
+
+    await assert.rejects(
+        () => mapData.loadHeatFeatureCollection(
+            async () => response(false, 503, {}),
+            'potential_heat_sources'
+        ),
+        /HTTP 503/
+    );
+    await assert.rejects(
+        () => mapData.loadHeatFeatureCollection(async () => response(true, 200, empty), 'other'),
+        /Unknown Heat layer/
+    );
+});
+
 test('grid details leave the persistent congestion controls in place', () => {
     const frontendDirectory = path.join(__dirname, '..', 'policy-tool-frontend');
     const html = fs.readFileSync(path.join(frontendDirectory, 'index.html'), 'utf8');
@@ -185,6 +263,13 @@ test('grid details leave the persistent congestion controls in place', () => {
     assert.match(script, /function selectScenarioTargetByPc6\(pc6Id\)/);
     assert.match(script, /updateGridReachSidePanel[\s\S]{0,250}selectScenarioTargetByPc6/);
     assert.match(script, /function applyGridVisibility\(fit = false\)/);
+    assert.match(html, /id="r-wind-turbines"/);
+    assert.match(html, /id="heat-layer-select"/);
+    mapData.HEAT_LAYER_IDS.forEach((layerId) => assert.match(html, new RegExp(layerId)));
+    assert.match(script, /function updateGridLineSidePanel\(prop\)/);
+    assert.match(script, /function updateGridTransformerSidePanel\(prop\)/);
+    assert.match(script, /function updateWindTurbineSidePanel\(prop\)/);
+    assert.match(script, /function updateHeatSidePanel\(layerId, prop\)/);
     assert.equal((html.match(/id="run-sim-btn"/g) || []).length, 1);
     assert.doesNotMatch(script, /updateGridLineSidePanel[\s\S]{0,200}selectScenarioTarget/);
 });

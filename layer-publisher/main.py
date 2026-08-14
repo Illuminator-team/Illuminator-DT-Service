@@ -20,6 +20,15 @@ from pv import (
     fetch_pv_artifact,
     get_pv_readiness_signature,
 )
+from wind import WindArtifact, fetch_wind_artifact, get_wind_readiness_signature
+from wind_postgis import sync_wind_layer
+from heat import (
+    HEAT_LAYER_IDS,
+    HeatArtifact,
+    fetch_heat_artifact,
+    get_heat_readiness_signature,
+)
+from heat_postgis import sync_heat_layers
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -68,6 +77,11 @@ GRID_CONFIGS = {
     "grid_lv_mv_transformer_reach": GRID_LV_MV_REACH_CONFIG,
     "grid_mv_hv_transformer_reach": GRID_MV_HV_REACH_CONFIG,
 }
+WIND_CONFIG = get_layer_config(MANIFEST, "layer:wind-turbine-map:public-turbines")
+HEAT_CONFIGS = {
+    layer_id: get_layer_config(MANIFEST, f"layer:heat-net-map:{layer_id}")
+    for layer_id in HEAT_LAYER_IDS
+}
 PC6_SOURCE_PATH = Path(os.getenv("PC6_SOURCE_PATH", PC6_CONFIG["source"]["path"]))
 PV_API_URL = os.getenv("PV_API_URL", PV_CONFIG["source"]["base_url"]).rstrip("/")
 PV_EXPECTED_RELEASE_COMMIT = os.getenv(
@@ -91,6 +105,32 @@ GRID_EXPORT_BBOX = bbox_env(
     "GRID_EXPORT_BBOX",
     GRID_LINES_CONFIG["source"]["production_selection"]["bbox"],
 )
+WIND_API_URL = os.getenv(
+    "WIND_API_URL", WIND_CONFIG["source"]["base_url"]
+).rstrip("/")
+WIND_EXPECTED_RELEASE_COMMIT = os.getenv(
+    "WIND_EXPECTED_RELEASE_COMMIT", WIND_CONFIG["source"]["release_commit"]
+)
+WIND_EXPECTED_CONTAINER_IMAGE = os.getenv(
+    "WIND_EXPECTED_CONTAINER_IMAGE",
+    WIND_CONFIG["source"]["container_reported_identity"],
+)
+WIND_EXPECTED_CONTAINER_DIGEST = os.getenv(
+    "WIND_EXPECTED_CONTAINER_DIGEST", WIND_CONFIG["source"]["container_digest"]
+)
+WIND_EXPECTED_DATA_MODE = os.getenv("WIND_EXPECTED_DATA_MODE", "real_source")
+HEAT_API_URL = os.getenv(
+    "HEAT_API_URL", next(iter(HEAT_CONFIGS.values()))["source"]["base_url"]
+).rstrip("/")
+HEAT_EXPECTED_RELEASE_COMMIT = os.getenv(
+    "HEAT_EXPECTED_RELEASE_COMMIT",
+    next(iter(HEAT_CONFIGS.values()))["source"]["release_commit"],
+)
+HEAT_EXPECTED_CONTAINER_DIGEST = os.getenv(
+    "HEAT_EXPECTED_CONTAINER_DIGEST",
+    next(iter(HEAT_CONFIGS.values()))["source"]["container_digest"],
+)
+HEAT_EXPECTED_DATA_MODE = os.getenv("HEAT_EXPECTED_DATA_MODE", "real_source")
 
 GEOSERVER_REST_URL = os.getenv(
     "GEOSERVER_REST_URL", "http://geo:8080/geoserver/rest"
@@ -118,6 +158,11 @@ PV_TABLE = PV_CONFIG["table"]
 PV_LAYER = PV_CONFIG["geoserver_layer"]
 GRID_TABLES = {
     layer_id: config["table"] for layer_id, config in GRID_CONFIGS.items()
+}
+WIND_TABLE = WIND_CONFIG["table"]
+WIND_LAYER = WIND_CONFIG["geoserver_layer"]
+HEAT_TABLES = {
+    layer_id: config["table"] for layer_id, config in HEAT_CONFIGS.items()
 }
 SOLAR_TABLE = "solar_panel_layer"
 SOLAR_LAYER = "solar_panel_layer"
@@ -606,6 +651,59 @@ def publish_grid() -> GridArtifact:
     return artifact
 
 
+def publish_wind() -> WindArtifact:
+    artifact = fetch_wind_artifact(
+        WIND_API_URL,
+        expected_release_commit=WIND_EXPECTED_RELEASE_COMMIT,
+        expected_container_image=WIND_EXPECTED_CONTAINER_IMAGE,
+        expected_container_digest=WIND_EXPECTED_CONTAINER_DIGEST,
+        expected_model_version=WIND_CONFIG["model_version"],
+        expected_contract_version=WIND_CONFIG["metadata_contract_version"],
+        expected_schema_contract_version=WIND_CONFIG["schema_contract_version"],
+        expected_data_mode=WIND_EXPECTED_DATA_MODE,
+    )
+    stats = sync_wind_layer(DB_CONN, table=WIND_TABLE, artifact=artifact)
+    ensure_feature_type(
+        WIND_LAYER, WIND_CONFIG["title"], WIND_CONFIG["source"]["crs"]
+    )
+    LOGGER.info(
+        "Wind layer synchronized: total=%s changed=%s deleted=%s output=%s",
+        stats["total"],
+        stats["changed"],
+        stats["deleted"],
+        artifact.output_id,
+    )
+    return artifact
+
+
+def publish_heat() -> HeatArtifact:
+    first_config = next(iter(HEAT_CONFIGS.values()))
+    artifact = fetch_heat_artifact(
+        HEAT_API_URL,
+        expected_release_commit=HEAT_EXPECTED_RELEASE_COMMIT,
+        expected_container_digest=HEAT_EXPECTED_CONTAINER_DIGEST,
+        expected_model_version=first_config["model_version"],
+        expected_contract_version=first_config["metadata_contract_version"],
+        expected_schema_contract_version=first_config["schema_contract_version"],
+        expected_data_mode=HEAT_EXPECTED_DATA_MODE,
+    )
+    stats = sync_heat_layers(DB_CONN, tables=HEAT_TABLES, artifact=artifact)
+    for layer_id, config in HEAT_CONFIGS.items():
+        ensure_feature_type(
+            config["geoserver_layer"], config["title"], config["source"]["crs"]
+        )
+        layer_stats = stats[layer_id]
+        LOGGER.info(
+            "Heat %s synchronized: total=%s changed=%s deleted=%s output=%s",
+            layer_id,
+            layer_stats["total"],
+            layer_stats["changed"],
+            layer_stats["deleted"],
+            artifact.layers[layer_id].output_id,
+        )
+    return artifact
+
+
 def create_solar_table() -> None:
     with psycopg2.connect(**DB_CONN) as connection:
         with connection.cursor() as cursor:
@@ -676,6 +774,8 @@ def run() -> None:
     publish_pc6()
     publish_pv()
     publish_grid()
+    publish_wind()
+    publish_heat()
     create_solar_table()
     ensure_feature_type(SOLAR_LAYER, "Tutorial Solar Panel", "EPSG:4326")
     try:
@@ -689,6 +789,12 @@ def run() -> None:
     last_pc6_signature = source_signature(PC6_SOURCE_PATH)
     last_pv_signature = get_pv_readiness_signature(PV_API_URL)
     last_grid_signature = get_grid_readiness_signature(GRID_API_URL)
+    last_wind_signature = get_wind_readiness_signature(
+        WIND_API_URL, expected_data_mode=WIND_EXPECTED_DATA_MODE
+    )
+    last_heat_signature = get_heat_readiness_signature(
+        HEAT_API_URL, expected_data_mode=HEAT_EXPECTED_DATA_MODE
+    )
     while True:
         time.sleep(PUBLISH_INTERVAL_SECONDS)
         current_signature = source_signature(PC6_SOURCE_PATH)
@@ -713,6 +819,30 @@ def run() -> None:
         except (RuntimeError, ValueError):
             LOGGER.warning(
                 "Could not check or refresh the grid layers",
+                exc_info=True,
+            )
+        try:
+            current_wind_signature = get_wind_readiness_signature(
+                WIND_API_URL, expected_data_mode=WIND_EXPECTED_DATA_MODE
+            )
+            if current_wind_signature != last_wind_signature:
+                publish_wind()
+                last_wind_signature = current_wind_signature
+        except (RuntimeError, ValueError):
+            LOGGER.warning(
+                "Could not check or refresh the Wind turbine layer",
+                exc_info=True,
+            )
+        try:
+            current_heat_signature = get_heat_readiness_signature(
+                HEAT_API_URL, expected_data_mode=HEAT_EXPECTED_DATA_MODE
+            )
+            if current_heat_signature != last_heat_signature:
+                publish_heat()
+                last_heat_signature = current_heat_signature
+        except (RuntimeError, ValueError):
+            LOGGER.warning(
+                "Could not check or refresh the Heat layers",
                 exc_info=True,
             )
         try:

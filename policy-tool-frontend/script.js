@@ -16,6 +16,8 @@ let gridTransformerLayers = {};
 let gridLvMvReachLayer;
 let gridMvHvReachLayer;
 let gridHasFit = false;
+let windTurbinesLayer;
+const heatMapLayers = {};
 let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
 let pvLayerSource = 'loading';
@@ -26,6 +28,77 @@ const gridLayerSources = {
     grid_mv_hv_transformer_reach: 'loading'
 };
 const gridCanvasRenderer = L.canvas({ padding: 0.5 });
+let windTurbinesLayerSource = 'loading';
+const heatLayerSources = Object.fromEntries(
+    Pc6MapData.HEAT_LAYER_IDS.map((layerId) => [layerId, 'loading'])
+);
+
+const HEAT_LAYER_UI = {
+    reported_neighbourhood_heat_consumers: {
+        title: 'Neighbourhood heat consumers',
+        color: '#b64b4b',
+        geometry: 'area',
+        fields: [
+            ['area_name', 'Area', ''],
+            ['reported_connected_share_pct', 'Reported connected share', '%'],
+            ['connected_dwellings_estimate', 'Connected dwellings estimate', ''],
+            ['heat_demand_estimate_gj_per_year', 'Estimated heat demand', ' GJ/year']
+        ]
+    },
+    inferred_pc6_heat_consumers: {
+        title: 'Inferred PC6 heat consumers',
+        color: '#d47b51',
+        geometry: 'area',
+        fields: [
+            ['postcode6', 'PC6', ''],
+            ['allocated_connected_dwellings_est', 'Allocated dwellings', ''],
+            ['heat_demand_gj_year_est', 'Estimated heat demand', ' GJ/year'],
+            ['liander_crosscheck_status', 'Liander cross-check', '']
+        ]
+    },
+    registered_heat_network_developments: {
+        title: 'Registered heat-network development',
+        color: '#d0a329',
+        geometry: 'area',
+        fields: [
+            ['development_name', 'Development', ''],
+            ['development_phase', 'Phase', ''],
+            ['status_date', 'Status date', ''],
+            ['planned_heat_source_description', 'Planned source', '']
+        ]
+    },
+    documented_actual_heat_sources: {
+        title: 'Documented actual heat source',
+        color: '#c23958',
+        geometry: 'point',
+        fields: [
+            ['source_name', 'Source', ''],
+            ['source_status', 'Status', ''],
+            ['technology', 'Technology', '']
+        ]
+    },
+    documented_large_heat_consumers: {
+        title: 'Documented large heat consumer',
+        color: '#4e606d',
+        geometry: 'point',
+        fields: [
+            ['consumer_name', 'Consumer', ''],
+            ['connection_evidence', 'Connection evidence', ''],
+            ['annual_heat_consumption', 'Annual consumption', ' GJ/year']
+        ]
+    },
+    potential_heat_sources: {
+        title: 'Potential heat source',
+        color: '#287f8f',
+        geometry: 'point',
+        fields: [
+            ['source_name', 'Source', ''],
+            ['source_type', 'Type', ''],
+            ['potential_thermal_capacity_mw', 'Potential capacity', ' MWth'],
+            ['temperature_c', 'Temperature', ' °C']
+        ]
+    }
+};
 
 // Unified Color Logic
 function getColor(d, type) {
@@ -173,6 +246,37 @@ function getReachColor(componentId) {
     return colors[hash % colors.length];
 }
 
+function windTurbineStyle(feature) {
+    const capacity = Number(feature.properties.capacity_kw || 0);
+    return {
+        radius: Math.max(6, Math.min(10, 5 + capacity / 800)),
+        color: '#ffffff',
+        weight: 2,
+        fillColor: '#16856b',
+        fillOpacity: 0.95
+    };
+}
+
+function heatLayerStyle(layerId) {
+    const config = HEAT_LAYER_UI[layerId];
+    if (config.geometry === 'point') {
+        return {
+            radius: 7,
+            color: '#ffffff',
+            weight: 2,
+            fillColor: config.color,
+            fillOpacity: 0.95
+        };
+    }
+    return {
+        fillColor: config.color,
+        weight: 1.2,
+        opacity: 0.85,
+        color: '#ffffff',
+        fillOpacity: 0.58
+    };
+}
+
 function gridReachStyle(feature) {
     const properties = feature.properties || {};
     const color = getReachColor(
@@ -213,6 +317,10 @@ function updateLayerStatus(layerName, source, fallbackReason = null) {
         pvLayerSource = source;
     } else if (Object.hasOwn(gridLayerSources, layerName)) {
         gridLayerSources[layerName] = source;
+    } else if (layerName === 'public_wind_turbines') {
+        windTurbinesLayerSource = source;
+    } else if (Pc6MapData.HEAT_LAYER_IDS.includes(layerName)) {
+        heatLayerSources[layerName] = source;
     } else {
         pc6LayerSource = source;
     }
@@ -229,7 +337,9 @@ function refreshLayerStatus() {
     const sources = {
         pc6: pc6LayerSource,
         pv_capacity: pvLayerSource,
-        grid_network: getGridNetworkSource()
+        grid_network: getGridNetworkSource(),
+        public_wind_turbines: windTurbinesLayerSource,
+        ...heatLayerSources
     };
     renderLayerStatus(sources[activeLayer]);
 }
@@ -239,10 +349,12 @@ function updateLayerQualitySummary() {
     const meter = document.getElementById('layer-quality-meter');
     const isPvCapacity = currentMetric === 'pv_capacity';
     const isGrid = currentMetric === 'grid_network';
-    label.textContent = isGrid
+    const isWind = currentMetric === 'public_wind_turbines';
+    const isHeat = Pc6MapData.HEAT_LAYER_IDS.includes(currentMetric);
+    label.textContent = (isGrid || isWind || isHeat)
         ? 'Datacompleetheid per component'
         : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
-    meter.title = (isPvCapacity || isGrid)
+    meter.title = (isPvCapacity || isGrid || isWind || isHeat)
         ? 'Feature-level confidence varies across this layer'
         : 'Layer-level confidence';
 }
@@ -300,18 +412,26 @@ function updateGridVisibilityPanel() {
 }
 
 function setActiveMapLayer(fitActive = false) {
+    const independentLayers = {
+        pc6: pc6Layer,
+        pv_capacity: pvLayer,
+        public_wind_turbines: windTurbinesLayer,
+        ...heatMapLayers
+    };
     const activeLayerName = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
-    [[pc6Layer, 'pc6'], [pvLayer, 'pv_capacity']].forEach(([layer, layerName]) => {
+    Object.entries(independentLayers).forEach(([layerName, layer]) => {
         if (layer && layerName !== activeLayerName && map.hasLayer(layer)) {
             map.removeLayer(layer);
         }
     });
     applyGridVisibility(fitActive || (currentMetric === 'grid_network' && !gridHasFit));
 
-    const activeLayer = activeLayerName === 'pc6' ? pc6Layer : activeLayerName === 'pv_capacity' ? pvLayer : null;
+    const activeLayer = independentLayers[activeLayerName];
     if (activeLayer && !map.hasLayer(activeLayer)) {
         activeLayer.addTo(map);
-        if (activeLayerName !== 'pc6') map.fitBounds(activeLayer.getBounds());
+        if (activeLayerName !== 'pc6' && activeLayer.getLayers().length > 0) {
+            map.fitBounds(activeLayer.getBounds());
+        }
     }
     if (activeLayerName === 'pc6' && pc6Layer) pc6Layer.setStyle(style);
     updateGridVisibilityPanel();
@@ -496,6 +616,70 @@ async function loadMap() {
         control.parentElement.title = 'MV/HV transformer reach layer is unavailable';
     }
 
+    try {
+        const result = await Pc6MapData.loadWindTurbinesFeatureCollection(fetch);
+        windTurbinesLayer = L.geoJSON(result.data, {
+            pointToLayer: (feature, latlng) => L.circleMarker(latlng, windTurbineStyle(feature)),
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 4 }),
+                    mouseout: (event) => event.target.setStyle(windTurbineStyle(feature)),
+                    click: (event) => {
+                        updateWindTurbineSidePanel(feature.properties);
+                        map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 15));
+                    }
+                });
+            }
+        });
+        updateLayerStatus('public_wind_turbines', result.source);
+    } catch (error) {
+        console.error('Wind turbine data load failed:', error);
+        updateLayerStatus('public_wind_turbines', 'failed', error.message);
+        const control = document.getElementById('r-wind-turbines');
+        control.disabled = true;
+        control.parentElement.title = 'Wind turbine layer is unavailable';
+    }
+
+    await Promise.all(Pc6MapData.HEAT_LAYER_IDS.map(async (layerId) => {
+        try {
+            const result = await Pc6MapData.loadHeatFeatureCollection(fetch, layerId);
+            const config = HEAT_LAYER_UI[layerId];
+            heatMapLayers[layerId] = L.geoJSON(result.data, {
+                style: () => heatLayerStyle(layerId),
+                pointToLayer: (feature, latlng) => L.circleMarker(
+                    latlng,
+                    heatLayerStyle(layerId)
+                ),
+                onEachFeature: (feature, layer) => {
+                    layer.on({
+                        mouseover: (event) => event.target.setStyle({ weight: 4 }),
+                        mouseout: (event) => event.target.setStyle(heatLayerStyle(layerId)),
+                        click: (event) => {
+                            updateHeatSidePanel(layerId, feature.properties);
+                            if (config.geometry === 'point') {
+                                map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 15));
+                            } else {
+                                map.fitBounds(event.target.getBounds(), {
+                                    padding: [40, 40],
+                                    maxZoom: 16
+                                });
+                            }
+                        }
+                    });
+                }
+            });
+            updateLayerStatus(layerId, result.source);
+        } catch (error) {
+            console.error(`${layerId} data load failed:`, error);
+            updateLayerStatus(layerId, 'failed', error.message);
+            const option = document.querySelector(
+                `#heat-layer-select option[value="${layerId}"]`
+            );
+            option.disabled = true;
+            option.title = 'Layer unavailable';
+        }
+    }));
+
     setActiveMapLayer();
 }
 
@@ -545,6 +729,17 @@ function updateLegend() {
             if (selectedGridLayers().length === 0) {
                 div.innerHTML += 'No grid components selected';
             }
+            return div;
+        }
+        if (currentMetric === 'public_wind_turbines') {
+            div.innerHTML = '<div class="legend-title">WIND TURBINES</div>';
+            div.innerHTML += '<i style="background:#16856b"></i> Published position and capacity<br>';
+            return div;
+        }
+        if (Pc6MapData.HEAT_LAYER_IDS.includes(currentMetric)) {
+            const config = HEAT_LAYER_UI[currentMetric];
+            div.innerHTML = '<div class="legend-title">HEAT EVIDENCE</div>';
+            div.innerHTML += `<i style="background:${config.color}"></i> ${config.title}<br>`;
             return div;
         }
         const isPvCapacity = currentMetric === 'pv_capacity';
@@ -966,6 +1161,82 @@ function updateGridReachSidePanel(prop, level) {
     `;
 }
 
+function updateWindTurbineSidePanel(prop) {
+    const capacity = prop.capacity_kw == null
+        ? 'Unknown'
+        : `${Number(prop.capacity_kw).toLocaleString('nl-NL')} kW`;
+    const annualEnergy = prop.modeled_annual_energy_kwh == null
+        ? 'Not available'
+        : `${Math.round(Number(prop.modeled_annual_energy_kwh)).toLocaleString('nl-NL')} kWh`;
+    const capacityFactor = prop.modeled_capacity_factor == null
+        ? 'Not available'
+        : `${(Number(prop.modeled_capacity_factor) * 100).toFixed(1)}%`;
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">Wind turbine</div>
+        <div class="feature-identifier">${escapeHtml(prop.feature_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Published capacity</div>
+                    <div class="data-value">${escapeHtml(capacity)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Hub / rotor</div>
+                    <div class="data-value">${escapeHtml(prop.hub_height_m ?? '?')} / ${escapeHtml(prop.rotor_diameter_m ?? '?')} m</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Provisional 2025 energy</div>
+                    <div class="data-value compact-value">${escapeHtml(annualEnergy)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Capacity factor</div>
+                    <div class="data-value">${escapeHtml(capacityFactor)}</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>WIND INVENTORY AND PROVISIONAL MODEL</strong><br>
+            Source period: ${escapeHtml(prop.source_reference_period || 'Unknown')}<br>
+            Profile transport: ${prop.profile_transport_available ? 'Available' : 'Not yet available'}<br>
+            <a href="/models/wind/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function formatHeatValue(value, unit) {
+    if (value === null || value === undefined || value === '') return 'Not available';
+    const rendered = typeof value === 'number'
+        ? value.toLocaleString('nl-NL', { maximumFractionDigits: 2 })
+        : String(value).replaceAll('_', ' ');
+    return `${rendered}${unit}`;
+}
+
+function updateHeatSidePanel(layerId, prop) {
+    const config = HEAT_LAYER_UI[layerId];
+    const rows = config.fields.map(([field, label, unit]) => `
+        <div class="data-group">
+            <div class="data-label">${escapeHtml(label)}</div>
+            <div class="data-value compact-value">${escapeHtml(formatHeatValue(prop[field], unit))}</div>
+        </div>
+    `).join('');
+    const evidenceStatus = String(prop.evidence_status || 'Not available').replaceAll('_', ' ');
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">${escapeHtml(config.title)}</div>
+        <div class="feature-identifier">${escapeHtml(prop.feature_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">${rows}</div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>HEAT-NET-MAP EVIDENCE</strong><br>
+            Evidence: ${escapeHtml(evidenceStatus)}<br>
+            Snapshot: ${escapeHtml(prop.model_snapshot_id || 'Unknown')}<br>
+            <a href="/models/heat/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
 function refreshVisuals(originalProps) {
     // This forces Leaflet to re-calculate the styles and patterns
     if (pc6Layer) pc6Layer.setStyle(style);
@@ -992,6 +1263,7 @@ document.getElementById('search-input').addEventListener('keypress', (e) => {
 
 document.querySelectorAll('input[name="layer"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
+        document.getElementById('heat-layer-select').value = '';
         currentMetric = e.target.value;
         setActiveMapLayer(true);
     });
@@ -1002,6 +1274,15 @@ document.querySelectorAll('#grid-visibility input[type="checkbox"]').forEach((ch
         applyGridVisibility();
         updateLegend();
     });
+});
+
+document.getElementById('heat-layer-select').addEventListener('change', (event) => {
+    if (!event.target.value) return;
+    document.querySelectorAll('input[name="layer"]').forEach((radio) => {
+        radio.checked = false;
+    });
+    currentMetric = event.target.value;
+    setActiveMapLayer();
 });
 
 let energyChart = null; 
