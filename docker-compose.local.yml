@@ -27,10 +27,32 @@ services:
     labels:
       traefik.http.routers.grid-api.rule: Host(`localhost`) && PathPrefix(`/models/grid`)
 
+  wind-init:
+    command:
+      - python
+      - -m
+      - wind_turbine_map.api.initialize
+      - --mode
+      - fixture
+      - --allow-fixture
+      - --fixture
+      - /fixtures/alkmaar_wind_turbines_fixture.json
+    environment:
+      WIND_API_ALLOW_FIXTURE: "true"
+    volumes:
+      - ./tests/fixtures/wind/alkmaar_wind_turbines_fixture.json:/fixtures/alkmaar_wind_turbines_fixture.json:ro
+
+  wind-api:
+    environment:
+      WIND_API_ALLOW_FIXTURE: "true"
+    labels:
+      traefik.http.routers.wind-api.rule: Host(`localhost`) && PathPrefix(`/models/wind`)
+
   layer-publisher:
     environment:
       GRID_EXPECTED_DATA_MODE: fixture
       GRID_EXPORT_BBOX: 4.774287,52.629131,4.779526,52.635583
+      WIND_EXPECTED_DATA_MODE: fixture
 
   grafana:
     environment:

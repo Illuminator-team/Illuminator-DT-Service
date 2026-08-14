@@ -10,7 +10,7 @@ This repository is based on the step-by-step tutorial for the [Rapid Deployment 
 
 You need to have [Docker](https://docs.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) installed.
 
-The pinned PV and Liander Grid model images are private GitHub Container Registry packages. Before
+The pinned PV, Liander Grid, and Wind model images are private GitHub Container Registry packages. Before
 a local first start, authenticate Docker with a separately managed GitHub token
 limited to `read:packages`; do not store that token in this repository:
 
@@ -37,13 +37,16 @@ Start the local stack with isolated GeoServer and Illuminator output volumes:
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
-The first start pulls the PV and Grid models by their verified immutable GHCR
+The first start pulls the PV, Grid, and Wind models by their verified immutable GHCR
 digests. PV runs its one-shot public-source initializer, which can download
 substantial source data and take more than ten minutes; the `pv-raw-cache`
 volume is reused on later starts. The local override initializes Grid from the
 checked-in 22-line/1-transformer Alkmaar acceptance fixture. The production
 Compose path instead runs the model-owned `north-holland-towns` source
-initializer and persists its result in `grid-model-data`.
+initializer and persists its result in `grid-model-data`. The local override
+initializes Wind from the model-owned four-turbine Alkmaar fixture; production
+uses the model's bounded real-source initializer and persists its result in
+`wind-model-data`.
 
 Local endpoints:
 
@@ -51,6 +54,7 @@ Local endpoints:
 - GeoServer: https://localhost/geoserver/web/
 - PV model API: https://localhost/models/pv/docs
 - Grid model API: https://localhost/models/grid/docs
+- Wind model API: https://localhost/models/wind/docs
 - Grafana: https://localhost/grafana/
 - Redis Insight: http://localhost:5540/
 - Traefik dashboard: http://localhost:8080/dashboard/
@@ -62,9 +66,12 @@ temporarily unavailable. The independent `rdp:pv_capacity` layer is loaded
 from GeoServer WFS without substituting consumption data when it is unavailable.
 The independent `rdp:grid_lines` and `rdp:grid_transformers` layers are likewise
 loaded from GeoServer WFS. Selecting either Grid layer changes the map and
-feature details while leaving the congestion scenario controls available.
+feature details while leaving the congestion scenario controls available. The
+independent `rdp:public_wind_turbines` point layer exposes published nameplate
+capacity, provisional generation summaries, and model-owned
+`datacompleetheid`; selecting it also leaves the scenario controls in place.
 
-Run the PC6, PV, and Grid publication contracts and frontend layer-adapter tests:
+Run the PC6, PV, Grid, and Wind publication contracts and frontend layer-adapter tests:
 
 ```shell
 python -m unittest discover -s tests -p "test_*.py"
@@ -83,3 +90,4 @@ python tests/smoke_stack.py --base-url https://localhost
 - [Future model integration plan](docs/model-integration-plan.md)
 - [Model developer integration guide](docs/model-developer-integration-guide.md)
 - [PV integration lessons learned](docs/pv-integration-lessons-learned.md)
+- [Wind turbine integration](docs/wind-integration.md)

@@ -14,6 +14,7 @@ PC6_LAYER = "policy_tool_pc6_energy"
 PV_LAYER = "pv_capacity"
 GRID_LINES_LAYER = "grid_lines"
 GRID_TRANSFORMERS_LAYER = "grid_transformers"
+WIND_LAYER = "public_wind_turbines"
 PV_FIXTURE = "BU03610302"
 PV_RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
 PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
@@ -21,6 +22,13 @@ GRID_RELEASE_COMMIT = "36bfcfbdca4030068a2ec1e2677bf2b334bb4a46"
 GRID_CONTAINER_DIGEST = "sha256:ed241d2dc64de8f9cb21a56595f58725bac4cdf91932f5623d4e20b9867a83c2"
 GRID_BBOX = [4.774287, 52.629131, 4.779526, 52.635583]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
+WIND_FIXTURE = "wind-turbine-2811"
+WIND_RELEASE_COMMIT = "b89bd49c717a1e301954aa0b8c1bdb98a91f8d44"
+WIND_CONTAINER_IMAGE = (
+    "ghcr.io/jortgroen/wind-turbine-map-api:"
+    "sha-b89bd49c717a1e301954aa0b8c1bdb98a91f8d44"
+)
+WIND_CONTAINER_DIGEST = "sha256:820822bfa5300bc8e2126482147b1d430d075c1834bd080999334825caa21828"
 FIXTURE = "1842EM"
 
 
@@ -308,6 +316,143 @@ def check_pv_layer(client: SmokeClient) -> None:
     require(image.startswith(b"\x89PNG") and len(image) > 1000, "PV WMS map is empty")
 
 
+def check_wind_model_api(client: SmokeClient) -> None:
+    root = client.get_json("/models/wind/")
+    require(root.get("status") == "alive", "Wind model liveness failed")
+
+    readiness = client.get_json("/models/wind/ready", timeout=120)
+    require(readiness.get("ready") is True, "Wind model is not ready")
+    require(readiness.get("state") == "ready", "Wind readiness state drift")
+    require(readiness.get("data_mode") == "fixture", "Wind fixture mode drift")
+    require(readiness.get("feature_count") == 4, "Wind readiness feature count drift")
+
+    metadata = client.get_json("/models/wind/metadata")
+    require(metadata.get("git_commit") == WIND_RELEASE_COMMIT, "Wind release identity drift")
+    require(
+        metadata.get("container_image") == WIND_CONTAINER_IMAGE,
+        "Wind container identity drift",
+    )
+    require(metadata.get("model", {}).get("version") == "0.2.0", "Wind version drift")
+    require(metadata.get("contract_version") == "1.0.0", "Wind contract drift")
+
+    layers = client.get_json("/models/wind/layers")
+    require(len(layers.get("layers", [])) == 1, "Wind layer contract is missing")
+    require(layers["layers"][0]["id"] == WIND_LAYER, "Wind layer ID drift")
+    require(
+        layers["layers"][0]["runtime"]["feature_count"] == 4,
+        "Wind layer feature count drift",
+    )
+
+    run = client.post_json(
+        "/models/wind/runs",
+        {
+            "layer_id": WIND_LAYER,
+            "spatial_selection": {"type": "all"},
+            "parameters": {},
+        },
+        timeout=300,
+    )
+    require(run.get("status") == "completed", "Wind model run failed")
+    require(run.get("git_commit") == WIND_RELEASE_COMMIT, "Wind run identity drift")
+    outputs = run.get("outputs", [])
+    require(len(outputs) == 1, "Wind run did not return one output")
+
+    output_id = outputs[0]["output_id"]
+    output = client.get_json(f"/models/wind/outputs/{output_id}")
+    require(output.get("layer_id") == WIND_LAYER, "Wind output layer drift")
+    require(output.get("feature_count") == 4, "Wind output feature count drift")
+    require(output.get("data_mode") == "fixture", "Wind output data mode drift")
+    data_path = output.get("links", {}).get("data")
+    require(
+        isinstance(data_path, str) and data_path.startswith("/outputs/"),
+        "Wind data link drift",
+    )
+    status, content, content_type = client.get(f"/models/wind{data_path}", timeout=120)
+    require(status == 200, "Wind output data request failed")
+    require(content_type == "application/geo+json", "Wind output media type drift")
+    require(len(content) == output["byte_size"], "Wind output byte size drift")
+    require(hashlib.sha256(content).hexdigest() == output["sha256"], "Wind output hash drift")
+
+
+def check_wind_layer(client: SmokeClient) -> None:
+    capabilities_query = urllib.parse.urlencode(
+        {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}
+    )
+    capabilities_path = f"/geoserver/wms?{capabilities_query}"
+    deadline = time.monotonic() + 300
+    while True:
+        status, body, _ = client.get(capabilities_path)
+        if status == 200 and WIND_LAYER.encode() in body:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError("Wind layer missing from WMS capabilities")
+        time.sleep(5)
+
+    describe_query = urllib.parse.urlencode({
+        "service": "WFS",
+        "version": "2.0.0",
+        "request": "DescribeFeatureType",
+        "typeNames": WIND_LAYER,
+    })
+    status, body, _ = client.get(f"/geoserver/rdp/ows?{describe_query}")
+    require(status == 200, "Wind WFS DescribeFeatureType failed")
+    for field in (
+        "feature_id",
+        "capacity_kw",
+        "modeled_annual_energy_kwh",
+        "datacompleetheid",
+        "datacompleetheid_label",
+        "datacompleetheid_rule_version",
+        "deployment_container_digest",
+    ):
+        require(field.encode() in body, f"Wind WFS schema is missing {field}")
+
+    feature_query = urllib.parse.urlencode({
+        "service": "WFS",
+        "version": "2.0.0",
+        "request": "GetFeature",
+        "typeNames": WIND_LAYER,
+        "outputFormat": "application/json",
+        "cql_filter": f"feature_id='{WIND_FIXTURE}'",
+    })
+    collection = client.get_json(f"/geoserver/rdp/ows?{feature_query}")
+    require(collection.get("numberReturned") == 1, "Wind fixture is missing")
+    feature = collection["features"][0]
+    properties = feature["properties"]
+    require(properties["feature_id"] == WIND_FIXTURE, "Wind fixture ID drift")
+    require(properties["capacity_kw"] > 0, "Wind fixture capacity is not positive")
+    require(properties["datacompleetheid"] == 2, "Wind fixture quality drift")
+    require(
+        properties["deployment_container_digest"] == WIND_CONTAINER_DIGEST,
+        "Wind deployment digest drift",
+    )
+    require(feature["geometry"]["type"] == "Point", "Wind geometry type drift")
+    longitude, latitude = feature["geometry"]["coordinates"][:2]
+    require(abs(longitude - 4.7523) < 0.000001, "Wind fixture longitude drift")
+    require(abs(latitude - 52.593) < 0.000001, "Wind fixture latitude drift")
+
+    padding = 0.002
+    map_query = urllib.parse.urlencode({
+        "service": "WMS",
+        "version": "1.1.1",
+        "request": "GetMap",
+        "layers": f"rdp:{WIND_LAYER}",
+        "styles": "",
+        "srs": "EPSG:4326",
+        "bbox": (
+            f"{longitude-padding},{latitude-padding},"
+            f"{longitude+padding},{latitude+padding}"
+        ),
+        "width": 256,
+        "height": 256,
+        "format": "image/png",
+    })
+    status, image, content_type = client.get(f"/geoserver/rdp/wms?{map_query}")
+    require(status == 200, "Wind WMS GetMap failed")
+    require(content_type == "image/png", "Wind WMS content type drift")
+    require(image.startswith(b"\x89PNG") and len(image) > 500, "Wind WMS map is empty")
+
+
 def check_grid_model_api(client: SmokeClient) -> None:
     root = client.get_json("/models/grid/")
     require(root.get("status") == "alive", "Grid model liveness failed")
@@ -511,6 +656,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(b"r-pv-capacity" in dashboard, "Dashboard PV layer control is missing")
     require(b"r-grid-lines" in dashboard, "Dashboard grid lines control is missing")
     require(b"r-grid-transformers" in dashboard, "Dashboard grid transformers control is missing")
+    require(b"r-wind-turbines" in dashboard, "Dashboard Wind layer control is missing")
     require(b"scenario-panel" in dashboard, "Persistent scenario controls are missing")
 
     status, script, _ = client.get("/dashboard/map-data.js")
@@ -519,6 +665,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(b"pv_capacity" in script, "Dashboard is not configured for PV WFS")
     require(b"grid_lines" in script, "Dashboard is not configured for grid lines WFS")
     require(b"grid_transformers" in script, "Dashboard is not configured for transformers WFS")
+    require(b"public_wind_turbines" in script, "Dashboard is not configured for Wind WFS")
     require(b"alkmaar_energy_map.geojson" in script, "Static fallback is missing")
 
     api = client.get_json("/policy-api/")
@@ -531,6 +678,10 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(
         "layer:grid-model:transformers" in records,
         "Grid transformers registry record is missing",
+    )
+    require(
+        "layer:wind-turbine-map:public-turbines" in records,
+        "Wind registry record is missing",
     )
     for local_id, qualified_layer in (
         ("layer:grid-model:lines", "rdp:grid_lines"),
@@ -550,6 +701,17 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(
         pv_record["services"]["qualified_layer"] == "rdp:pv_capacity",
         "PV registry GeoServer layer drift",
+    )
+    wind_record = records["layer:wind-turbine-map:public-turbines"]
+    require(wind_record["model_version"] == "0.2.0", "Wind registry version drift")
+    require(wind_record["crs"] == "EPSG:4326", "Wind registry CRS drift")
+    require(
+        wind_record["data_quality"]["method_version"] == "WIND-DATA-COMPLETE-001",
+        "Wind registry quality method drift",
+    )
+    require(
+        wind_record["services"]["qualified_layer"] == "rdp:public_wind_turbines",
+        "Wind registry GeoServer layer drift",
     )
 
     simulation = client.get_json(
@@ -585,16 +747,19 @@ def main() -> int:
     wait_until_ready(client, "/policy-api/")
     wait_until_ready(client, "/models/pv/ready", timeout=1800)
     wait_until_ready(client, "/models/grid/ready", timeout=300)
+    wait_until_ready(client, "/models/wind/ready", timeout=300)
     wait_until_ready(
         client, "/geoserver/wms?service=WMS&version=1.3.0&request=GetCapabilities"
     )
     check_pv_model_api(client)
     check_grid_model_api(client)
+    check_wind_model_api(client)
     check_pc6_layer(client)
     check_pv_layer(client)
     check_grid_layers(client)
+    check_wind_layer(client)
     check_dashboard_and_simulation(client)
-    print("Integrated PC6, PV capacity, and grid layer smoke test passed")
+    print("Integrated PC6, PV capacity, grid, and Wind layer smoke test passed")
     return 0
 
 
