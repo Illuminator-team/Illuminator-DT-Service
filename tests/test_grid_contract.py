@@ -22,11 +22,15 @@ from postgis_sql import (  # noqa: E402
 )
 
 
-RELEASE_COMMIT = "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
-CONTAINER_DIGEST = "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0"
+RELEASE_COMMIT = "3fe554a05b6609bb33b2f99bd26ba4701a55d971"
+CONTAINER_DIGEST = "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c"
 IMAGE_IDENTITY = f"ghcr.io/jortgroen/liander-grid-model-api@{CONTAINER_DIGEST}"
+GRID_CROSSWALK_IMAGE = (
+    "ghcr.io/jortgroen/liander-grid-crosswalk@sha256:"
+    "f17e0a27f665a8885aa1f527359c22889ce5d2e3ead14dc4eb5d0e582154774e"
+)
 MODEL_VERSION = "2.1.0"
-CONTRACT_VERSION = "2.3.0"
+CONTRACT_VERSION = "2.4.0"
 METHOD_VERSION = "2.1.0"
 GRID_DATA_VERSION = "grid-acceptance-version"
 BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
@@ -595,6 +599,7 @@ class GridContractTest(unittest.TestCase):
         ci = (ROOT / "docker-compose.ci.yml").read_text(encoding="utf-8")
         full_grid = (ROOT / "docker-compose.full-grid.yml").read_text(encoding="utf-8")
         self.assertIn(IMAGE_IDENTITY, compose)
+        self.assertIn(GRID_CROSSWALK_IMAGE, compose)
         self.assertIn(RELEASE_COMMIT, compose)
         self.assertIn("--fetch-region", compose)
         self.assertIn("north-holland-towns", compose)
@@ -607,6 +612,11 @@ class GridContractTest(unittest.TestCase):
         self.assertIn("GRID_MODEL_DATA_VOLUME", full_grid)
         self.assertIn("external: true", full_grid)
         self.assertIn("GRID_EXPORT_BBOX: 4.60,52.50,4.98,52.88", compose)
+        self.assertIn("grid-crosswalk-init:", compose)
+        self.assertIn("network_mode: none", compose)
+        self.assertIn("grid-crosswalk-data:/crosswalk:ro", compose)
+        self.assertIn("/crosswalk/alkmaar-cbs-postcode6-2024.geojson", compose)
+        self.assertIn("/crosswalk/alkmaar-buurt-pc6-2025.json", compose)
         grid_service = compose.split("  grid-api:", 1)[1].split("#  ---", 1)[0]
         self.assertNotIn("GEOSERVER_ADMIN", grid_service)
         self.assertNotIn("POSTGRES_PASSWORD", grid_service)
@@ -625,54 +635,54 @@ class GridContractTest(unittest.TestCase):
             "4cf159559528c56ee43ccee79e2d851535761eee0d5aef9580b5204534ff3a12",
         )
 
-    def test_orchestration_fixture_is_the_checked_1483aa_model_fixture(self):
+    def test_orchestration_fixture_is_the_checked_combined_model_fixture(self):
         fixture = (
             ROOT
             / "tests"
             / "fixtures"
             / "grid"
-            / "pc6_1483aa_grid_fixture.json"
+            / "orchestration_1483aa_bu03610709_grid_fixture.json"
         )
         text = fixture.read_text(encoding="utf-8")
         payload = json.loads(text)
         provenance = payload["provenance"]
 
         self.assertEqual(
-            payload["fixture_id"], "pc6-1483aa-provisional-hierarchy-v1"
+            payload["fixture_id"], "orchestration-1483aa-bu03610709-v1"
         )
-        self.assertEqual(provenance["expected_pc6_id"], "1483AA")
+        self.assertFalse(provenance["scientific_recomputation"])
         self.assertEqual(
             provenance["expected_counts"],
             {
-                "buses": 261,
+                "buses": 341,
                 "external_grids": 7,
-                "lines": 119,
+                "lines": 156,
                 "mv_hv_station_connections": 7,
-                "pc6": 1,
-                "switches": 138,
-                "transformers": 3,
+                "pc6": 2,
+                "switches": 180,
+                "transformers": 6,
             },
         )
-        shares = provenance["expected_lv_mv_transformer_shares"]
-        self.assertAlmostEqual(sum(shares.values()), 1.0, places=6)
-        self.assertEqual(provenance["expected_mv_hv_root_bus_id"], "27999")
-        self.assertEqual(provenance["expected_mv_hv_station_name"], "OS OTERLEEK")
         self.assertEqual(
-            {
-                key: value["selected_distance_edges"]
-                for key, value in provenance[
-                    "nearest_electrical_root_evidence"
-                ].items()
-            },
-            {
-                "trafo_MV_LV_1272": 72,
-                "trafo_MV_LV_1418": 78,
-                "trafo_MV_LV_787": 69,
-            },
+            set(provenance["expected_outcomes"]), {"1483AA", "BU03610709"}
+        )
+        for outcome in provenance["expected_outcomes"].values():
+            self.assertAlmostEqual(sum(outcome["lv_mv_shares"].values()), 1.0, places=6)
+        self.assertEqual(
+            provenance["expected_outcomes"]["1483AA"]["mv_hv_root_bus_id"],
+            "27999",
+        )
+        self.assertEqual(
+            provenance["expected_outcomes"]["BU03610709"]["pc6_id"],
+            "1831GD",
+        )
+        self.assertEqual(
+            provenance["crosswalk_artifact_sha256"],
+            "8824d7d4af024a40fb02cdf0762cf97cf1fb00d0bfe9cde8439c67581dba3651",
         )
         self.assertEqual(
             hashlib.sha256(text.encode("utf-8")).hexdigest(),
-            "76064f56b4e6380214ea21686b5f55272cbba41992307d6acbafb19b77dfe061",
+            "778dbcc41216d2ec08400e2c4725564aebb3ff71864c5ad738354c5644cd9af8",
         )
 
     def test_grid_geometry_sql_templates_are_balanced(self):

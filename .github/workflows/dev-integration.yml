@@ -78,6 +78,7 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml stop layer-publisher
           output="$(docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml run --rm --no-deps -e PUBLISH_ONCE=true layer-publisher 2>&1)"
           printf '%s\n' "${output}"
+          grep -Fq "PV layer synchronized: total=66 changed=0 deleted=0" <<<"${output}"
           grep -Fq "grid_lines synchronized: total=34 changed=0 deleted=0" <<<"${output}"
           grep -Fq "grid_transformers synchronized: total=2 changed=0 deleted=0" <<<"${output}"
           grep -Fq "grid_lv_mv_transformer_reach synchronized: total=2 changed=0 deleted=0" <<<"${output}"

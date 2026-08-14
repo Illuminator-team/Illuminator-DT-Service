@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from orchestration import ModelApiClient, OrchestrationError, TransformerProfileOrchestrator
+from orchestration import validate_request_timeout
 
 app = FastAPI()
 
@@ -33,11 +34,27 @@ PC6_GEOMETRY_PATH = Path(
 GRID_API_URL = os.getenv("GRID_API_URL", "http://grid-api:8080")
 CONGESTION_API_URL = os.getenv("CONGESTION_API_URL", "http://congestion-backend:8080")
 CONSUMPTION_API_URL = os.getenv("CONSUMPTION_API_URL", "http://consumption-api:8080")
+CONGESTION_REQUEST_TIMEOUT_SECONDS = validate_request_timeout(
+    os.getenv("CONGESTION_REQUEST_TIMEOUT_SECONDS", "120")
+)
+PV_API_URL = os.getenv("PV_API_URL", "http://pv-api:8000")
+PV_EXPECTED_RELEASE_COMMIT = os.getenv("PV_EXPECTED_RELEASE_COMMIT", "")
+PV_EXPECTED_CONTAINER_IMAGE = os.getenv("PV_EXPECTED_CONTAINER_IMAGE", "")
+PV_EXPECTED_MODEL_VERSION = os.getenv("PV_EXPECTED_MODEL_VERSION", "")
+PV_REQUEST_TIMEOUT_SECONDS = validate_request_timeout(
+    os.getenv("PV_REQUEST_TIMEOUT_SECONDS", "120")
+)
 
 
 class TransformerProfileScenario(BaseModel):
     start: datetime = datetime.fromisoformat("2022-12-31T23:00:00+00:00")
     end: datetime = datetime.fromisoformat("2023-01-01T00:00:00+00:00")
+
+
+class PvTransformerProfileScenario(BaseModel):
+    start: datetime = datetime.fromisoformat("2024-06-01T12:00:00+00:00")
+    end: datetime = datetime.fromisoformat("2024-06-01T13:00:00+00:00")
+
 
 @app.get("/")
 def home():
@@ -88,12 +105,48 @@ def transformer_profiles_pc6(
     orchestrator = TransformerProfileOrchestrator(
         consumption_client=ModelApiClient(CONSUMPTION_API_URL, "consumption"),
         grid_client=ModelApiClient(GRID_API_URL, "grid"),
-        congestion_client=ModelApiClient(CONGESTION_API_URL, "congestion"),
+        congestion_client=ModelApiClient(
+            CONGESTION_API_URL,
+            "congestion",
+            request_timeout=CONGESTION_REQUEST_TIMEOUT_SECONDS,
+        ),
         pc6_geometry_path=PC6_GEOMETRY_PATH,
     )
     try:
         return orchestrator.aggregate_pc6(
             pc6,
+            start=scenario.start,
+            end=scenario.end,
+        )
+    except OrchestrationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.as_detail()) from exc
+
+
+@app.post("/transformer-profiles/pv/cbs-buurt/{buurt_code}")
+def transformer_profiles_pv_buurt(
+    buurt_code: str, scenario: PvTransformerProfileScenario
+):
+    orchestrator = TransformerProfileOrchestrator(
+        consumption_client=ModelApiClient(CONSUMPTION_API_URL, "consumption"),
+        grid_client=ModelApiClient(GRID_API_URL, "grid"),
+        congestion_client=ModelApiClient(
+            CONGESTION_API_URL,
+            "congestion",
+            request_timeout=CONGESTION_REQUEST_TIMEOUT_SECONDS,
+        ),
+        pc6_geometry_path=PC6_GEOMETRY_PATH,
+        pv_client=ModelApiClient(
+            PV_API_URL,
+            "pv",
+            request_timeout=PV_REQUEST_TIMEOUT_SECONDS,
+        ),
+        pv_expected_release_commit=PV_EXPECTED_RELEASE_COMMIT,
+        pv_expected_container_image=PV_EXPECTED_CONTAINER_IMAGE,
+        pv_expected_model_version=PV_EXPECTED_MODEL_VERSION,
+    )
+    try:
+        return orchestrator.aggregate_pv_buurt(
+            buurt_code,
             start=scenario.start,
             end=scenario.end,
         )

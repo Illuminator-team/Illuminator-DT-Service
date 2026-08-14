@@ -20,10 +20,10 @@ WIND_LAYER = "public_wind_turbines"
 EV_LAYER = "public_ev_chargers"
 CONSUMPTION_LAYER = "consumption_electricity_areas"
 PV_FIXTURE = "BU03610302"
-PV_RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
-PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
-GRID_RELEASE_COMMIT = "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
-GRID_CONTAINER_DIGEST = "sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0"
+PV_RELEASE_COMMIT = "4c920c47c34075831a5ad49e9d8f45d9dfac2ae7"
+PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6"
+GRID_RELEASE_COMMIT = "3fe554a05b6609bb33b2f99bd26ba4701a55d971"
+GRID_CONTAINER_DIGEST = "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c"
 GRID_BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
 WIND_FIXTURE = "wind-turbine-2811"
@@ -71,6 +71,17 @@ CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:a111
 CONSUMPTION_FIXTURE = "BU03610308"
 FIXTURE = "1842EM"
 ORCHESTRATION_PC6 = "1483AA"
+PV_ORCHESTRATION_BUURT = "BU03610709"
+PV_ORCHESTRATION_FIXTURE_LV_MV = {
+    "grid-transformer-trafo_MV_LV_1065",
+    "grid-transformer-trafo_MV_LV_1168",
+    "grid-transformer-trafo_MV_LV_183",
+}
+PV_ORCHESTRATION_REAL_LV_MV = {
+    "grid-transformer-trafo_MV_LV_1168",
+    "grid-transformer-trafo_MV_LV_183",
+}
+PV_ORCHESTRATION_MV_HV = "grid-transformer-mv-hv-station-585218"
 
 
 class SmokeClient:
@@ -265,8 +276,14 @@ def check_pv_model_api(client: SmokeClient) -> None:
     require(metadata.get("capacity_method") == "model_estimated", "PV method drift")
 
     layers = client.get_json("/models/pv/layers")
-    require(len(layers.get("layers", [])) == 1, "PV layer contract is missing")
-    require(layers["layers"][0]["layer_id"] == PV_LAYER, "PV layer ID drift")
+    layer_records = layers.get("layers")
+    require(isinstance(layer_records, list), "PV layers contract is missing")
+    capacity_layers = [
+        layer
+        for layer in layer_records
+        if isinstance(layer, dict) and layer.get("layer_id") == PV_LAYER
+    ]
+    require(len(capacity_layers) == 1, "PV capacity layer contract is missing or duplicated")
 
     run = client.post_json(
         "/models/pv/runs",
@@ -762,7 +779,7 @@ def check_ev_layer(client: SmokeClient) -> None:
 def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     root = client.get_json("/models/grid/")
     require(root.get("status") == "alive", "Grid model liveness failed")
-    require(root.get("api_version") == "2.3.0", "Grid API version drift")
+    require(root.get("api_version") == "2.4.0", "Grid API version drift")
 
     readiness = client.get_json("/models/grid/ready", timeout=120)
     require(readiness.get("status") == "ready", "Grid model is not ready")
@@ -777,7 +794,7 @@ def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     )
 
     metadata = client.get_json("/models/grid/metadata")
-    require(metadata.get("contract_version") == "2.3.0", "Grid contract drift")
+    require(metadata.get("contract_version") == "2.4.0", "Grid contract drift")
     require(
         metadata.get("model", {}).get("version") == "2.1.0",
         "Grid model version drift",
@@ -1273,7 +1290,7 @@ def check_congestion_model_api(client: SmokeClient) -> None:
         metadata.get("service") == "congestion-backend",
         "Congestion service identity drift",
     )
-    require(metadata.get("service_version") == "0.2.0", "Congestion version drift")
+    require(metadata.get("service_version") == "0.4.1", "Congestion version drift")
     require(metadata.get("contract_version") == "1.0.0", "Congestion contract drift")
     require(metadata.get("temporal_resolution") == "PT15M", "Congestion resolution drift")
     require(metadata.get("canonical_unit") == "kW", "Congestion unit drift")
@@ -1292,11 +1309,11 @@ def check_congestion_model_api(client: SmokeClient) -> None:
         "Congestion provisional Grid policy drift",
     )
     require(
-        provisional.get("api_contract_version") == "2.3.0"
+        provisional.get("api_contract_version") == "2.4.0"
         and provisional.get("hierarchy_contract_version")
         == "grid-feature-hierarchy-v2"
         and provisional.get("reference_commit")
-        == "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+        == GRID_RELEASE_COMMIT
         and provisional.get("authority_status") == "provisional_estimated",
         "Congestion provisional Grid contract drift",
     )
@@ -1476,11 +1493,114 @@ def check_transformer_profile_orchestration(client: SmokeClient) -> None:
             == "provisional_estimated_electrical_parent"
             and item.get("relation_share") == 1.0
             and item.get("grid_model_git_sha")
-            == "972f9c390e1bf3d86cc87e0b34e500db7e0168a9"
+            == GRID_RELEASE_COMMIT
             and item.get("hierarchy_datacompleetheid") == 1
             for item in hierarchy_contributions
         ),
         "Congestion provisional hierarchy contribution drift",
+    )
+
+
+def check_pv_transformer_profile_orchestration(
+    client: SmokeClient, grid_data_mode: str
+) -> None:
+    response = client.post_json(
+        f"/policy-api/transformer-profiles/pv/cbs-buurt/{PV_ORCHESTRATION_BUURT}",
+        {
+            "start": "2024-06-01T12:00:00Z",
+            "end": "2024-06-01T13:00:00Z",
+        },
+        timeout=300,
+        expected_status=200,
+    )
+    require(response.get("status") == "completed", "PV transformer orchestration failed")
+    require(
+        response.get("feature", {}).get("source_feature_id")
+        == PV_ORCHESTRATION_BUURT,
+        "PV transformer orchestration feature drift",
+    )
+    profile = response.get("profile", {})
+    require(profile.get("model_id") == "pv-map", "PV profile model drift")
+    require(profile.get("producer_model_id") == "pv-capacity-model", "PV producer drift")
+    require(profile.get("model_version") == "0.3.0", "PV profile version drift")
+    require(profile.get("profile_calendar") == 2024, "PV profile calendar drift")
+    require(profile.get("scenario_year") == 2035, "PV scenario year drift")
+    require(
+        profile.get("canonical_sign_convention") == "negative_production",
+        "PV canonical sign convention drift",
+    )
+    require(
+        profile.get("release_commit") == PV_RELEASE_COMMIT
+        and profile.get("container_image") == PV_CONTAINER_IMAGE,
+        "PV orchestration release identity drift",
+    )
+
+    result = response.get("result", {})
+    require(result.get("complete") is True, "PV transformer hierarchy is incomplete")
+    require(
+        result.get("aggregation_mode") == "two_stage_provisional_estimated",
+        "PV provisional aggregation mode drift",
+    )
+    require(
+        isinstance(result.get("overall_datacompleetheid"), int)
+        and not isinstance(result["overall_datacompleetheid"], bool)
+        and 0 <= result["overall_datacompleetheid"] <= 1,
+        "PV aggregate datacompleetheid drift",
+    )
+
+    source_targets = result.get("source_to_lv_mv", {}).get("targets", [])
+    target_targets = result.get("lv_mv_to_mv_hv", {}).get("targets", [])
+    expected_lv_mv = (
+        PV_ORCHESTRATION_FIXTURE_LV_MV
+        if grid_data_mode == "fixture"
+        else PV_ORCHESTRATION_REAL_LV_MV
+    )
+    require(
+        {item.get("transformer_id") for item in source_targets} == expected_lv_mv,
+        "PV LV/MV transformer set drift",
+    )
+    require(
+        len(target_targets) == 1
+        and target_targets[0].get("transformer_id") == PV_ORCHESTRATION_MV_HV,
+        "PV MV/HV transformer target drift",
+    )
+    for target in [*source_targets, *target_targets]:
+        points = target.get("points", [])
+        require(len(points) == 4, "PV transformer PT15M interval count drift")
+        require(
+            all(
+                point.get("demand_power_kw") == 0
+                and point.get("production_power_kw", 0) < 0
+                and point.get("net_power_kw") == point.get("production_power_kw")
+                for point in points
+            ),
+            "PV transformer canonical production values drifted",
+        )
+
+    source_totals = [
+        sum(target["points"][index]["net_power_kw"] for target in source_targets)
+        for index in range(4)
+    ]
+    target_totals = [
+        sum(target["points"][index]["net_power_kw"] for target in target_targets)
+        for index in range(4)
+    ]
+    require(
+        all(abs(source - target) <= 1e-9 for source, target in zip(source_totals, target_totals)),
+        "PV LV/MV and MV/HV aggregate totals diverged",
+    )
+    require(all(value < 0 for value in target_totals), "PV daylight production is empty")
+
+    hierarchy = result.get("hierarchy_resolutions", [])
+    require(
+        len(hierarchy) == 3
+        and all(
+            item.get("status") == "available"
+            and item.get("complete") is True
+            and item.get("target_transformer_id") == PV_ORCHESTRATION_MV_HV
+            for item in hierarchy
+        ),
+        "PV hierarchy contains an unresolved transformer parent",
     )
 
 
@@ -1775,6 +1895,10 @@ def main() -> int:
     wait_until_ready(
         client, "/geoserver/wms?service=WMS&version=1.3.0&request=GetCapabilities"
     )
+    # Publication runs the same heavyweight capacity calculation. Wait for it
+    # before starting the independent API run so acceptance never overlaps two
+    # full PV calculations on a small CI runner.
+    check_pv_layer(client)
     check_pv_model_api(client)
     check_grid_model_api(client, args.expected_grid_data_mode)
     check_wind_model_api(client)
@@ -1783,17 +1907,17 @@ def main() -> int:
     check_consumption_model_api(client)
     check_congestion_model_api(client)
     check_pc6_layer(client)
-    check_pv_layer(client)
     check_grid_layers(client)
     check_wind_layer(client)
     check_heat_layers(client)
     check_ev_layer(client)
     check_consumption_layer(client)
     check_transformer_profile_orchestration(client)
+    check_pv_transformer_profile_orchestration(client, args.expected_grid_data_mode)
     check_dashboard_and_simulation(client)
     print(
-        "Integrated PC6, PV capacity, Grid, Wind, Heat, EV, Consumption, "
-        "and Congestion smoke test passed"
+        "Integrated PC6, PV capacity and transformer profiles, Grid, Wind, "
+        "Heat, EV, Consumption, and Congestion smoke test passed"
     )
     return 0
 

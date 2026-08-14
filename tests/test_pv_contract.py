@@ -12,9 +12,9 @@ sys.path.insert(0, str(ROOT / "layer-publisher"))
 from pc6 import get_layer_config, load_manifest  # noqa: E402
 from pv import fetch_pv_artifact, load_pv_records  # noqa: E402
 
-RELEASE_COMMIT = "bd29351e108d9db002b9e54d5c7fb2356416a306"
-IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710"
-CACHE_IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b"
+RELEASE_COMMIT = "4c920c47c34075831a5ad49e9d8f45d9dfac2ae7"
+IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6"
+CACHE_IMAGE_IDENTITY = "ghcr.io/jortgroen/pv-map-source-cache@sha256:c81dd68136bf6a55d412897980910db1d1062f434fa2b70e8ab53374bd6b1b41"
 QUALITY_METHOD = "pv-datacompleetheid/1.0.0"
 MODEL_VERSION = "0.3.0"
 METADATA_CONTRACT_VERSION = "2.1.0"
@@ -122,14 +122,21 @@ class FakeSession:
                 "metadata_contract_version": METADATA_CONTRACT_VERSION,
                 **identity,
             }),
-            ("GET", "/layers"): FakeResponse(document={"layers": [{
-                "layer_id": "pv_capacity",
-                "crs": "EPSG:4326",
-                "datacompleetheid": {"method_version": QUALITY_METHOD},
-                "model_version": MODEL_VERSION,
-                "metadata_contract_version": METADATA_CONTRACT_VERSION,
-                "attributes": [{"name": "pv_capacity_kwp", "unit": "kWp"}],
-            }]}),
+            ("GET", "/layers"): FakeResponse(document={"layers": [
+                {
+                    "layer_id": "pv_capacity",
+                    "crs": "EPSG:4326",
+                    "datacompleetheid": {"method_version": QUALITY_METHOD},
+                    "model_version": MODEL_VERSION,
+                    "metadata_contract_version": METADATA_CONTRACT_VERSION,
+                    "attributes": [{"name": "pv_capacity_kwp", "unit": "kWp"}],
+                },
+                {
+                    "layer_id": "pv_production_profile",
+                    "temporal_resolution": "PT15M",
+                    "unit": "kW",
+                },
+            ]}),
             ("POST", "/runs"): FakeResponse(document=self.run),
             ("GET", f"/runs/{RUN_ID}"): FakeResponse(document=self.run),
             ("GET", f"/outputs/{OUTPUT_ID}"): FakeResponse(document=self.output),
@@ -170,6 +177,46 @@ class PvContractTest(unittest.TestCase):
         self.assertEqual(records[0].cbs_buurt_code, "BU03610302")
         self.assertGreater(records[0].properties["pv_capacity_kwp"], 0)
         self.assertEqual(len(records[0].source_feature_hash), 64)
+
+    def test_feature_hash_ignores_run_timestamps_but_tracks_semantic_changes(self):
+        original = feature()
+        rerun = feature()
+        for field in (
+            "datacompleetheid_assessed_at",
+            "model_run_at",
+            "output_generated_at",
+            "last_updated",
+        ):
+            rerun["properties"][field] = "2026-08-06T10:00:00+00:00"
+
+        def record(item):
+            return load_pv_records(
+                {"type": "FeatureCollection", "features": [item]},
+                expected_quality_method_version=QUALITY_METHOD,
+                expected_model_version=MODEL_VERSION,
+                expected_metadata_contract_version=METADATA_CONTRACT_VERSION,
+            )[0]
+
+        original_record = record(original)
+        self.assertEqual(
+            original_record.source_feature_hash,
+            record(rerun).source_feature_hash,
+        )
+
+        source_refresh = feature()
+        source_refresh["properties"]["source_retrieved_at"] = (
+            "2026-08-06T10:00:00+00:00"
+        )
+        self.assertNotEqual(
+            original_record.source_feature_hash,
+            record(source_refresh).source_feature_hash,
+        )
+
+        changed_capacity = feature(capacity=43.5)
+        self.assertNotEqual(
+            original_record.source_feature_hash,
+            record(changed_capacity).source_feature_hash,
+        )
 
     def test_geojson_contract_allows_empty_optional_evidence_categories(self):
         item = feature()
@@ -228,6 +275,25 @@ class PvContractTest(unittest.TestCase):
                 session=session,
             )
 
+    def test_http_handoff_requires_one_capacity_layer_among_other_capabilities(self):
+        for mutation in ("missing", "duplicate"):
+            with self.subTest(mutation=mutation):
+                session = FakeSession()
+                layers = session.routes[("GET", "/layers")]._document["layers"]
+                if mutation == "missing":
+                    layers.pop(0)
+                else:
+                    layers.append(copy.deepcopy(layers[0]))
+                with self.assertRaisesRegex(ValueError, "exactly one pv_capacity"):
+                    fetch_pv_artifact(
+                        "http://pv-api:8000",
+                        expected_release_commit=RELEASE_COMMIT,
+                        expected_container_image=IMAGE_IDENTITY,
+                        expected_model_version=MODEL_VERSION,
+                        expected_metadata_contract_version=METADATA_CONTRACT_VERSION,
+                        session=session,
+                    )
+
     def test_compose_keeps_shared_credentials_out_of_the_model(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
         init_service = compose.split("  pv-init:", 1)[1].split("  pv-api:", 1)[0]
@@ -245,6 +311,13 @@ class PvContractTest(unittest.TestCase):
         self.assertNotIn("PV_MODEL_CONFIG_PATH", init_service)
         self.assertNotIn("GEOSERVER_ADMIN", init_service)
         self.assertNotIn("POSTGRES_PASSWORD", init_service)
+        self.assertIn('user: "10001:10001"', init_service)
+        self.assertIn("network_mode: none", init_service)
+        self.assertIn("read_only: true", init_service)
+        self.assertIn("no-new-privileges:true", init_service)
+        self.assertIn('user: "10001:10001"', pv_service)
+        self.assertIn("read_only: true", pv_service)
+        self.assertIn("pv-raw-cache:/app/data/raw:ro", pv_service)
         workflow = (ROOT / ".github" / "workflows" / "dev-integration.yml").read_text(
             encoding="utf-8"
         )

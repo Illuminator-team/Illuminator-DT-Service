@@ -16,9 +16,9 @@ Evidence:
 - failed publisher-SQL run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31107449535>
 - failed publisher-packaging run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31109126622>
 - successful full-stack run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31110105407>
-- PV source commit: `bd29351e108d9db002b9e54d5c7fb2356416a306`
-- PV API image: `ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710`
-- PV source-cache image: `ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b`
+- PV source commit: `4c920c47c34075831a5ad49e9d8f45d9dfac2ae7`
+- PV API image: `ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6`
+- PV production source-cache image: `ghcr.io/jortgroen/pv-map-source-cache@sha256:c81dd68136bf6a55d412897980910db1d1062f434fa2b70e8ab53374bd6b1b41`
 
 PR 14 remained draft and undeployed while its complete gate was failing. The
 final full-stack run passed; the PR can now leave draft state for review, but
@@ -62,6 +62,16 @@ it was not produced by a new live-source download on 6 August. That limitation
 is recorded rather than hidden. A future routine refresh should create the next
 cache image from a clean trusted-network run and repeat the same acceptance.
 
+The later production-profile release replaced that capacity-only deployment
+artifact with a schema `2.0.0` bundle containing 230 source objects and explicit
+`capacity` and `production_profile` capabilities. A genuinely empty volume
+bootstrapped with networking disabled, ran the full 35,136-interval physical
+validation, and wrote a separate identity-bound production marker only after
+that validation passed. A daylight HTTP check for `BU03610302` returned four
+positive PT15M values without runtime network traffic. The PV API remains on a
+2024 reference-weather calendar; it is not combined with Consumption's 2023
+calendar until an explicit calendar-alignment policy is agreed.
+
 The first cache-backed Illuminator run reached the publisher but exposed an
 extra closing parenthesis in the PostGIS bulk-insert template. The next run
 showed that the corrected SQL helper passed host tests but had not been copied
@@ -84,6 +94,11 @@ publisher execution, and cleanup.
 4. **Code and data artifacts have separate lifecycles.** The API image contains
    code and dependencies, not source caches. Record code-image and cache-artifact
    digests separately.
+5. **Diff semantic content, not run envelopes.** PV run and assessment
+   timestamps change on every valid rerun. They remain useful provenance, but
+   including them in the feature hash rewrites every PostGIS row and causes
+   needless downstream mapping work even when capacity, geometry, source
+   freshness, and model identity are unchanged.
 5. **Private package access must be designed explicitly.** Do not assume an
    integration repository's automatic `GITHUB_TOKEN` can pull a private package
    owned elsewhere. One read-only deployment credential may cover multiple

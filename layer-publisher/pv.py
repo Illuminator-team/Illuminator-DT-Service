@@ -71,6 +71,12 @@ PV_EMPTY_STRING_FIELDS = {
     "datacompleetheid_estimated",
     "datacompleetheid_assumed",
 }
+PV_RUN_FIELDS = {
+    "datacompleetheid_assessed_at",
+    "model_run_at",
+    "output_generated_at",
+    "last_updated",
+}
 
 
 @dataclass(frozen=True)
@@ -160,7 +166,12 @@ def _validate_geometry(geometry: object, feature_id: str) -> dict[str, Any]:
 
 
 def _feature_hash(properties: dict[str, Any], geometry: dict[str, Any]) -> str:
-    payload = {"properties": properties, "geometry": geometry}
+    semantic_properties = {
+        field: value
+        for field, value in properties.items()
+        if field not in PV_RUN_FIELDS
+    }
+    payload = {"properties": semantic_properties, "geometry": geometry}
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
@@ -337,9 +348,18 @@ def fetch_pv_artifact(
         "GET /layers",
     )
     layer_records = layers.get("layers")
-    if not isinstance(layer_records, list) or len(layer_records) != 1:
-        raise ValueError("GET /layers must expose exactly one PV layer")
-    layer = _mapping(layer_records[0], "GET /layers layer")
+    if not isinstance(layer_records, list):
+        raise TypeError("GET /layers: layers must be a list")
+    parsed_layers = [
+        _mapping(item, f"GET /layers layers[{index}]")
+        for index, item in enumerate(layer_records)
+    ]
+    capacity_layers = [
+        item for item in parsed_layers if item.get("layer_id") == PV_LAYER_ID
+    ]
+    if len(capacity_layers) != 1:
+        raise ValueError("GET /layers must expose exactly one pv_capacity layer")
+    layer = capacity_layers[0]
     if layer.get("layer_id") != PV_LAYER_ID or layer.get("crs") != "EPSG:4326":
         raise ValueError("GET /layers: PV layer identity or CRS drift")
     if layer.get("model_version") != expected_model_version:

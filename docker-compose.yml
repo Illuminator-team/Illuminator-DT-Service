@@ -1,11 +1,14 @@
 x-pv-image: &pv-image
-  image: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
+  image: ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
 
 x-grid-image: &grid-image
-  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
+  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
+
+x-grid-crosswalk-image: &grid-crosswalk-image
+  image: ghcr.io/jortgroen/liander-grid-crosswalk@sha256:f17e0a27f665a8885aa1f527359c22889ce5d2e3ead14dc4eb5d0e582154774e
 
 x-congestion-image: &congestion-image
-  image: ghcr.io/jortgroen/congestion-backend@sha256:a939d2c991fa56d697cba5a547f758e776d8e2f93d787ed0e8c08b6533f9e5b2
+  image: ghcr.io/jortgroen/congestion-backend@sha256:d44df2b778508747fa2133740130fa97692a1198e5d91f0e14e0474f671eceea
 
 x-wind-image: &wind-image
   image: ghcr.io/jortgroen/wind-turbine-map-api@sha256:820822bfa5300bc8e2126482147b1d430d075c1834bd080999334825caa21828
@@ -23,7 +26,7 @@ x-consumption-cache-image: &consumption-cache-image
   image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:f4bcf9c44b39ee4e1e244502a220296d1a0cdfa9ed2bb21bf2667654f391ef59
 
 x-pv-cache-image: &pv-cache-image
-  image: ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b
+  image: ghcr.io/jortgroen/pv-map-source-cache@sha256:c81dd68136bf6a55d412897980910db1d1062f434fa2b70e8ab53374bd6b1b41
 
 services:
 
@@ -55,7 +58,13 @@ services:
         - PC6_GEOMETRY_PATH=/app/config/alkmaar_energy_map.geojson
         - GRID_API_URL=http://grid-api:8080
         - CONGESTION_API_URL=http://congestion-backend:8080
+        - CONGESTION_REQUEST_TIMEOUT_SECONDS=120
         - CONSUMPTION_API_URL=http://consumption-api:8080
+        - PV_API_URL=http://pv-api:8000
+        - PV_EXPECTED_RELEASE_COMMIT=4c920c47c34075831a5ad49e9d8f45d9dfac2ae7
+        - PV_EXPECTED_CONTAINER_IMAGE=ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
+        - PV_EXPECTED_MODEL_VERSION=0.3.0
+        - PV_REQUEST_TIMEOUT_SECONDS=120
       labels:
         - "traefik.enable=true"
         # path to /policy-api is needed to out frontend to make calls to the backend
@@ -73,6 +82,15 @@ services:
   ## -----------------------------------------------------------
   pv-init:
     <<: *pv-cache-image
+    user: "10001:10001"
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     volumes:
       - pv-raw-cache:/app/data/raw
     restart: "no"
@@ -80,13 +98,21 @@ services:
   pv-api:
     <<: *pv-image
     init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     environment:
       PV_RAW_CACHE_DIR: /app/data/raw
       PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
       PV_OUTPUT_DIR: /app/data/processed/pv_capacity
-      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
+      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
     volumes:
-      - pv-raw-cache:/app/data/raw
+      - pv-raw-cache:/app/data/raw:ro
       - pv-generated-outputs:/app/data/processed/pv_capacity
     depends_on:
       pv-init:
@@ -114,8 +140,31 @@ services:
   ## -------------------------------------------------------------
   ## Initialize and expose the standalone Liander grid model API.
   ## -------------------------------------------------------------
+  grid-crosswalk-init:
+    <<: *grid-crosswalk-image
+    user: "10001:10001"
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - grid-crosswalk-data:/crosswalk
+    restart: "no"
+
   grid-init:
     <<: *grid-image
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     command:
       - python
       - -m
@@ -124,21 +173,35 @@ services:
       - --fetch-region
       - north-holland-towns
       - --pc6-geojson
-      - /inputs/alkmaar_energy_map.geojson
+      - /crosswalk/alkmaar-cbs-postcode6-2024.geojson
+      - --buurt-pc6-crosswalk
+      - /crosswalk/alkmaar-buurt-pc6-2025.json
       - --reuse-ready-cache
     environment:
       GRID_API_DATA_DIR: /data
+      GRID_API_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
     volumes:
       - grid-model-data:/data
-      - ./policy-tool-frontend/data/alkmaar_energy_map.geojson:/inputs/alkmaar_energy_map.geojson:ro
+      - grid-crosswalk-data:/crosswalk:ro
+    depends_on:
+      grid-crosswalk-init:
+        condition: service_completed_successfully
     restart: "no"
 
   grid-api:
     <<: *grid-image
     init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
+      GRID_API_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
     volumes:
       - grid-model-data:/data
     depends_on:
@@ -304,6 +367,11 @@ services:
       CONGESTION_ADAPTER_MODE: http
       GRID_API_BASE_URL: http://grid-api:8080
       CONSUMPTION_API_BASE_URL: http://consumption-api:8080
+      PV_API_BASE_URL: http://pv-api:8000
+      PV_API_TIMEOUT_SECONDS: "120"
+      PV_EXPECTED_RELEASE_COMMIT: 4c920c47c34075831a5ad49e9d8f45d9dfac2ae7
+      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
+      PV_EXPECTED_MODEL_VERSION: 0.3.0
     healthcheck:
       test:
         - CMD
@@ -667,11 +735,11 @@ services:
       PUBLISHER_MANIFEST_PATH: /app/layer-manifest.json
       PC6_SOURCE_PATH: /data/alkmaar_energy_map.geojson
       PV_API_URL: http://pv-api:8000
-      PV_EXPECTED_RELEASE_COMMIT: bd29351e108d9db002b9e54d5c7fb2356416a306
-      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:0fffb8dd6e725956257c4dc51c94225ea7c5745478ed33cf8bce597ee8551710
+      PV_EXPECTED_RELEASE_COMMIT: 4c920c47c34075831a5ad49e9d8f45d9dfac2ae7
+      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
       GRID_API_URL: http://grid-api:8080
-      GRID_EXPECTED_RELEASE_COMMIT: 972f9c390e1bf3d86cc87e0b34e500db7e0168a9
-      GRID_EXPECTED_CONTAINER_DIGEST: sha256:b4f966b393b0f404c5ed58237374fa87acbbd42c1c4f67530b5556bb4ccbb8b0
+      GRID_EXPECTED_RELEASE_COMMIT: 3fe554a05b6609bb33b2f99bd26ba4701a55d971
+      GRID_EXPECTED_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
       GRID_EXPECTED_DATA_MODE: real_source
       GRID_EXPORT_BBOX: 4.60,52.50,4.98,52.88
       WIND_API_URL: http://wind-api:8080
@@ -742,6 +810,7 @@ volumes:
   policy-tool-data:
   pv-raw-cache:
   pv-generated-outputs:
+  grid-crosswalk-data:
   grid-model-data:
   wind-model-data:
   heat-model-data:

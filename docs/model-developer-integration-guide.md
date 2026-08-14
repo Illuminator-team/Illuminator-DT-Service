@@ -341,6 +341,13 @@ result. Omitted policy SHOULD use the strict fail-closed behavior. Missing paths
 ties, mixed policies, incompatible versions, or falsely authoritative markers
 MUST fail rather than silently selecting a target.
 
+Partial source coverage MUST be represented as typed evidence. Keep the full
+source weights and identify the missing object and affected feature; do not
+drop an unavailable row and renormalize the remaining shares. Dataset-level
+metadata MUST report both the intended inventory and the authoritative geometry
+coverage so callers can distinguish a local unavailable feature from a fully
+covered release.
+
 A spatial input used during initialization MUST be validated, normalized, and
 content-hashed. Its source identity, checksum, and feature count MUST participate
 in the initialization fingerprint and reusable-cache check. Changing the input
@@ -359,6 +366,26 @@ assumption set. The project default interval is 15 minutes, represented as
 `PT15M`. Keep profile data separate from feature properties so a later
 SensorThings, OGC API, or time-series storage interface can be added without
 changing feature identity.
+
+A callable profile contract MUST also expose a stable profile ID and version,
+contribution kind, source sign convention, scenario year, profile calendar,
+half-open UTC time window, release commit, digest-qualified container image,
+and artifact checksum. Consumers MUST validate those fields before assigning or
+aggregating a profile. Different profile calendars remain separate until the
+orchestrator applies an explicit, versioned alignment rule.
+
+Production and demand services MAY use different source signs, but the
+aggregation boundary MUST define one canonical convention. The current
+Congestion contract uses positive kW for demand/import and negative kW for
+production/export. Acceptance SHOULD include a nonzero interval so sign
+normalization cannot pass on an all-zero sample.
+
+When a clean deployment depends on a model-owned source-cache image, readiness
+MUST prove the advertised capability rather than only file presence. The cache
+bundle, producer release, config, source identities, file inventory, and hashes
+must be immutable and validated with networking disabled. A production-profile
+ready marker may be written only after the physical profile path succeeds; a
+capacity-only ready marker is not sufficient evidence.
 
 ## 7. Metadata And Provenance
 
@@ -385,6 +412,13 @@ The current RDP registry also uses the compatibility name
 `source_last_updated`. When that field is present, it MUST mean the source
 publisher's last modification or documented source vintage. It MUST NOT contain
 `source_retrieved_at`.
+
+Feature-level change hashes MUST cover semantic values, geometry, model and
+source versions, and source freshness. They MUST exclude run-envelope fields
+such as run/output IDs, `model_run_at`, `output_generated_at`, and equivalent
+assessment timestamps when those fields change on an otherwise identical
+rerun. Keep those fields in provenance, but do not use them alone to trigger a
+republish or downstream remapping.
 
 Metadata MUST also include:
 
