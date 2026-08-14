@@ -598,7 +598,7 @@ class GridContractTest(unittest.TestCase):
         self.assertIn(RELEASE_COMMIT, compose)
         self.assertIn("--fetch-region", compose)
         self.assertIn("north-holland-towns", compose)
-        self.assertNotIn("--allow-fixture", local)
+        self.assertNotIn("GRID_API_ALLOW_FIXTURE", local)
         self.assertNotIn("GRID_EXPECTED_DATA_MODE: fixture", local)
         self.assertIn("--allow-fixture", ci)
         self.assertIn("GRID_EXPECTED_DATA_MODE: fixture", ci)

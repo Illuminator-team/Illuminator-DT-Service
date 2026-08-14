@@ -27,6 +27,8 @@ from pv import (
     fetch_pv_artifact,
     get_pv_readiness_signature,
 )
+from wind import WindArtifact, fetch_wind_artifact, get_wind_readiness_signature
+from wind_postgis import sync_wind_layer
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -79,6 +81,7 @@ EV_CONFIG = get_layer_config(MANIFEST, "layer:ev-map:public-chargers")
 CONSUMPTION_CONFIG = get_layer_config(
     MANIFEST, "layer:consumption-map:electricity-areas"
 )
+WIND_CONFIG = get_layer_config(MANIFEST, "layer:wind-turbine-map:public-turbines")
 PC6_SOURCE_PATH = Path(os.getenv("PC6_SOURCE_PATH", PC6_CONFIG["source"]["path"]))
 PV_API_URL = os.getenv("PV_API_URL", PV_CONFIG["source"]["base_url"]).rstrip("/")
 PV_EXPECTED_RELEASE_COMMIT = os.getenv(
@@ -120,6 +123,20 @@ CONSUMPTION_EXPECTED_CONTAINER_IMAGE = os.getenv(
     "CONSUMPTION_EXPECTED_CONTAINER_IMAGE",
     CONSUMPTION_CONFIG["source"]["container_image"],
 )
+WIND_API_URL = os.getenv(
+    "WIND_API_URL", WIND_CONFIG["source"]["base_url"]
+).rstrip("/")
+WIND_EXPECTED_RELEASE_COMMIT = os.getenv(
+    "WIND_EXPECTED_RELEASE_COMMIT", WIND_CONFIG["source"]["release_commit"]
+)
+WIND_EXPECTED_CONTAINER_IMAGE = os.getenv(
+    "WIND_EXPECTED_CONTAINER_IMAGE",
+    WIND_CONFIG["source"]["container_reported_identity"],
+)
+WIND_EXPECTED_CONTAINER_DIGEST = os.getenv(
+    "WIND_EXPECTED_CONTAINER_DIGEST", WIND_CONFIG["source"]["container_digest"]
+)
+WIND_EXPECTED_DATA_MODE = os.getenv("WIND_EXPECTED_DATA_MODE", "real_source")
 
 GEOSERVER_REST_URL = os.getenv(
     "GEOSERVER_REST_URL", "http://geo:8080/geoserver/rest"
@@ -155,6 +172,8 @@ EV_TABLE = EV_CONFIG["table"]
 EV_LAYER = EV_CONFIG["geoserver_layer"]
 CONSUMPTION_TABLE = CONSUMPTION_CONFIG["table"]
 CONSUMPTION_LAYER = CONSUMPTION_CONFIG["geoserver_layer"]
+WIND_TABLE = WIND_CONFIG["table"]
+WIND_LAYER = WIND_CONFIG["geoserver_layer"]
 SOLAR_TABLE = "solar_panel_layer"
 SOLAR_LAYER = "solar_panel_layer"
 
@@ -717,6 +736,31 @@ def publish_consumption() -> ConsumptionArtifact:
     return artifact
 
 
+def publish_wind() -> WindArtifact:
+    artifact = fetch_wind_artifact(
+        WIND_API_URL,
+        expected_release_commit=WIND_EXPECTED_RELEASE_COMMIT,
+        expected_container_image=WIND_EXPECTED_CONTAINER_IMAGE,
+        expected_container_digest=WIND_EXPECTED_CONTAINER_DIGEST,
+        expected_model_version=WIND_CONFIG["model_version"],
+        expected_contract_version=WIND_CONFIG["metadata_contract_version"],
+        expected_schema_contract_version=WIND_CONFIG["schema_contract_version"],
+        expected_data_mode=WIND_EXPECTED_DATA_MODE,
+    )
+    stats = sync_wind_layer(DB_CONN, table=WIND_TABLE, artifact=artifact)
+    ensure_feature_type(
+        WIND_LAYER, WIND_CONFIG["title"], WIND_CONFIG["source"]["crs"]
+    )
+    LOGGER.info(
+        "Wind layer synchronized: total=%s changed=%s deleted=%s output=%s",
+        stats["total"],
+        stats["changed"],
+        stats["deleted"],
+        artifact.output_id,
+    )
+    return artifact
+
+
 def create_solar_table() -> None:
     with psycopg2.connect(**DB_CONN) as connection:
         with connection.cursor() as cursor:
@@ -789,6 +833,7 @@ def run() -> None:
     publish_grid()
     publish_ev()
     publish_consumption()
+    publish_wind()
     create_solar_table()
     ensure_feature_type(SOLAR_LAYER, "Tutorial Solar Panel", "EPSG:4326")
     try:
@@ -805,6 +850,9 @@ def run() -> None:
     last_ev_signature = get_ev_readiness_signature(EV_API_URL)
     last_consumption_signature = get_consumption_readiness_signature(
         CONSUMPTION_API_URL
+    )
+    last_wind_signature = get_wind_readiness_signature(
+        WIND_API_URL, expected_data_mode=WIND_EXPECTED_DATA_MODE
     )
     while True:
         time.sleep(PUBLISH_INTERVAL_SECONDS)
@@ -852,6 +900,18 @@ def run() -> None:
         except (RuntimeError, ValueError):
             LOGGER.warning(
                 "Could not check or refresh the grid layers",
+                exc_info=True,
+            )
+        try:
+            current_wind_signature = get_wind_readiness_signature(
+                WIND_API_URL, expected_data_mode=WIND_EXPECTED_DATA_MODE
+            )
+            if current_wind_signature != last_wind_signature:
+                publish_wind()
+                last_wind_signature = current_wind_signature
+        except (RuntimeError, ValueError):
+            LOGGER.warning(
+                "Could not check or refresh the Wind turbine layer",
                 exc_info=True,
             )
         try:

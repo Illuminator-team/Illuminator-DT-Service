@@ -13,6 +13,7 @@
     const CONSUMPTION_AREAS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=consumption_electricity_areas&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_LV_MV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lv_mv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_MV_HV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_mv_hv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const WIND_TURBINES_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_wind_turbines&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const FALLBACK_URL = 'data/alkmaar_energy_map.geojson';
     const FALLBACK_QUALITY = Object.freeze({
         datacompleetheid: 2,
@@ -97,6 +98,11 @@
         return { data, source: 'geoserver_wfs', fallbackReason: null };
     }
 
+    async function loadWindTurbinesFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, WIND_TURBINES_WFS_URL, 'Wind turbines GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
     return {
         FALLBACK_QUALITY,
         FALLBACK_URL,
@@ -107,6 +113,7 @@
         GRID_MV_HV_REACH_WFS_URL,
         GRID_TRANSFORMERS_WFS_URL,
         PV_WFS_URL,
+        WIND_TURBINES_WFS_URL,
         WFS_URL,
         addFallbackQuality,
         loadGridLinesFeatureCollection,
@@ -117,6 +124,7 @@
         loadEvChargersFeatureCollection,
         loadPc6FeatureCollection,
         loadPvFeatureCollection,
+        loadWindTurbinesFeatureCollection,
         validateFeatureCollection
     };
 }));

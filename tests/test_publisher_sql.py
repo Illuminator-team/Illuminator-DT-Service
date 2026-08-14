@@ -18,6 +18,8 @@ class PublisherSqlTest(unittest.TestCase):
         self.assertIn("consumption.py", dockerfile)
         self.assertIn("ev.py", dockerfile)
         self.assertIn("model_postgis.py", dockerfile)
+        self.assertIn("wind.py", dockerfile)
+        self.assertIn("wind_postgis.py", dockerfile)
 
     def test_multipolygon_values_template_is_balanced(self):
         template = values_template(2)
@@ -29,6 +31,18 @@ class PublisherSqlTest(unittest.TestCase):
         )
         self.assertEqual(template.count("("), template.count(")"))
         self.assertEqual(template.count("%s"), 3)
+
+
+    def test_point_values_template_is_balanced(self):
+        template = point_values_template(3)
+
+        self.assertEqual(
+            template,
+            "(%s,%s,%s,ST_CollectionExtract(ST_MakeValid("
+            "ST_SetSRID(ST_GeomFromGeoJSON(%s),4326)),1))",
+        )
+        self.assertEqual(template.count("("), template.count(")"))
+        self.assertEqual(template.count("%s"), 4)
 
     def test_values_template_rejects_missing_scalar_values(self):
         with self.assertRaisesRegex(ValueError, "must be positive"):

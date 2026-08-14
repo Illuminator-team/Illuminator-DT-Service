@@ -16,6 +16,9 @@ x-consumption-image: &consumption-image
 x-consumption-cache-image: &consumption-cache-image
   image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:f4bcf9c44b39ee4e1e244502a220296d1a0cdfa9ed2bb21bf2667654f391ef59
 
+x-wind-image: &wind-image
+  image: ghcr.io/jortgroen/wind-turbine-map-api@sha256:820822bfa5300bc8e2126482147b1d430d075c1834bd080999334825caa21828
+
 x-pv-cache-image: &pv-cache-image
   image: ghcr.io/jortgroen/pv-map-source-cache@sha256:e432f76ad7b6dfd67bb55c52445d985027c3a87f3de6e5502bedb1c236c8620b
 
@@ -156,6 +159,68 @@ services:
       - "traefik.http.middlewares.grid-api-strip.stripprefix.prefixes=/models/grid"
       - "traefik.http.routers.grid-api.middlewares=grid-api-strip"
       - "traefik.http.services.grid-api.loadbalancer.server.port=8080"
+    restart: unless-stopped
+
+  ## -------------------------------------------------------------
+  ## Initialize and expose the standalone Wind turbine model API.
+  ## -------------------------------------------------------------
+  wind-init:
+    <<: *wind-image
+    user: "10001:10001"
+    command:
+      - python
+      - -m
+      - wind_turbine_map.api.initialize
+      - --mode
+      - real
+    environment:
+      WIND_API_DATA_DIR: /data
+    volumes:
+      - wind-model-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  wind-api:
+    <<: *wind-image
+    user: "10001:10001"
+    environment:
+      WIND_API_DATA_DIR: /data
+    volumes:
+      - wind-model-data:/data
+    depends_on:
+      wind-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8080/ready', timeout=3); assert response.status == 200"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 20
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.wind-api.rule=Host(`reformers01.ewi.tudelft.nl`) && PathPrefix(`/models/wind`)"
+      - "traefik.http.routers.wind-api.entrypoints=web,websecure"
+      - "traefik.http.routers.wind-api.tls=true"
+      - "traefik.http.middlewares.wind-api-strip.stripprefix.prefixes=/models/wind"
+      - "traefik.http.routers.wind-api.middlewares=wind-api-strip"
+      - "traefik.http.services.wind-api.loadbalancer.server.port=8080"
     restart: unless-stopped
 
   ## ----------------------------------------------------------------
@@ -552,6 +617,11 @@ services:
       CONSUMPTION_API_URL: http://consumption-api:8080
       CONSUMPTION_EXPECTED_RELEASE_COMMIT: e5f44368b01bee9f4a77a409e6894f22f57f9684
       CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
+      WIND_API_URL: http://wind-api:8080
+      WIND_EXPECTED_RELEASE_COMMIT: b89bd49c717a1e301954aa0b8c1bdb98a91f8d44
+      WIND_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/wind-turbine-map-api:sha-b89bd49c717a1e301954aa0b8c1bdb98a91f8d44
+      WIND_EXPECTED_CONTAINER_DIGEST: sha256:820822bfa5300bc8e2126482147b1d430d075c1834bd080999334825caa21828
+      WIND_EXPECTED_DATA_MODE: real_source
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
@@ -569,6 +639,8 @@ services:
       ev-api:
         condition: service_healthy
       consumption-api:
+        condition: service_healthy
+      wind-api:
         condition: service_healthy
     networks:
       - default
@@ -604,3 +676,4 @@ volumes:
   grid-model-data:
   ev-generated-outputs:
   consumption-model-data:
+  wind-model-data:

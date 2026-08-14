@@ -13,8 +13,10 @@ let pc6Layer;
 let pvLayer;
 let evChargersLayer;
 let consumptionAreasLayer;
+let windTurbinesLayer;
 let evChargersLayerSource = 'loading';
 let consumptionAreasLayerSource = 'loading';
+let windTurbinesLayerSource = 'loading';
 let gridLineLayers = {};
 let gridTransformerLayers = {};
 let gridLvMvReachLayer;
@@ -188,6 +190,17 @@ function consumptionAreaStyle(feature) {
     };
 }
 
+function windTurbineStyle(feature) {
+    const capacity = Number(feature.properties.capacity_kw || 0);
+    return {
+        radius: Math.max(6, Math.min(10, 5 + capacity / 800)),
+        color: '#ffffff',
+        weight: 2,
+        fillColor: '#16856b',
+        fillOpacity: 0.95
+    };
+}
+
 function evChargerStyle(feature) {
     const maximumPower = Number(feature.properties.max_power_kw || 0);
     return {
@@ -250,6 +263,8 @@ function updateLayerStatus(layerName, source, fallbackReason = null) {
         evChargersLayerSource = source;
     } else if (layerName === 'consumption_areas') {
         consumptionAreasLayerSource = source;
+    } else if (layerName === 'public_wind_turbines') {
+        windTurbinesLayerSource = source;
     } else if (Object.hasOwn(gridLayerSources, layerName)) {
         gridLayerSources[layerName] = source;
     } else {
@@ -270,7 +285,8 @@ function refreshLayerStatus() {
         pv_capacity: pvLayerSource,
         ev_chargers: evChargersLayerSource,
         consumption_areas: consumptionAreasLayerSource,
-        grid_network: getGridNetworkSource()
+        grid_network: getGridNetworkSource(),
+        public_wind_turbines: windTurbinesLayerSource
     };
     renderLayerStatus(sources[activeLayer]);
 }
@@ -282,12 +298,13 @@ function updateLayerQualitySummary() {
     const isEv = currentMetric === 'ev_chargers';
     const isConsumption = currentMetric === 'consumption_areas';
     const isGrid = currentMetric === 'grid_network';
-    label.textContent = isGrid
+    const isWind = currentMetric === 'public_wind_turbines';
+    label.textContent = (isGrid || isWind)
         ? 'Datacompleetheid per component'
         : isEv ? 'Datacompleetheid 0-2/3'
             : isConsumption ? 'Datacompleetheid 1-2/3'
                 : isPvCapacity ? 'Datacompleetheid 1-2/3' : 'Datacompleetheid 2/3';
-    meter.title = (isPvCapacity || isGrid || isEv || isConsumption)
+    meter.title = (isPvCapacity || isGrid || isWind || isEv || isConsumption)
         ? 'Feature-level confidence varies across this layer'
         : 'Layer-level confidence';
 }
@@ -350,7 +367,8 @@ function setActiveMapLayer(fitActive = false) {
         pc6: pc6Layer,
         pv_capacity: pvLayer,
         ev_chargers: evChargersLayer,
-        consumption_areas: consumptionAreasLayer
+        consumption_areas: consumptionAreasLayer,
+        public_wind_turbines: windTurbinesLayer
     };
     Object.entries(layers).forEach(([layerName, layer]) => {
         if (layer && layerName !== activeLayerName && map.hasLayer(layer)) {
@@ -595,6 +613,30 @@ async function loadMap() {
         control.parentElement.title = 'MV/HV transformer reach layer is unavailable';
     }
 
+    try {
+        const result = await Pc6MapData.loadWindTurbinesFeatureCollection(fetch);
+        windTurbinesLayer = L.geoJSON(result.data, {
+            pointToLayer: (feature, latlng) => L.circleMarker(latlng, windTurbineStyle(feature)),
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 4 }),
+                    mouseout: (event) => event.target.setStyle(windTurbineStyle(feature)),
+                    click: (event) => {
+                        updateWindTurbineSidePanel(feature.properties);
+                        map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 15));
+                    }
+                });
+            }
+        });
+        updateLayerStatus('public_wind_turbines', result.source);
+    } catch (error) {
+        console.error('Wind turbine data load failed:', error);
+        updateLayerStatus('public_wind_turbines', 'failed', error.message);
+        const control = document.getElementById('r-wind-turbines');
+        control.disabled = true;
+        control.parentElement.title = 'Wind turbine layer is unavailable';
+    }
+
     setActiveMapLayer();
 }
 
@@ -659,6 +701,11 @@ function updateLegend() {
                 const label = `${(grade / 1000000).toLocaleString('nl-NL')}${upper ? `-${upper / 1000000}` : '+'} M`;
                 div.innerHTML += `<i style="background:${getConsumptionColor(grade + 1)}"></i> ${label}<br>`;
             });
+            return div;
+        }
+        if (currentMetric === 'public_wind_turbines') {
+            div.innerHTML = '<div class="legend-title">WIND TURBINES</div>';
+            div.innerHTML += '<i style="background:#16856b"></i> Published position and capacity<br>';
             return div;
         }
         const isPvCapacity = currentMetric === 'pv_capacity';
@@ -1163,6 +1210,49 @@ function updateGridReachSidePanel(prop, level) {
             ${escapeHtml(level)} shares are direct fractions of the original PC6 polygon.<br>
             Grid data: ${escapeHtml(prop.grid_data_version)}<br>
             <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function updateWindTurbineSidePanel(prop) {
+    const capacity = prop.capacity_kw == null
+        ? 'Unknown'
+        : `${Number(prop.capacity_kw).toLocaleString('nl-NL')} kW`;
+    const annualEnergy = prop.modeled_annual_energy_kwh == null
+        ? 'Not available'
+        : `${Math.round(Number(prop.modeled_annual_energy_kwh)).toLocaleString('nl-NL')} kWh`;
+    const capacityFactor = prop.modeled_capacity_factor == null
+        ? 'Not available'
+        : `${(Number(prop.modeled_capacity_factor) * 100).toFixed(1)}%`;
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">Wind turbine</div>
+        <div class="feature-identifier">${escapeHtml(prop.feature_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Published capacity</div>
+                    <div class="data-value">${escapeHtml(capacity)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Hub / rotor</div>
+                    <div class="data-value">${escapeHtml(prop.hub_height_m ?? '?')} / ${escapeHtml(prop.rotor_diameter_m ?? '?')} m</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Provisional 2025 energy</div>
+                    <div class="data-value compact-value">${escapeHtml(annualEnergy)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Capacity factor</div>
+                    <div class="data-value">${escapeHtml(capacityFactor)}</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>WIND INVENTORY AND PROVISIONAL MODEL</strong><br>
+            Source period: ${escapeHtml(prop.source_reference_period || 'Unknown')}<br>
+            Profile transport: ${prop.profile_transport_available ? 'Available' : 'Not yet available'}<br>
+            <a href="/models/wind/metadata" target="_blank" rel="noopener">Model metadata</a>
         </div>
     `;
 }

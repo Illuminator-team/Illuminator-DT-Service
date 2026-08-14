@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Validate legacy, PV, Grid, Consumption, and EV contracts
+      - name: Validate legacy, PV, Grid, Wind, Consumption, and EV contracts
         run: python -m unittest discover -s tests -p "test_*.py"
 
       - name: Test dashboard layer adapters
@@ -80,6 +80,7 @@ jobs:
           grep -Fq "grid_transformers synchronized: total=2 changed=0 deleted=0" <<<"${output}"
           grep -Fq "grid_lv_mv_transformer_reach synchronized: total=2 changed=0 deleted=0" <<<"${output}"
           grep -Fq "grid_mv_hv_transformer_reach synchronized: total=2 changed=0 deleted=0" <<<"${output}"
+          grep -Fq "Wind layer synchronized: total=4 changed=0 deleted=0" <<<"${output}"
           grep -Fq "EV charger layer synchronized: total=784 changed=0 deleted=0" <<<"${output}"
           grep -Fq "Consumption area layer synchronized: total=67 changed=0 deleted=0" <<<"${output}"
           docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml up -d layer-publisher
