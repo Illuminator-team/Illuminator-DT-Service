@@ -622,7 +622,7 @@ def check_heat_layers(client: SmokeClient) -> None:
         require(image.startswith(b"\x89PNG") and len(image) > 500, f"{layer_id} WMS map is empty")
 
 
-+def check_ev_model_api(client: SmokeClient) -> None:
+def check_ev_model_api(client: SmokeClient) -> None:
     readiness = client.get_json("/models/ev/ready", timeout=120)
     require(readiness.get("ready") is True, "EV model is not ready")
     require(readiness.get("state") == "ready", "EV readiness state drift")
