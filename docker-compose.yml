@@ -542,7 +542,7 @@ services:
       - timescale-data:/var/lib/postgresql/data
     restart: always
     ports:
-      - 5432:5432  # only for debugging
+      - "127.0.0.1:5432:5432"  # local diagnostics or an SSH tunnel only
 
   ## ------------------------------------------------------------------------
   ## This micro-service defines the database schema used by the timescale DB.
@@ -660,7 +660,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8080:8080"  # expose dashboard port
+      - "127.0.0.1:8080:8080"  # local diagnostics or an SSH tunnel only
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./certs/config.yml:/etc/traefik/dynamic_conf.yml:ro
@@ -797,7 +797,7 @@ services:
       - RI_REDIS_PASSWORD0=${REDIS_PASSWORD}
       - RI_REDIS_ALIAS0=Tutorial Redis Database
     ports:
-      - 5540:5540
+      - "127.0.0.1:5540:5540"
     depends_on:
       - redis
 

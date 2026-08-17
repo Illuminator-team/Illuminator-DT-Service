@@ -1,11 +1,18 @@
-name: Dev integration
+name: Integration and release gate
 
 on:
   pull_request:
+    branches: [dev, main]
+  push:
     branches: [dev]
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   model-layer-integration:
@@ -14,6 +21,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Enforce dev-to-main release flow
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        shell: bash
+        run: |
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "::error::Release pull requests to main must originate from dev"
+            exit 1
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -63,7 +79,14 @@ jobs:
             -keyout certs/ci-local.key -out certs/ci-local.crt \
             -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 
-      - name: Validate Docker Compose configuration
+      - name: Validate production Compose contract
+        shell: bash
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml config --format json \
+            | python scripts/check_release_compose.py
+
+      - name: Validate CI fixture Compose configuration
         run: docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml config --quiet
 
       - name: Start integrated stack
