@@ -158,10 +158,20 @@ With the stack running, execute the integrated smoke test:
 python tests/smoke_stack.py --base-url http://127.0.0.1
 ```
 
+## Production Release
+
+Promotion from `dev` to `main` and deployment to the TU Delft server are
+separate, owner-approved actions. Follow the
+[RDP deployment runbook](docs/rdp-deployment-runbook.md) to validate the exact
+production Compose configuration, back up the current deployment, run the
+real-source acceptance checks, and preserve a rollback path. The workflow never
+deploys automatically.
+
 ## Documentation
 
 - [Future model integration plan](docs/model-integration-plan.md)
 - [Model developer integration guide](docs/model-developer-integration-guide.md)
 - [PV integration lessons learned](docs/pv-integration-lessons-learned.md)
+- [RDP deployment runbook](docs/rdp-deployment-runbook.md)
 - [Wind turbine integration](docs/wind-integration.md)
 - [Heat network integration](docs/heat-integration.md)
