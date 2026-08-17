@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const mapData = require('../policy-tool-frontend/map-data.js');
+const heatVisualization = require('../policy-tool-frontend/heat-visualization.js');
 
 function response(ok, status, payload) {
     return {
@@ -300,6 +301,88 @@ test('accepts an empty Heat layer but never substitutes another model layer', as
     );
 });
 
+test('styles Heat evidence by meaning instead of using one color per layer', () => {
+    const lowShare = heatVisualization.layerStyle(
+        'reported_neighbourhood_heat_consumers',
+        { properties: { reported_connected_share_pct: 8 } }
+    );
+    const highShare = heatVisualization.layerStyle(
+        'reported_neighbourhood_heat_consumers',
+        { properties: { reported_connected_share_pct: 78 } }
+    );
+    assert.notEqual(lowShare.fillColor, highShare.fillColor);
+    assert.equal(lowShare.color, '#7f2704');
+
+    const strongSupported = heatVisualization.layerStyle(
+        'inferred_pc6_heat_consumers',
+        { properties: {
+            allocated_connected_dwellings_est: 18,
+            inference_class: 'strong_low_gas_normal_electricity',
+            liander_crosscheck_status: 'supports_low_active_gas'
+        } }
+    );
+    assert.equal(strongSupported.fillColor, '#084594');
+    assert.equal(strongSupported.color, '#238b45');
+    assert.equal(strongSupported.dashArray, null);
+
+    const signalOnly = heatVisualization.layerStyle(
+        'inferred_pc6_heat_consumers',
+        { properties: {
+            allocated_connected_dwellings_est: 0,
+            inference_class: 'moderate_low_gas_normal_electricity',
+            liander_crosscheck_status: 'conflicts_active_gas_connections'
+        } }
+    );
+    assert.equal(signalOnly.fillColor, '#fdbb30');
+    assert.equal(signalOnly.color, '#cb181d');
+
+    const excluded = heatVisualization.layerStyle(
+        'inferred_pc6_heat_consumers',
+        { properties: {
+            inference_class: 'excluded_possible_electric_heating',
+            liander_crosscheck_status: 'inconclusive_privacy_aggregation'
+        } }
+    );
+    assert.equal(excluded.fillColor, '#9e9ac8');
+    assert.equal(excluded.dashArray, '5 4');
+
+    const development = heatVisualization.layerStyle(
+        'registered_heat_network_developments'
+    );
+    assert.equal(development.color, '#54278f');
+    assert.equal(development.dashArray, '8 6');
+    assert.equal(
+        heatVisualization.layerStyle('documented_actual_heat_sources').fillColor,
+        '#cb181d'
+    );
+    assert.equal(
+        heatVisualization.layerStyle('documented_large_heat_consumers').fillColor,
+        '#2171b5'
+    );
+    assert.equal(
+        heatVisualization.layerStyle('potential_heat_sources').fillColor,
+        '#238b45'
+    );
+});
+
+test('presents Heat as one model with independently visible evidence layers', () => {
+    const frontendDirectory = path.join(__dirname, '..', 'policy-tool-frontend');
+    const html = fs.readFileSync(path.join(frontendDirectory, 'index.html'), 'utf8');
+    const script = fs.readFileSync(path.join(frontendDirectory, 'script.js'), 'utf8');
+
+    assert.match(html, /value="heat_network" id="r-heat-network"/);
+    assert.match(html, /id="heat-visibility"/);
+    assert.match(html, /id="heat-evidence-summary"/);
+    assert.doesNotMatch(html, /id="heat-layer-select"/);
+    mapData.HEAT_LAYER_IDS.forEach((layerId) => {
+        assert.match(html, new RegExp(`data-heat-layer="${layerId}" checked`));
+    });
+    assert.match(script, /function applyHeatVisibility\(fit = false\)/);
+    assert.match(script, /function updateHeatEvidenceSummary\(\)/);
+    assert.match(script, /currentMetric === 'heat_network'/);
+    assert.match(script, /HeatVisualization\.layerStyle/);
+});
+
 test('grid details leave the persistent congestion controls in place', () => {
     const frontendDirectory = path.join(__dirname, '..', 'policy-tool-frontend');
     const html = fs.readFileSync(path.join(frontendDirectory, 'index.html'), 'utf8');
@@ -323,7 +406,8 @@ test('grid details leave the persistent congestion controls in place', () => {
     assert.match(script, /function applyGridVisibility\(fit = false\)/);
     assert.match(html, /id="r-wind-turbines"/);
     assert.match(html, /id="r-ev-chargers"/);
-    assert.match(html, /id="heat-layer-select"/);
+    assert.match(html, /id="r-heat-network"/);
+    assert.match(html, /id="heat-visibility"/);
     mapData.HEAT_LAYER_IDS.forEach((layerId) => assert.match(html, new RegExp(layerId)));
     assert.match(script, /function updateGridLineSidePanel\(prop\)/);
     assert.match(script, /function updateGridTransformerSidePanel\(prop\)/);

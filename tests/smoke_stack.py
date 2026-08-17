@@ -1717,9 +1717,15 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     ):
         require(control_id in dashboard, f"Dashboard Grid visibility control is missing: {control_id!r}")
     require(b"r-wind-turbines" in dashboard, "Dashboard Wind layer control is missing")
-    require(b"heat-layer-select" in dashboard, "Dashboard Heat layer selector is missing")
+    require(b"r-heat-network" in dashboard, "Dashboard Heat model control is missing")
+    require(b"heat-visibility" in dashboard, "Dashboard Heat visibility controls are missing")
+    require(b"heat-evidence-summary" in dashboard, "Dashboard Heat evidence summary is missing")
+    require(
+        b"heat-visualization.js" in dashboard,
+        "Dashboard does not load its Heat visualization adapter",
+    )
     for layer_id in HEAT_LAYERS:
-        require(layer_id.encode() in dashboard, f"Dashboard {layer_id} option is missing")
+        require(layer_id.encode() in dashboard, f"Dashboard {layer_id} control is missing")
     require(b"scenario-panel" in dashboard, "Persistent scenario controls are missing")
 
     status, script, _ = client.get("/dashboard/map-data.js")
@@ -1739,6 +1745,19 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     for layer_id in HEAT_LAYERS:
         require(layer_id.encode() in script, f"Dashboard is not configured for {layer_id}")
     require(b"alkmaar_energy_map.geojson" in script, "Static fallback is missing")
+
+    status, heat_visualization, _ = client.get("/dashboard/heat-visualization.js")
+    require(status == 200, "Heat visualization adapter did not load")
+    for evidence_field in (
+        b"reported_connected_share_pct",
+        b"inference_class",
+        b"allocated_connected_dwellings_est",
+        b"liander_crosscheck_status",
+    ):
+        require(
+            evidence_field in heat_visualization,
+            f"Heat visualization does not use evidence field {evidence_field!r}",
+        )
 
     api = client.get_json("/policy-api/")
     require(api.get("message") == "Policy Tool API is active", "Policy API is unhealthy")
