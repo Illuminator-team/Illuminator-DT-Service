@@ -190,6 +190,10 @@ input[type="range"].side-slider {
 #controls { 
     top: 80px;  /* Pushed down to clear the search box */
     left: 60px; 
+    width: 244px;
+    max-height: calc(100vh - 108px);
+    overflow-y: auto;
+    box-sizing: border-box;
 }
 
 .grid-visibility {
@@ -265,35 +269,51 @@ input[type="range"].side-slider {
     background: rgba(22, 132, 91, 0.2);
 }
 
+.heat-neighbourhood-swatch {
+    border: 1px solid #7f2704;
+    background: linear-gradient(90deg, #fff7bc, #fd8d3c, #800026);
+}
+
+.heat-pc6-swatch {
+    border: 2px solid #238b45;
+    background: #2171b5;
+}
+
+.heat-development-swatch {
+    border: 2px dashed #54278f;
+    background: rgba(117, 107, 177, 0.18);
+}
+
+.heat-actual-swatch { background: #cb181d; }
+.heat-consumer-swatch { background: #2171b5; }
+.heat-potential-swatch { background: #238b45; }
+
 .swatch-lv { background: #c43d4f; }
 .swatch-mv { background: #2378a7; }
 .swatch-hv { background: #24292e; }
 .swatch-lv-mv { background: #7651a8; }
 .swatch-mv-hv { background: #e58c2c; }
 
-.layer-select-item {
+.heat-evidence-summary {
     display: grid;
-    gap: 5px;
+    gap: 3px;
     margin-top: 10px;
     padding-top: 9px;
     border-top: 1px solid var(--border-muted);
-}
-
-.layer-select-item label {
     color: var(--text-muted);
     font-size: 9px;
-    font-weight: 800;
+    line-height: 1.35;
 }
 
-.layer-select-item select {
-    width: 100%;
-    min-width: 0;
-    padding: 6px 24px 6px 7px;
-    border: 1px solid var(--border-muted);
-    border-radius: 2px;
-    background: #ffffff;
+.heat-evidence-summary[hidden] {
+    display: none;
+}
+
+.heat-evidence-summary strong {
+    margin-bottom: 2px;
     color: var(--text-main);
-    font: inherit;
+    font-size: 9px;
+    text-transform: uppercase;
 }
 
 .layer-health {
@@ -556,6 +576,31 @@ button {
     border-radius: 50%;
 }
 
+.info.legend .heat-gradient {
+    width: 72px;
+    background: linear-gradient(90deg, #fff7bc, #fd8d3c, #800026);
+}
+
+.info.legend .heat-outline-support {
+    border: 2px solid #238b45;
+    background: transparent;
+}
+
+.info.legend .heat-outline-conflict {
+    border: 2px solid #cb181d;
+    background: transparent;
+}
+
+.info.legend .heat-outline-inconclusive {
+    border: 2px dashed #737373;
+    background: transparent;
+}
+
+.info.legend .heat-development {
+    border: 2px dashed #54278f;
+    background: rgba(117, 107, 177, 0.18);
+}
+
 .compact-value {
     overflow-wrap: anywhere;
     font-size: 12px;
@@ -633,6 +678,7 @@ button {
 
     #controls {
         left: 16px;
+        width: auto;
         max-width: calc(58vw - 32px);
     }
 }

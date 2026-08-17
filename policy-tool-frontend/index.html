@@ -48,17 +48,9 @@
             <input type="radio" name="layer" value="public_wind_turbines" id="r-wind-turbines">
             <label for="r-wind-turbines">WIND TURBINES</label>
         </div>
-        <div class="layer-select-item">
-            <label for="heat-layer-select">HEAT EVIDENCE</label>
-            <select id="heat-layer-select">
-                <option value="" selected>SELECT LAYER</option>
-                <option value="reported_neighbourhood_heat_consumers">Neighbourhood consumers</option>
-                <option value="inferred_pc6_heat_consumers">Inferred PC6 consumers</option>
-                <option value="registered_heat_network_developments">Registered developments</option>
-                <option value="documented_actual_heat_sources">Actual heat sources</option>
-                <option value="documented_large_heat_consumers">Large heat consumers</option>
-                <option value="potential_heat_sources">Potential heat sources</option>
-            </select>
+        <div class="radio-item">
+            <input type="radio" name="layer" value="heat_network" id="r-heat-network">
+            <label for="r-heat-network">HEAT NETWORK EVIDENCE</label>
         </div>
     </div>
     <fieldset id="grid-visibility" class="grid-visibility" hidden>
@@ -99,6 +91,45 @@
             <span>MV/HV reach (PC6 shares)</span>
         </label>
     </fieldset>
+    <fieldset id="heat-visibility" class="grid-visibility heat-visibility" hidden>
+        <legend>Heat evidence visibility</legend>
+        <label class="visibility-item" for="heat-reported-neighbourhoods">
+            <input type="checkbox" id="heat-reported-neighbourhoods" data-heat-layer="reported_neighbourhood_heat_consumers" checked>
+            <span class="area-swatch heat-neighbourhood-swatch" aria-hidden="true"></span>
+            <span>Neighbourhood connection share</span>
+        </label>
+        <label class="visibility-item" for="heat-inferred-pc6">
+            <input type="checkbox" id="heat-inferred-pc6" data-heat-layer="inferred_pc6_heat_consumers" checked>
+            <span class="area-swatch heat-pc6-swatch" aria-hidden="true"></span>
+            <span>PC6 allocation evidence</span>
+        </label>
+        <label class="visibility-item" for="heat-developments">
+            <input type="checkbox" id="heat-developments" data-heat-layer="registered_heat_network_developments" checked>
+            <span class="area-swatch heat-development-swatch" aria-hidden="true"></span>
+            <span>Network developments</span>
+        </label>
+        <label class="visibility-item" for="heat-actual-sources">
+            <input type="checkbox" id="heat-actual-sources" data-heat-layer="documented_actual_heat_sources" checked>
+            <span class="point-swatch heat-actual-swatch" aria-hidden="true"></span>
+            <span>Actual heat sources</span>
+        </label>
+        <label class="visibility-item" for="heat-large-consumers">
+            <input type="checkbox" id="heat-large-consumers" data-heat-layer="documented_large_heat_consumers" checked>
+            <span class="point-swatch heat-consumer-swatch" aria-hidden="true"></span>
+            <span>Large heat consumers</span>
+        </label>
+        <label class="visibility-item" for="heat-potential-sources">
+            <input type="checkbox" id="heat-potential-sources" data-heat-layer="potential_heat_sources" checked>
+            <span class="point-swatch heat-potential-swatch" aria-hidden="true"></span>
+            <span>Potential heat sources</span>
+        </label>
+    </fieldset>
+    <div id="heat-evidence-summary" class="heat-evidence-summary" hidden aria-live="polite">
+        <strong>Alkmaar evidence snapshot</strong>
+        <span id="heat-summary-consumers">Loading neighbourhood evidence</span>
+        <span id="heat-summary-pc6">Loading PC6 evidence</span>
+        <span id="heat-summary-crosscheck">Loading Liander cross-checks</span>
+    </div>
     <div class="layer-health" aria-live="polite">
         <div class="layer-source-row">
             <span class="source-indicator" aria-hidden="true"></span>
@@ -164,6 +195,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="map-data.js"></script>
+    <script src="heat-visualization.js"></script>
     <script src="script.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>

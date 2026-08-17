@@ -20,6 +20,7 @@ let windTurbinesLayer;
 let evChargersLayer;
 let consumptionAreasLayer;
 const heatMapLayers = {};
+let heatHasFit = false;
 let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
 let pvLayerSource = 'loading';
@@ -40,7 +41,6 @@ const heatLayerSources = Object.fromEntries(
 const HEAT_LAYER_UI = {
     reported_neighbourhood_heat_consumers: {
         title: 'Neighbourhood heat consumers',
-        color: '#b64b4b',
         geometry: 'area',
         fields: [
             ['area_name', 'Area', ''],
@@ -51,7 +51,6 @@ const HEAT_LAYER_UI = {
     },
     inferred_pc6_heat_consumers: {
         title: 'Inferred PC6 heat consumers',
-        color: '#d47b51',
         geometry: 'area',
         fields: [
             ['postcode6', 'PC6', ''],
@@ -62,7 +61,6 @@ const HEAT_LAYER_UI = {
     },
     registered_heat_network_developments: {
         title: 'Registered heat-network development',
-        color: '#d0a329',
         geometry: 'area',
         fields: [
             ['development_name', 'Development', ''],
@@ -73,7 +71,6 @@ const HEAT_LAYER_UI = {
     },
     documented_actual_heat_sources: {
         title: 'Documented actual heat source',
-        color: '#c23958',
         geometry: 'point',
         fields: [
             ['source_name', 'Source', ''],
@@ -83,7 +80,6 @@ const HEAT_LAYER_UI = {
     },
     documented_large_heat_consumers: {
         title: 'Documented large heat consumer',
-        color: '#4e606d',
         geometry: 'point',
         fields: [
             ['consumer_name', 'Consumer', ''],
@@ -93,7 +89,6 @@ const HEAT_LAYER_UI = {
     },
     potential_heat_sources: {
         title: 'Potential heat source',
-        color: '#287f8f',
         geometry: 'point',
         fields: [
             ['source_name', 'Source', ''],
@@ -292,24 +287,8 @@ function windTurbineStyle(feature) {
     };
 }
 
-function heatLayerStyle(layerId) {
-    const config = HEAT_LAYER_UI[layerId];
-    if (config.geometry === 'point') {
-        return {
-            radius: 7,
-            color: '#ffffff',
-            weight: 2,
-            fillColor: config.color,
-            fillOpacity: 0.95
-        };
-    }
-    return {
-        fillColor: config.color,
-        weight: 1.2,
-        opacity: 0.85,
-        color: '#ffffff',
-        fillOpacity: 0.58
-    };
+function heatLayerStyle(layerId, feature) {
+    return HeatVisualization.layerStyle(layerId, feature);
 }
 
 function gridReachStyle(feature) {
@@ -330,12 +309,14 @@ function renderLayerStatus(source, fallbackReason = null) {
     status.textContent = source === 'geoserver_wfs'
         ? 'Live GeoServer WFS'
         : source === 'partial'
-            ? 'Some Grid layers unavailable'
+            ? 'Some sublayers unavailable'
             : source === 'static_geojson'
                 ? 'Static fallback active'
                 : source === 'failed'
                     ? 'Layer unavailable'
-                    : 'Loading layer';
+                    : source === 'empty'
+                        ? 'No sublayers selected'
+                        : 'Loading layer';
     status.title = fallbackReason || '';
 }
 
@@ -344,6 +325,22 @@ function getGridNetworkSource() {
     if (sources.every((source) => source === 'geoserver_wfs')) return 'geoserver_wfs';
     if (sources.some((source) => source === 'loading')) return 'loading';
     if (sources.some((source) => source === 'geoserver_wfs')) return 'partial';
+    return 'failed';
+}
+
+function selectedHeatLayerIds() {
+    return [...document.querySelectorAll('[data-heat-layer]:checked')]
+        .map((control) => control.dataset.heatLayer);
+}
+
+function getHeatNetworkSource() {
+    const selectedSources = selectedHeatLayerIds().map(
+        (layerId) => heatLayerSources[layerId]
+    );
+    if (selectedSources.length === 0) return 'empty';
+    if (selectedSources.every((source) => source === 'geoserver_wfs')) return 'geoserver_wfs';
+    if (selectedSources.some((source) => source === 'loading')) return 'loading';
+    if (selectedSources.some((source) => source === 'geoserver_wfs')) return 'partial';
     return 'failed';
 }
 
@@ -366,6 +363,8 @@ function updateLayerStatus(layerName, source, fallbackReason = null) {
     const activeLayer = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
     if (activeLayer === 'grid_network' && Object.hasOwn(gridLayerSources, layerName)) {
         renderLayerStatus(getGridNetworkSource(), fallbackReason);
+    } else if (activeLayer === 'heat_network' && Pc6MapData.HEAT_LAYER_IDS.includes(layerName)) {
+        renderLayerStatus(getHeatNetworkSource(), fallbackReason);
     } else if (activeLayer === layerName) {
         renderLayerStatus(source, fallbackReason);
     }
@@ -380,6 +379,7 @@ function refreshLayerStatus() {
         ev_chargers: evChargersLayerSource,
         consumption_areas: consumptionAreasLayerSource,
         public_wind_turbines: windTurbinesLayerSource,
+        heat_network: getHeatNetworkSource(),
         ...heatLayerSources
     };
     renderLayerStatus(sources[activeLayer]);
@@ -393,7 +393,7 @@ function updateLayerQualitySummary() {
     const isEv = currentMetric === 'ev_chargers';
     const isConsumption = currentMetric === 'consumption_areas';
     const isWind = currentMetric === 'public_wind_turbines';
-    const isHeat = Pc6MapData.HEAT_LAYER_IDS.includes(currentMetric);
+    const isHeat = currentMetric === 'heat_network';
     label.textContent = (isGrid || isWind || isHeat)
         ? 'Datacompleetheid per component'
         : isEv ? 'Datacompleetheid 0-2/3'
@@ -456,14 +456,85 @@ function updateGridVisibilityPanel() {
     document.getElementById('grid-visibility').hidden = currentMetric !== 'grid_network';
 }
 
+function allHeatLayers() {
+    return Object.values(heatMapLayers).filter(Boolean);
+}
+
+function selectedHeatLayers() {
+    return selectedHeatLayerIds()
+        .map((layerId) => heatMapLayers[layerId])
+        .filter(Boolean);
+}
+
+function applyHeatVisibility(fit = false) {
+    allHeatLayers().forEach((layer) => {
+        if (map.hasLayer(layer)) map.removeLayer(layer);
+    });
+    if (currentMetric !== 'heat_network') return;
+
+    const visibleLayers = selectedHeatLayers();
+    visibleLayers.forEach((layer) => layer.addTo(map));
+    Pc6MapData.HEAT_LAYER_IDS.forEach((layerId) => {
+        const layer = heatMapLayers[layerId];
+        if (layer && map.hasLayer(layer) && layer.bringToFront) layer.bringToFront();
+    });
+    if (fit && visibleLayers.length > 0) {
+        const bounds = L.featureGroup(visibleLayers).getBounds();
+        if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [24, 24] });
+            heatHasFit = true;
+        }
+    }
+}
+
+function updateHeatVisibilityPanel() {
+    const isHeat = currentMetric === 'heat_network';
+    document.getElementById('heat-visibility').hidden = !isHeat;
+    document.getElementById('heat-evidence-summary').hidden = !isHeat;
+}
+
+function updateHeatEvidenceSummary() {
+    const neighbourhoods = heatMapLayers.reported_neighbourhood_heat_consumers;
+    const pc6 = heatMapLayers.inferred_pc6_heat_consumers;
+    if (neighbourhoods) {
+        let connectedDwellings = 0;
+        let demandGj = 0;
+        neighbourhoods.eachLayer((layer) => {
+            const properties = layer.feature?.properties || {};
+            connectedDwellings += Number(properties.connected_dwellings_estimate) || 0;
+            demandGj += Number(properties.heat_demand_estimate_gj_per_year) || 0;
+        });
+        const neighbourhoodCount = neighbourhoods.getLayers().length;
+        document.getElementById('heat-summary-consumers').textContent =
+            `${neighbourhoodCount.toLocaleString('nl-NL')} ` +
+            `neighbourhood${neighbourhoodCount === 1 ? '' : 's'}; ` +
+            `${Math.round(connectedDwellings).toLocaleString('nl-NL')} connected dwellings; ` +
+            `${(demandGj / 1000).toLocaleString('nl-NL', { maximumFractionDigits: 1 })} TJ/year`;
+    }
+    if (pc6) {
+        const checks = { supports: 0, conflicts: 0, inconclusive: 0 };
+        pc6.eachLayer((layer) => {
+            const status = String(layer.feature?.properties?.liander_crosscheck_status || '');
+            if (status.startsWith('supports_')) checks.supports += 1;
+            else if (status.startsWith('conflicts_')) checks.conflicts += 1;
+            else checks.inconclusive += 1;
+        });
+        const pc6Count = pc6.getLayers().length;
+        document.getElementById('heat-summary-pc6').textContent =
+            `${pc6Count.toLocaleString('nl-NL')} PC6 evidence area${pc6Count === 1 ? '' : 's'}`;
+        document.getElementById('heat-summary-crosscheck').textContent =
+            `Liander: ${checks.supports} support / ${checks.conflicts} conflict / ` +
+            `${checks.inconclusive} inconclusive`;
+    }
+}
+
 function setActiveMapLayer(fitActive = false) {
     const independentLayers = {
         pc6: pc6Layer,
         pv_capacity: pvLayer,
         ev_chargers: evChargersLayer,
         consumption_areas: consumptionAreasLayer,
-        public_wind_turbines: windTurbinesLayer,
-        ...heatMapLayers
+        public_wind_turbines: windTurbinesLayer
     };
     const activeLayerName = ['gas', 'elec'].includes(currentMetric) ? 'pc6' : currentMetric;
     Object.entries(independentLayers).forEach(([layerName, layer]) => {
@@ -472,6 +543,7 @@ function setActiveMapLayer(fitActive = false) {
         }
     });
     applyGridVisibility(fitActive || (currentMetric === 'grid_network' && !gridHasFit));
+    applyHeatVisibility(fitActive || (currentMetric === 'heat_network' && !heatHasFit));
 
     const activeLayer = independentLayers[activeLayerName];
     if (activeLayer && !map.hasLayer(activeLayer)) {
@@ -482,6 +554,7 @@ function setActiveMapLayer(fitActive = false) {
     }
     if (activeLayerName === 'pc6' && pc6Layer) pc6Layer.setStyle(style);
     updateGridVisibilityPanel();
+    updateHeatVisibilityPanel();
     refreshLayerStatus();
     updateLayerQualitySummary();
     updateLegend();
@@ -743,15 +816,17 @@ async function loadMap() {
             const result = await Pc6MapData.loadHeatFeatureCollection(fetch, layerId);
             const config = HEAT_LAYER_UI[layerId];
             heatMapLayers[layerId] = L.geoJSON(result.data, {
-                style: () => heatLayerStyle(layerId),
+                style: (feature) => heatLayerStyle(layerId, feature),
                 pointToLayer: (feature, latlng) => L.circleMarker(
                     latlng,
-                    heatLayerStyle(layerId)
+                    heatLayerStyle(layerId, feature)
                 ),
                 onEachFeature: (feature, layer) => {
                     layer.on({
                         mouseover: (event) => event.target.setStyle({ weight: 4 }),
-                        mouseout: (event) => event.target.setStyle(heatLayerStyle(layerId)),
+                        mouseout: (event) => event.target.setStyle(
+                            heatLayerStyle(layerId, feature)
+                        ),
                         click: (event) => {
                             updateHeatSidePanel(layerId, feature.properties);
                             if (config.geometry === 'point') {
@@ -766,15 +841,17 @@ async function loadMap() {
                     });
                 }
             });
+            updateHeatEvidenceSummary();
             updateLayerStatus(layerId, result.source);
         } catch (error) {
             console.error(`${layerId} data load failed:`, error);
             updateLayerStatus(layerId, 'failed', error.message);
-            const option = document.querySelector(
-                `#heat-layer-select option[value="${layerId}"]`
+            const control = document.querySelector(
+                `[data-heat-layer="${layerId}"]`
             );
-            option.disabled = true;
-            option.title = 'Layer unavailable';
+            control.disabled = true;
+            control.checked = false;
+            control.parentElement.title = 'Layer unavailable';
         }
     }));
 
@@ -839,10 +916,35 @@ function updateLegend() {
             div.innerHTML += '<i class="point-legend" style="background:#008b8b"></i> Charging location<br>';
             return div;
         }
-        if (Pc6MapData.HEAT_LAYER_IDS.includes(currentMetric)) {
-            const config = HEAT_LAYER_UI[currentMetric];
+        if (currentMetric === 'heat_network') {
+            const selected = new Set(selectedHeatLayerIds());
             div.innerHTML = '<div class="legend-title">HEAT EVIDENCE</div>';
-            div.innerHTML += `<i style="background:${config.color}"></i> ${config.title}<br>`;
+            if (selected.has('reported_neighbourhood_heat_consumers')) {
+                div.innerHTML += '<i class="heat-gradient"></i> Neighbourhood connected share (0-100%)<br>';
+            }
+            if (selected.has('inferred_pc6_heat_consumers')) {
+                div.innerHTML += '<i style="background:#084594"></i> Strong allocated PC6 evidence<br>';
+                div.innerHTML += '<i style="background:#4292c6"></i> Moderate allocated PC6 evidence<br>';
+                div.innerHTML += '<i style="background:#c6dbef"></i> Fallback PC6 allocation<br>';
+                div.innerHTML += '<i style="background:#fdbb30"></i> Signal only, not allocated<br>';
+                div.innerHTML += '<i style="background:#9e9ac8"></i> Possible electric heating excluded<br>';
+                div.innerHTML += '<i class="heat-outline-support"></i> Liander supports<br>';
+                div.innerHTML += '<i class="heat-outline-conflict"></i> Liander conflicts<br>';
+                div.innerHTML += '<i class="heat-outline-inconclusive"></i> Liander inconclusive<br>';
+            }
+            if (selected.has('registered_heat_network_developments')) {
+                div.innerHTML += '<i class="heat-development"></i> Registered network development<br>';
+            }
+            if (selected.has('documented_actual_heat_sources')) {
+                div.innerHTML += '<i class="point-legend" style="background:#cb181d"></i> Actual heat source<br>';
+            }
+            if (selected.has('documented_large_heat_consumers')) {
+                div.innerHTML += '<i class="point-legend" style="background:#2171b5"></i> Large heat consumer<br>';
+            }
+            if (selected.has('potential_heat_sources')) {
+                div.innerHTML += '<i class="point-legend" style="background:#238b45"></i> Potential heat source<br>';
+            }
+            if (selected.size === 0) div.innerHTML += 'No heat evidence selected';
             return div;
         }
         if (currentMetric === 'consumption_areas') {
@@ -1463,7 +1565,6 @@ document.getElementById('search-input').addEventListener('keypress', (e) => {
 
 document.querySelectorAll('input[name="layer"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
-        document.getElementById('heat-layer-select').value = '';
         currentMetric = e.target.value;
         setActiveMapLayer(true);
     });
@@ -1476,13 +1577,12 @@ document.querySelectorAll('#grid-visibility input[type="checkbox"]').forEach((ch
     });
 });
 
-document.getElementById('heat-layer-select').addEventListener('change', (event) => {
-    if (!event.target.value) return;
-    document.querySelectorAll('input[name="layer"]').forEach((radio) => {
-        radio.checked = false;
+document.querySelectorAll('[data-heat-layer]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+        applyHeatVisibility();
+        refreshLayerStatus();
+        updateLegend();
     });
-    currentMetric = event.target.value;
-    setActiveMapLayer();
 });
 
 let energyChart = null; 
