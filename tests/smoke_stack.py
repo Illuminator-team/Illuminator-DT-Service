@@ -1593,7 +1593,7 @@ def check_pv_transformer_profile_orchestration(
 
     hierarchy = result.get("hierarchy_resolutions", [])
     require(
-        len(hierarchy) == 3
+        len(hierarchy) == len(expected_lv_mv)
         and all(
             item.get("status") == "available"
             and item.get("complete") is True
