@@ -118,6 +118,14 @@ jobs:
             potential_heat_sources; do
             grep -Fq "Heat ${layer} synchronized: total=1 changed=0 deleted=0" <<<"${output}"
           done
+          targeted_output="$(docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml run --rm --no-deps -e PUBLISH_ONCE=true -e PUBLISH_MODELS=heat layer-publisher 2>&1)"
+          printf '%s\n' "${targeted_output}"
+          grep -Fq "Startup publication scope: heat" <<<"${targeted_output}"
+          grep -Fq "Heat reported_neighbourhood_heat_consumers synchronized: total=1 changed=0 deleted=0" <<<"${targeted_output}"
+          if grep -Eq "PC6 layer synchronized|PV layer synchronized|grid_lines synchronized|Wind layer synchronized|EV charger layer synchronized|Consumption area layer synchronized" <<<"${targeted_output}"; then
+            echo "::error::Targeted Heat publication touched an unselected model"
+            exit 1
+          fi
           docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml up -d layer-publisher
 
       - name: Show service logs on failure

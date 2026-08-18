@@ -20,6 +20,7 @@ from grid_postgis import sync_grid_layer
 from model_postgis import sync_model_layer
 from pc6 import Pc6Record, get_layer_config, load_manifest, load_pc6_records
 from postgis_sql import values_template
+from publication_scope import parse_publish_models
 from psycopg2.extras import execute_values
 from pv import (
     PV_PROPERTY_FIELDS,
@@ -901,18 +902,30 @@ def source_signature(path: Path) -> tuple[int, int]:
 
 
 def run() -> None:
+    publish_models = parse_publish_models(os.getenv("PUBLISH_MODELS"))
+    LOGGER.info("Startup publication scope: %s", ",".join(publish_models))
+
     wait_for_postgres()
     wait_for_geoserver()
     ensure_workspace()
     ensure_datastore()
 
-    publish_pc6()
-    publish_pv()
-    publish_grid()
-    publish_wind()
-    publish_heat()
-    publish_ev()
-    publish_consumption()
+    if "pc6" in publish_models:
+        publish_pc6()
+    if "pv" in publish_models:
+        publish_pv()
+    if "grid" in publish_models:
+        publish_grid()
+    if "wind" in publish_models:
+        publish_wind()
+    if "heat" in publish_models:
+        publish_heat()
+    if "ev" in publish_models:
+        publish_ev()
+    if "consumption" in publish_models:
+        publish_consumption()
+
+    # This tutorial layer is internal platform state, not an independent model.
     create_solar_table()
     ensure_feature_type(SOLAR_LAYER, "Tutorial Solar Panel", "EPSG:4326")
     try:
@@ -922,6 +935,9 @@ def run() -> None:
 
     if PUBLISH_ONCE:
         return
+
+    if os.getenv("PUBLISH_MODELS"):
+        LOGGER.info("Startup publication complete; monitoring all models for changes")
 
     last_pc6_signature = source_signature(PC6_SOURCE_PATH)
     last_pv_signature = get_pv_readiness_signature(PV_API_URL)

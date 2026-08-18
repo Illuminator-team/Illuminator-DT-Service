@@ -760,6 +760,7 @@ services:
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
+      PUBLISH_MODELS: ${PUBLISH_MODELS:-}
     depends_on:
       geo:
         condition: service_started
