@@ -19,6 +19,8 @@ HEAT_QUALITY_METHOD = "datacompleetheid-heat-net-v1"
 HEAT_METHOD_ID = "alkmaar-heat-network-evidence-v1"
 HEAT_STABLE_FIXTURE = "pc6-1812ab"
 PC6_PATTERN = re.compile(r"^[0-9]{4}[A-Z]{2}$")
+HEAT_REQUIRED_FEATURE_FIELDS = {"type", "id", "geometry", "properties"}
+HEAT_OPTIONAL_FEATURE_FIELDS = {"bbox", "geometry_name"}
 
 HEAT_COMMON_FIELDS = (
     "feature_id",
@@ -292,6 +294,40 @@ def _validate_geometry(value: object, layer_id: str, feature_id: str) -> dict[st
     return geometry
 
 
+def _validate_feature_fields(item: dict[str, Any], layer_id: str) -> None:
+    fields = set(item)
+    missing = HEAT_REQUIRED_FEATURE_FIELDS - fields
+    unexpected = fields - HEAT_REQUIRED_FEATURE_FIELDS - HEAT_OPTIONAL_FEATURE_FIELDS
+    if missing or unexpected:
+        raise ValueError(
+            f"{layer_id}: feature contract drift: "
+            f"missing={sorted(missing)} unexpected={sorted(unexpected)}"
+        )
+
+    bbox = item.get("bbox")
+    if bbox is not None:
+        if (
+            not isinstance(bbox, list)
+            or len(bbox) not in {4, 6}
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                for value in bbox
+            )
+        ):
+            raise ValueError(f"{layer_id}: invalid feature bbox")
+        dimensions = len(bbox) // 2
+        if any(bbox[index] > bbox[index + dimensions] for index in range(dimensions)):
+            raise ValueError(f"{layer_id}: invalid feature bbox bounds")
+
+    geometry_name = item.get("geometry_name")
+    if geometry_name is not None and (
+        not isinstance(geometry_name, str) or not geometry_name.strip()
+    ):
+        raise ValueError(f"{layer_id}: invalid geometry name")
+
+
 def _canonical_properties(layer_id: str, properties: dict[str, Any]) -> dict[str, Any]:
     definition = HEAT_LAYER_DEFINITIONS[layer_id]
     missing = set(definition["canonical_fields"]) - set(properties)
@@ -386,8 +422,7 @@ def load_heat_layer_records(
     feature_ids: set[str] = set()
     for feature in features:
         item = _mapping(feature, f"{layer_id} feature")
-        if set(item) != {"type", "id", "geometry", "properties"}:
-            raise ValueError(f"{layer_id}: feature contract drift")
+        _validate_feature_fields(item, layer_id)
         if item.get("type") != "Feature":
             raise ValueError(f"{layer_id}: feature type drift")
         feature_id = item.get("id")

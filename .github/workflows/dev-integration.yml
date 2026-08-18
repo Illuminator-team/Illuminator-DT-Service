@@ -93,7 +93,7 @@ jobs:
         run: docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.ci.yml up -d --build
 
       - name: Run cumulative model and orchestration smoke checks
-        run: python tests/smoke_stack.py --base-url http://127.0.0.1:18080 --expected-grid-data-mode fixture
+        run: python tests/smoke_stack.py --base-url http://127.0.0.1:18080 --expected-grid-data-mode fixture --expected-heat-data-mode fixture
 
       - name: Verify repeatable publisher execution
         shell: bash
