@@ -1,4 +1,14 @@
 services:
+  heat-init:
+    command:
+      - python
+      - -m
+      - heat_net_map.api
+      - initialize
+      - --mode
+      - fixture
+      - --allow-fixture
+
   reverse-proxy:
     ports: !override
       - "18080:80"
@@ -55,6 +65,7 @@ services:
     environment:
       GRID_EXPECTED_DATA_MODE: fixture
       GRID_EXPORT_BBOX: 4.74454,52.629131,4.835248,52.644642
+      HEAT_EXPECTED_DATA_MODE: fixture
 
   orchestration-grid-init:
     image: ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c

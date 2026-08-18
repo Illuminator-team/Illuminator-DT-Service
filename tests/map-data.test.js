@@ -365,6 +365,54 @@ test('styles Heat evidence by meaning instead of using one color per layer', () 
     );
 });
 
+test('partitions Heat PC6 evidence into the reference map overlays', () => {
+    const features = [
+        {
+            id: 'allocated',
+            properties: {
+                allocated_connected_dwellings_est: 18,
+                inference_class: 'strong_low_gas_normal_electricity',
+                corroboration: 'reported_heat_neighbourhood'
+            }
+        },
+        {
+            id: 'signal-only',
+            properties: {
+                allocated_connected_dwellings_est: 0,
+                inference_class: 'moderate_low_gas_normal_electricity',
+                corroboration: 'outside_reported_heat_neighbourhood'
+            }
+        },
+        {
+            id: 'excluded',
+            properties: {
+                allocated_connected_dwellings_est: 0,
+                inference_class: 'excluded_possible_electric_heating'
+            }
+        },
+        {
+            id: 'no-signal',
+            properties: {
+                allocated_connected_dwellings_est: 0,
+                inference_class: 'no_low_gas_signal'
+            }
+        }
+    ];
+    const source = { type: 'FeatureCollection', features };
+
+    assert.equal(heatVisualization.pc6ViewId(features[0]), 'allocated_pc6_heat_consumers');
+    assert.equal(heatVisualization.pc6ViewId(features[1]), 'unallocated_pc6_heat_signals');
+    assert.equal(heatVisualization.pc6ViewId(features[2]), 'excluded_electric_heating_pc6');
+    assert.equal(heatVisualization.pc6ViewId(features[3]), null);
+
+    const displayedIds = heatVisualization.HEAT_VIEW_IDS
+        .filter((viewId) => heatVisualization.sourceLayerId(viewId) === 'inferred_pc6_heat_consumers')
+        .flatMap((viewId) => heatVisualization.viewCollection(viewId, source).features)
+        .map((feature) => feature.id);
+    assert.deepEqual(displayedIds, ['allocated', 'signal-only', 'excluded']);
+    assert.equal(new Set(displayedIds).size, displayedIds.length);
+});
+
 test('presents Heat as one model with independently visible evidence layers', () => {
     const frontendDirectory = path.join(__dirname, '..', 'policy-tool-frontend');
     const html = fs.readFileSync(path.join(frontendDirectory, 'index.html'), 'utf8');
@@ -374,11 +422,31 @@ test('presents Heat as one model with independently visible evidence layers', ()
     assert.match(html, /id="heat-visibility"/);
     assert.match(html, /id="heat-evidence-summary"/);
     assert.doesNotMatch(html, /id="heat-layer-select"/);
+    const defaultViews = new Set([
+        'reported_neighbourhood_heat_consumers',
+        'allocated_pc6_heat_consumers',
+        'registered_heat_network_developments',
+        'documented_actual_heat_sources',
+        'documented_large_heat_consumers'
+    ]);
+    heatVisualization.HEAT_VIEW_IDS.forEach((viewId) => {
+        const control = html.match(new RegExp(
+            `<input[^>]+data-heat-view="${viewId}"[^>]*>`
+        ));
+        assert.ok(control, `missing Heat view control ${viewId}`);
+        assert.equal(
+            /\schecked(?:\s|>)/.test(control[0]),
+            defaultViews.has(viewId),
+            `unexpected default visibility for ${viewId}`
+        );
+    });
     mapData.HEAT_LAYER_IDS.forEach((layerId) => {
-        assert.match(html, new RegExp(`data-heat-layer="${layerId}" checked`));
+        assert.match(html, new RegExp(`data-heat-source="${layerId}"`));
     });
     assert.match(script, /function applyHeatVisibility\(fit = false\)/);
     assert.match(script, /function updateHeatEvidenceSummary\(\)/);
+    assert.match(script, /HeatVisualization\.viewCollection/);
+    assert.match(script, /function createHeatMapLayer\(layerId, featureCollection\)/);
     assert.match(script, /currentMetric === 'heat_network'/);
     assert.match(script, /HeatVisualization\.layerStyle/);
 });

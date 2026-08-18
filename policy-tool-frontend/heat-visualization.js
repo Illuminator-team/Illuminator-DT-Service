@@ -10,6 +10,55 @@
         documented_large_heat_consumers: '#2171b5',
         potential_heat_sources: '#238b45'
     });
+    const PC6_SOURCE_LAYER = 'inferred_pc6_heat_consumers';
+    const HEAT_VIEW_IDS = Object.freeze([
+        'reported_neighbourhood_heat_consumers',
+        'allocated_pc6_heat_consumers',
+        'unallocated_pc6_heat_signals',
+        'excluded_electric_heating_pc6',
+        'registered_heat_network_developments',
+        'documented_actual_heat_sources',
+        'potential_heat_sources',
+        'documented_large_heat_consumers'
+    ]);
+
+    function sourceLayerId(viewId) {
+        return [
+            'allocated_pc6_heat_consumers',
+            'unallocated_pc6_heat_signals',
+            'excluded_electric_heating_pc6'
+        ].includes(viewId) ? PC6_SOURCE_LAYER : viewId;
+    }
+
+    function pc6ViewId(feature = {}) {
+        const properties = feature.properties || {};
+        const inferenceClass = String(properties.inference_class || '');
+        if (inferenceClass === 'excluded_possible_electric_heating') {
+            return 'excluded_electric_heating_pc6';
+        }
+        if ((Number(properties.allocated_connected_dwellings_est) || 0) > 0) {
+            return 'allocated_pc6_heat_consumers';
+        }
+        if (
+            ['strong_low_gas_normal_electricity', 'moderate_low_gas_normal_electricity']
+                .includes(inferenceClass) &&
+            properties.corroboration !== 'reported_heat_neighbourhood'
+        ) {
+            return 'unallocated_pc6_heat_signals';
+        }
+        return null;
+    }
+
+    function viewCollection(viewId, sourceCollection) {
+        const sourceId = sourceLayerId(viewId);
+        const features = sourceCollection?.features || [];
+        return {
+            ...sourceCollection,
+            features: sourceId === PC6_SOURCE_LAYER
+                ? features.filter((feature) => pc6ViewId(feature) === viewId)
+                : [...features]
+        };
+    }
 
     function neighbourhoodColor(value) {
         const share = Number(value) || 0;
@@ -82,5 +131,14 @@
         };
     }
 
-    return Object.freeze({ neighbourhoodColor, pc6Fill, pc6Outline, layerStyle });
+    return Object.freeze({
+        HEAT_VIEW_IDS,
+        neighbourhoodColor,
+        pc6Fill,
+        pc6Outline,
+        pc6ViewId,
+        sourceLayerId,
+        viewCollection,
+        layerStyle
+    });
 }));
