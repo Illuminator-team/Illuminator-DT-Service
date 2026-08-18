@@ -16,9 +16,9 @@ Evidence:
 - failed publisher-SQL run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31107449535>
 - failed publisher-packaging run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31109126622>
 - successful full-stack run: <https://github.com/Illuminator-team/Illuminator-DT-Service/actions/runs/31110105407>
-- PV source commit: `4c920c47c34075831a5ad49e9d8f45d9dfac2ae7`
-- PV API image: `ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6`
-- PV production source-cache image: `ghcr.io/jortgroen/pv-map-source-cache@sha256:c81dd68136bf6a55d412897980910db1d1062f434fa2b70e8ab53374bd6b1b41`
+- PV source commit: `357d7a9ede79a9da775649bed1069c196a945d39`
+- PV API image: `ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72`
+- PV production source-cache image: `ghcr.io/jortgroen/pv-map-source-cache@sha256:630e5f8a45bbc14699254251ee125415443bc7c185518eaaf5d64e1f86b5ce50`
 
 PR 14 remained draft and undeployed while its complete gate was failing. The
 final full-stack run passed; the PR can now leave draft state for review, but
