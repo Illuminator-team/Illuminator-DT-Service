@@ -12,7 +12,7 @@ function target(id, level, demand, production) {
         transformer_level: level,
         datacompleetheid: 1,
         points: demand.map((value, index) => ({
-            interval_start_utc: `2023-01-01T0${index}:00:00Z`,
+            timestamp: `2023-01-01T0${index}:00:00Z`,
             demand_power_kw: value,
             production_power_kw: production[index],
             net_power_kw: value + production[index]
@@ -111,6 +111,18 @@ test('rejects an inconsistent canonical net-power value', () => {
     assert.throws(
         () => profiles.normalizeResponse(payload),
         /canonical net-power sum/
+    );
+});
+
+
+test('rejects a response that drifts from the canonical timestamp field', () => {
+    const payload = response();
+    const point = payload.result.source_to_lv_mv.targets[0].points[0];
+    point.interval_start_utc = point.timestamp;
+    delete point.timestamp;
+    assert.throws(
+        () => profiles.normalizeResponse(payload),
+        /invalid timestamp/
     );
 });
 

@@ -1467,6 +1467,8 @@ def check_transformer_profile_orchestration(client: SmokeClient) -> None:
                 point.get("demand_power_kw", 0) > 0
                 and point.get("production_power_kw") == 0
                 and point.get("net_power_kw") == point.get("demand_power_kw")
+                and isinstance(point.get("timestamp"), str)
+                and point["timestamp"].endswith("Z")
                 for point in points
             ),
             "Consumption-only transformer profile values drifted",
@@ -1611,6 +1613,8 @@ def check_pv_transformer_profile_orchestration(
                 point.get("demand_power_kw") == 0
                 and point.get("production_power_kw", 0) < 0
                 and point.get("net_power_kw") == point.get("production_power_kw")
+                and isinstance(point.get("timestamp"), str)
+                and point["timestamp"].endswith("Z")
                 for point in points
             ),
             "PV transformer canonical production values drifted",

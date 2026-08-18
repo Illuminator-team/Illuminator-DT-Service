@@ -93,7 +93,7 @@
 
     function normalizePoint(point) {
         requireObject(point, 'Transformer profile points must be objects.');
-        const timestamp = String(point.interval_start_utc || '');
+        const timestamp = String(point.timestamp || '');
         if (!timestamp || Number.isNaN(Date.parse(timestamp))) {
             throw new Error('Transformer profile point has an invalid timestamp.');
         }
