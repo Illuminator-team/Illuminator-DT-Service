@@ -302,6 +302,43 @@ class HeatContractTest(unittest.TestCase):
         self.assertEqual(pc6.canonical["allocated_connected_dwellings_est"], 18)
         self.assertEqual(pc6.canonical["heat_demand_gj_year_est"], 414)
 
+    def test_accepts_real_source_geojson_feature_metadata(self):
+        layer_id = "reported_neighbourhood_heat_consumers"
+        payload = collection(layer_id)
+        payload["features"][0].update({
+            "bbox": [4.75, 52.62, 4.76, 52.63],
+            "geometry_name": "the_geom",
+        })
+
+        records = load_heat_layer_records(
+            payload,
+            layer_id=layer_id,
+            expected_run_id=RUN_ID,
+            expected_output_id=OUTPUT_IDS[layer_id],
+            expected_model_version=MODEL_VERSION,
+            expected_data_mode="fixture",
+        )
+
+        self.assertEqual(len(records), 1)
+
+    def test_rejects_unknown_or_invalid_feature_metadata(self):
+        layer_id = "reported_neighbourhood_heat_consumers"
+        unknown = collection(layer_id)
+        unknown["features"][0]["unexpected"] = "contract drift"
+        invalid_bbox = collection(layer_id)
+        invalid_bbox["features"][0]["bbox"] = [4.76, 52.63, 4.75, 52.62]
+
+        for payload in (unknown, invalid_bbox):
+            with self.assertRaises(ValueError):
+                load_heat_layer_records(
+                    payload,
+                    layer_id=layer_id,
+                    expected_run_id=RUN_ID,
+                    expected_output_id=OUTPUT_IDS[layer_id],
+                    expected_model_version=MODEL_VERSION,
+                    expected_data_mode="fixture",
+                )
+
     def test_content_hash_ignores_only_per_run_provenance(self):
         layer_id = "inferred_pc6_heat_consumers"
         first = collection(layer_id)

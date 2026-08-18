@@ -83,7 +83,7 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compo
 The CI smoke check must likewise declare fixture mode explicitly:
 
 ```shell
-python tests/smoke_stack.py --base-url http://127.0.0.1 --expected-grid-data-mode fixture
+python tests/smoke_stack.py --base-url http://127.0.0.1 --expected-grid-data-mode fixture --expected-heat-data-mode fixture
 ```
 
 Local endpoints:

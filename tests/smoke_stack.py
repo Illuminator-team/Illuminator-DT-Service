@@ -537,13 +537,16 @@ def check_wind_layer(client: SmokeClient) -> None:
     require(image.startswith(b"\x89PNG") and len(image) > 500, "Wind WMS map is empty")
 
 
-def check_heat_model_api(client: SmokeClient) -> None:
+def check_heat_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     root = client.get_json("/models/heat/")
     require(root.get("status") == "alive", "Heat model liveness failed")
 
     readiness = client.get_json("/models/heat/ready", timeout=120)
     require(readiness.get("status") == "ready", "Heat model is not ready")
-    require(readiness.get("data_mode") == "fixture", "Heat fixture mode drift")
+    require(
+        readiness.get("data_mode") == expected_data_mode,
+        f"Heat data mode drift: expected {expected_data_mode}",
+    )
     require(readiness.get("model_version") == "0.2.0", "Heat readiness version drift")
 
     metadata = client.get_json("/models/heat/metadata")
@@ -554,9 +557,18 @@ def check_heat_model_api(client: SmokeClient) -> None:
     catalog = client.get_json("/models/heat/layers")
     by_id = {item["id"]: item for item in catalog.get("layers", [])}
     require(set(by_id) == set(HEAT_LAYERS), "Heat six-layer catalog drift")
+    expected_counts = {}
     for layer_id, layer in by_id.items():
-        require(layer["runtime"]["feature_count"] == 1, f"{layer_id} fixture count drift")
-        require(layer["runtime"]["data_mode"] == "fixture", f"{layer_id} mode drift")
+        feature_count = layer["runtime"]["feature_count"]
+        if expected_data_mode == "fixture":
+            require(feature_count == 1, f"{layer_id} fixture count drift")
+        else:
+            require(feature_count > 0, f"{layer_id} real-source layer is empty")
+        require(
+            layer["runtime"]["data_mode"] == expected_data_mode,
+            f"{layer_id} mode drift",
+        )
+        expected_counts[layer_id] = feature_count
 
     run = client.post_json(
         "/models/heat/runs",
@@ -567,10 +579,16 @@ def check_heat_model_api(client: SmokeClient) -> None:
     outputs = {item["layer_id"]: item for item in run.get("outputs", [])}
     require(set(outputs) == set(HEAT_LAYERS), "Heat run output catalog drift")
     for layer_id, summary in outputs.items():
-        require(summary.get("feature_count") == 1, f"{layer_id} output summary drift")
+        require(
+            summary.get("feature_count") == expected_counts[layer_id],
+            f"{layer_id} output summary drift",
+        )
         output = client.get_json(f"/models/heat/outputs/{summary['output_id']}")
         require(output.get("layer_id") == layer_id, f"{layer_id} output identity drift")
-        require(output.get("feature_count") == 1, f"{layer_id} output count drift")
+        require(
+            output.get("feature_count") == expected_counts[layer_id],
+            f"{layer_id} output count drift",
+        )
         data_path = output.get("links", {}).get("data")
         require(isinstance(data_path, str) and data_path.startswith("/outputs/"), f"{layer_id} data link drift")
         status, content, content_type = client.get(f"/models/heat{data_path}")
@@ -580,14 +598,18 @@ def check_heat_model_api(client: SmokeClient) -> None:
         require(hashlib.sha256(content).hexdigest() == output["sha256"], f"{layer_id} hash drift")
         collection = json.loads(content)
         feature = collection["features"][0]
-        require(feature["properties"]["fixture_only"] is True, f"{layer_id} fixture marker drift")
-        if layer_id == "inferred_pc6_heat_consumers":
+        fixture_only = feature["properties"].get("fixture_only") is True
+        require(
+            fixture_only == (expected_data_mode == "fixture"),
+            f"{layer_id} fixture marker drift",
+        )
+        if expected_data_mode == "fixture" and layer_id == "inferred_pc6_heat_consumers":
             require(feature["id"] == HEAT_PC6_FIXTURE, "Heat PC6 fixture ID drift")
             require(feature["properties"]["allocated_connected_dwellings_est"] == 18, "Heat fixture dwelling drift")
             require(feature["properties"]["heat_demand_gj_year_est"] == 414, "Heat fixture demand drift")
 
 
-def check_heat_layers(client: SmokeClient) -> None:
+def check_heat_layers(client: SmokeClient, expected_data_mode: str) -> None:
     capabilities_query = urllib.parse.urlencode(
         {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}
     )
@@ -630,20 +652,27 @@ def check_heat_layers(client: SmokeClient) -> None:
             "outputFormat": "application/json",
             "count": 1,
         }
-        if layer_id == "inferred_pc6_heat_consumers":
+        if expected_data_mode == "fixture" and layer_id == "inferred_pc6_heat_consumers":
             feature_parameters["cql_filter"] = f"feature_id='{HEAT_PC6_FIXTURE}'"
         collection = client.get_json(
             f"/geoserver/rdp/ows?{urllib.parse.urlencode(feature_parameters)}"
         )
-        require(collection.get("numberReturned") == 1, f"{layer_id} fixture is missing")
+        require(collection.get("numberReturned") == 1, f"{layer_id} feature is missing")
         feature = collection["features"][0]
         properties = feature["properties"]
-        require(properties["fixture_only"] is True, f"{layer_id} fixture marker drift")
-        require(properties["datacompleetheid"] == 2, f"{layer_id} quality drift")
+        require(
+            properties["fixture_only"] == (expected_data_mode == "fixture"),
+            f"{layer_id} fixture marker drift",
+        )
+        require(
+            isinstance(properties["datacompleetheid"], int)
+            and 0 <= properties["datacompleetheid"] <= 3,
+            f"{layer_id} quality drift",
+        )
         require(properties["release_commit"] == HEAT_RELEASE_COMMIT, f"{layer_id} release drift")
         require(properties["deployment_container_digest"] == HEAT_CONTAINER_DIGEST, f"{layer_id} digest drift")
         require(feature["geometry"]["type"] == contract["geometry"], f"{layer_id} geometry drift")
-        if layer_id == "inferred_pc6_heat_consumers":
+        if expected_data_mode == "fixture" and layer_id == "inferred_pc6_heat_consumers":
             require(properties["feature_id"] == HEAT_PC6_FIXTURE, "Heat WFS fixture ID drift")
             require(properties["allocated_connected_dwellings_est"] == 18, "Heat WFS dwelling drift")
             require(properties["heat_demand_gj_year_est"] == 414, "Heat WFS demand drift")
@@ -1919,6 +1948,11 @@ def main() -> int:
         choices=("real_source", "fixture"),
         default="real_source",
     )
+    parser.add_argument(
+        "--expected-heat-data-mode",
+        choices=("real_source", "fixture"),
+        default="real_source",
+    )
     args = parser.parse_args()
 
     client = SmokeClient(args.base_url, host_header=args.host_header)
@@ -1941,14 +1975,14 @@ def main() -> int:
     check_pv_model_api(client)
     check_grid_model_api(client, args.expected_grid_data_mode)
     check_wind_model_api(client)
-    check_heat_model_api(client)
+    check_heat_model_api(client, args.expected_heat_data_mode)
     check_ev_model_api(client)
     check_consumption_model_api(client)
     check_congestion_model_api(client)
     check_pc6_layer(client)
     check_grid_layers(client)
     check_wind_layer(client)
-    check_heat_layers(client)
+    check_heat_layers(client, args.expected_heat_data_mode)
     check_ev_layer(client)
     check_consumption_layer(client)
     check_transformer_profile_orchestration(client)
