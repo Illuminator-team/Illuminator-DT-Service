@@ -58,6 +58,26 @@ Heat with its deterministic six-layer fixture lane.
 The EV API serves its frozen 784-location Alkmaar charger inventory and writes
 generated run outputs to `ev-generated-outputs`.
 
+When publisher code changes for only one established model, its startup work can
+be limited without rescanning unchanged large layers. For example, this rebuilds
+the publisher, republishes only Heat at startup, and then resumes monitoring all
+models for later changes:
+
+```powershell
+$env:PUBLISH_MODELS = "heat"
+docker compose `
+  -f docker-compose.yml `
+  -f docker-compose.local.yml `
+  up -d --build --force-recreate layer-publisher
+Remove-Item Env:PUBLISH_MODELS
+```
+
+Valid comma-separated values are `pc6`, `pv`, `grid`, `wind`, `heat`, `ev`, and
+`consumption`. Leaving `PUBLISH_MODELS` unset, or setting it to `all`, preserves
+the full startup publication. Use the full default after a database or GeoServer
+reset, and for release acceptance; a scoped startup assumes every omitted layer
+is already published and unchanged.
+
 To attach an existing verified real-source cache instead of initializing a new
 one, select its Docker volume explicitly:
 
