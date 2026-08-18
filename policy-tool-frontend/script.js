@@ -1014,6 +1014,11 @@ let selectedScenarioPostcode = null;
 let selectedScenarioProperties = null;
 let scenarioDraft = { gas: 1.0, pv: 1.0, modified: false };
 let scenarioRunning = false;
+let selectedTransformerProfileSource = null;
+let transformerProfileRunning = false;
+let transformerProfileResult = null;
+let activeTransformerProfileStage = 'lv_mv';
+let preferredTransformerProfileId = null;
 
 function getActiveScenario() {
     return selectedScenarioPostcode
@@ -1047,6 +1052,7 @@ function selectScenarioTarget(prop) {
     }
     selectedScenarioPostcode = pc;
     selectedScenarioProperties = prop;
+    selectTransformerProfileSource({ type: 'pc6', id: pc, label: pc });
     updateScenarioControls();
 }
 
@@ -1088,6 +1094,243 @@ function initializeScenarioControls() {
     });
 
     updateScenarioControls();
+}
+
+function resetTransformerProfileOutput() {
+    transformerProfileResult = null;
+    activeTransformerProfileStage = 'lv_mv';
+    preferredTransformerProfileId = null;
+    const output = document.getElementById('transformer-profile-output');
+    output.hidden = true;
+    if (transformerProfileChart) {
+        transformerProfileChart.destroy();
+        transformerProfileChart = null;
+    }
+}
+
+function setTransformerProfileStatus(message = '', state = '') {
+    const status = document.getElementById('transformer-profile-status');
+    status.innerText = message;
+    if (state) status.dataset.state = state;
+    else delete status.dataset.state;
+}
+
+function updateTransformerProfileControls() {
+    const sourceContainer = document.getElementById('transformer-profile-source');
+    const sourceValue = document.getElementById('transformer-profile-source-value');
+    const dateInput = document.getElementById('transformer-profile-date');
+    const loadButton = document.getElementById('load-transformer-profiles-btn');
+    const source = selectedTransformerProfileSource;
+
+    sourceContainer.dataset.state = source ? 'selected' : 'empty';
+    sourceValue.innerText = source?.id || 'No supported area selected';
+    sourceValue.title = source?.label || '';
+    dateInput.disabled = !source || transformerProfileRunning;
+    loadButton.disabled = !source || transformerProfileRunning;
+    loadButton.innerText = transformerProfileRunning
+        ? 'CALCULATING...'
+        : 'CALCULATE PROFILES';
+
+    if (source) {
+        dateInput.min = `${source.year}-01-01`;
+        dateInput.max = `${source.year}-12-31`;
+        if (!dateInput.value || Number(dateInput.value.slice(0, 4)) !== source.year) {
+            dateInput.value = source.defaultDate;
+        }
+    } else {
+        dateInput.value = '';
+        dateInput.removeAttribute('min');
+        dateInput.removeAttribute('max');
+    }
+}
+
+function selectTransformerProfileSource(source) {
+    let normalized;
+    try {
+        normalized = TransformerProfiles.normalizeSource(source);
+    } catch (error) {
+        console.warn('Unsupported transformer profile source:', error);
+        return;
+    }
+    const previousKey = selectedTransformerProfileSource
+        ? `${selectedTransformerProfileSource.type}:${selectedTransformerProfileSource.id}`
+        : '';
+    const nextKey = `${normalized.type}:${normalized.id}`;
+    selectedTransformerProfileSource = normalized;
+    if (previousKey !== nextKey) {
+        resetTransformerProfileOutput();
+        setTransformerProfileStatus();
+    }
+    updateTransformerProfileControls();
+}
+
+function transformerProfileError(payload, status) {
+    const detail = payload?.detail;
+    if (typeof detail === 'string' && detail) return detail;
+    if (detail && typeof detail === 'object') {
+        if (typeof detail.message === 'string') return detail.message;
+        if (typeof detail.code === 'string') return detail.code.replaceAll('_', ' ');
+    }
+    return `Transformer profile request failed (${status}).`;
+}
+
+function renderTransformerProfileChart(target) {
+    const data = TransformerProfiles.chartData(target);
+    const canvas = document.getElementById('transformer-profile-canvas');
+    if (transformerProfileChart) transformerProfileChart.destroy();
+    transformerProfileChart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: data.labels,
+            datasets: [
+                {
+                    label: 'Demand',
+                    data: data.demand,
+                    borderColor: '#2980b9',
+                    borderWidth: 2,
+                    pointRadius: 0
+                },
+                {
+                    label: 'Production',
+                    data: data.production,
+                    borderColor: '#d97706',
+                    borderWidth: 2,
+                    pointRadius: 0
+                },
+                {
+                    label: 'Net',
+                    data: data.net,
+                    borderColor: '#1e272e',
+                    borderWidth: 2,
+                    pointRadius: 0
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: { unit: 'hour', displayFormats: { hour: 'HH:mm' } },
+                    ticks: { font: { size: 8 }, maxRotation: 0 }
+                },
+                y: {
+                    title: { display: true, text: 'kW', font: { size: 9 } },
+                    ticks: { font: { size: 8 } }
+                }
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { boxWidth: 10, font: { size: 9 } }
+                }
+            }
+        }
+    });
+}
+
+function renderTransformerProfileTarget(target) {
+    const summary = document.getElementById('transformer-profile-summary');
+    const mode = transformerProfileResult.aggregationMode
+        .replace('two_stage_', '')
+        .replaceAll('_', ' ');
+    summary.innerHTML = `
+        <span>${target.points.length} × ${escapeHtml(transformerProfileResult.resolution)}</span>
+        <strong>${escapeHtml(mode)}<br>Datacompleetheid ${transformerProfileResult.datacompleetheid}/3</strong>
+    `;
+    renderTransformerProfileChart(target);
+}
+
+function renderTransformerProfileStage(preferredId = null) {
+    if (!transformerProfileResult) return;
+    document.querySelectorAll('[data-profile-stage]').forEach((button) => {
+        button.setAttribute(
+            'aria-pressed',
+            String(button.dataset.profileStage === activeTransformerProfileStage)
+        );
+    });
+
+    const targets = transformerProfileResult.stages[activeTransformerProfileStage].targets;
+    const select = document.getElementById('transformer-profile-select');
+    select.innerHTML = targets.map((target) => (
+        `<option value="${escapeHtml(target.id)}">${escapeHtml(target.label)}</option>`
+    )).join('');
+    const matchingId = targets.some((target) => target.id === preferredId)
+        ? preferredId
+        : targets[0].id;
+    select.value = matchingId;
+    renderTransformerProfileTarget(
+        targets.find((target) => target.id === matchingId) || targets[0]
+    );
+}
+
+function focusLoadedTransformerProfile(transformerId, transformerType) {
+    preferredTransformerProfileId = String(transformerId || '');
+    if (!transformerProfileResult || !preferredTransformerProfileId) return;
+    const requestedStage = transformerType === 'mv_hv' ? 'mv_hv' : 'lv_mv';
+    const targets = transformerProfileResult.stages[requestedStage].targets;
+    if (!targets.some((target) => target.id === preferredTransformerProfileId)) return;
+    activeTransformerProfileStage = requestedStage;
+    renderTransformerProfileStage(preferredTransformerProfileId);
+}
+
+async function loadTransformerProfiles() {
+    if (!selectedTransformerProfileSource || transformerProfileRunning) return;
+    const date = document.getElementById('transformer-profile-date').value;
+    let request;
+    try {
+        request = TransformerProfiles.buildRequest(selectedTransformerProfileSource, date);
+    } catch (error) {
+        setTransformerProfileStatus(error.message, 'error');
+        return;
+    }
+
+    transformerProfileRunning = true;
+    updateTransformerProfileControls();
+    setTransformerProfileStatus('Calculating transformer profiles...');
+    try {
+        const response = await fetch(request.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request.body)
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(transformerProfileError(payload, response.status));
+        transformerProfileResult = TransformerProfiles.normalizeResponse(payload);
+        activeTransformerProfileStage = 'lv_mv';
+        document.getElementById('transformer-profile-output').hidden = false;
+        renderTransformerProfileStage(preferredTransformerProfileId);
+        setTransformerProfileStatus(
+            `${transformerProfileResult.sourceFeatureId} profiles calculated.`
+        );
+    } catch (error) {
+        console.error('Transformer profile calculation failed:', error);
+        setTransformerProfileStatus(error.message, 'error');
+    } finally {
+        transformerProfileRunning = false;
+        updateTransformerProfileControls();
+    }
+}
+
+function initializeTransformerProfileControls() {
+    document.getElementById('load-transformer-profiles-btn')
+        .addEventListener('click', loadTransformerProfiles);
+    document.querySelectorAll('[data-profile-stage]').forEach((button) => {
+        button.addEventListener('click', () => {
+            if (!transformerProfileResult) return;
+            activeTransformerProfileStage = button.dataset.profileStage;
+            renderTransformerProfileStage();
+        });
+    });
+    document.getElementById('transformer-profile-select').addEventListener('change', (event) => {
+        if (!transformerProfileResult) return;
+        const targets = transformerProfileResult.stages[activeTransformerProfileStage].targets;
+        const target = targets.find((candidate) => candidate.id === event.target.value);
+        if (target) renderTransformerProfileTarget(target);
+    });
+    updateTransformerProfileControls();
 }
 
 
@@ -1200,6 +1443,13 @@ function updatePvSidePanel(prop) {
     const completeness = Number(prop.datacompleetheid ?? 0);
     const label = escapeHtml(prop.datacompleetheid_label || 'not assessed');
     const reason = escapeHtml(prop.completeness_reason || 'No quality explanation available.');
+    if (prop.cbs_buurt_code) {
+        selectTransformerProfileSource({
+            type: 'cbs_buurt',
+            id: prop.cbs_buurt_code,
+            label: prop.buurt_name || prop.cbs_buurt_code
+        });
+    }
 
     document.getElementById('panel-content').innerHTML = `
         <div class="pc6-header">${escapeHtml(prop.buurt_name)}</div>
@@ -1379,6 +1629,7 @@ function updateGridTransformerSidePanel(prop) {
     const rating = prop.rated_power_kva == null
         ? 'Unknown'
         : `${Number(prop.rated_power_kva).toLocaleString('nl-NL')} kVA`;
+    focusLoadedTransformerProfile(prop.component_id, prop.transformer_type);
     document.getElementById('panel-content').innerHTML = `
         <div class="pc6-header">Grid transformer</div>
         <div class="feature-identifier">${escapeHtml(prop.component_id)}</div>
@@ -1617,7 +1868,8 @@ document.querySelectorAll('[data-heat-view]').forEach((checkbox) => {
     });
 });
 
-let energyChart = null; 
+let energyChart = null;
+let transformerProfileChart = null;
 let lastCsvData = null; // Store data to allow re-rendering in the popup
 
 async function runPythonSimulation(postcode, scenario) {
@@ -1786,4 +2038,5 @@ function openChartModal() {
 
 // Run
 initializeScenarioControls();
+initializeTransformerProfileControls();
 loadMap();

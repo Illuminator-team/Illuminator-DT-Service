@@ -1774,6 +1774,18 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
             f"Dashboard Heat view default drift: {view_id}",
         )
     require(b"scenario-panel" in dashboard, "Persistent scenario controls are missing")
+    require(
+        b"transformer-profiles.js" in dashboard,
+        "Dashboard does not load its transformer-profile adapter",
+    )
+    require(
+        b"load-transformer-profiles-btn" in dashboard,
+        "Dashboard transformer-profile command is missing",
+    )
+    require(
+        b"transformer-profile-select" in dashboard,
+        "Dashboard transformer selector is missing",
+    )
 
     status, script, _ = client.get("/dashboard/map-data.js")
     require(status == 200, "Map data adapter did not load")
@@ -1792,6 +1804,21 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     for layer_id in HEAT_LAYERS:
         require(layer_id.encode() in script, f"Dashboard is not configured for {layer_id}")
     require(b"alkmaar_energy_map.geojson" in script, "Static fallback is missing")
+
+    status, profile_adapter, _ = client.get("/dashboard/transformer-profiles.js")
+    require(status == 200, "Transformer profile adapter did not load")
+    require(
+        b"/policy-api/transformer-profiles/pc6/" in profile_adapter,
+        "Consumption transformer-profile route is missing from the dashboard",
+    )
+    require(
+        b"/policy-api/transformer-profiles/pv/cbs-buurt/" in profile_adapter,
+        "PV transformer-profile route is missing from the dashboard",
+    )
+    require(
+        b"source_to_lv_mv" in profile_adapter and b"lv_mv_to_mv_hv" in profile_adapter,
+        "Dashboard transformer-profile stages are incomplete",
+    )
 
     status, heat_visualization, _ = client.get("/dashboard/heat-visualization.js")
     require(status == 200, "Heat visualization adapter did not load")

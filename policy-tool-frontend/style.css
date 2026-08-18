@@ -65,8 +65,11 @@ path {
 /* SIDEBAR PANELS */
 #feature-panel {
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 0;
+    overflow-x: hidden;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     padding-right: 4px;
 }
 
@@ -81,10 +84,13 @@ path {
 
 .sidebar-controls {
     flex: 0 0 auto;
+    min-width: 0;
     max-height: 58vh;
     margin-top: 0;
     padding-top: 16px;
+    overflow-x: hidden;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     border-top: 1px solid var(--border-muted);
 }
 
@@ -129,6 +135,119 @@ button:disabled {
 
 .simulation-output {
     margin-top: 18px;
+}
+
+.transformer-profile-tool {
+    min-width: 0;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-muted);
+}
+
+.profile-date-control,
+.profile-transformer-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 145px);
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.profile-date-control input,
+.profile-transformer-control select {
+    min-width: 0;
+    height: 32px;
+    box-sizing: border-box;
+    border: 1px solid var(--border-muted);
+    border-radius: 3px;
+    background: #fff;
+    color: var(--primary-dark);
+    font: 11px/1.2 monospace;
+}
+
+.secondary-btn {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid var(--primary-dark);
+    border-radius: 3px;
+    background: #fff;
+    color: var(--primary-dark);
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.secondary-btn:hover:not(:disabled) {
+    background: #eef1f3;
+}
+
+.profile-status {
+    min-height: 16px;
+    margin-top: 8px;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.profile-status[data-state="error"] {
+    color: var(--accent-red);
+}
+
+.transformer-profile-output {
+    margin-top: 12px;
+}
+
+.profile-stage-control {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 12px;
+    border: 1px solid var(--border-muted);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.profile-stage-control button {
+    min-height: 30px;
+    border: 0;
+    border-right: 1px solid var(--border-muted);
+    background: #fff;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.profile-stage-control button:last-child {
+    border-right: 0;
+}
+
+.profile-stage-control button[aria-pressed="true"] {
+    background: var(--primary-dark);
+    color: #fff;
+}
+
+.profile-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 8px 0;
+    color: var(--text-muted);
+    font-size: 9px;
+    line-height: 1.35;
+}
+
+.profile-summary strong {
+    color: var(--primary-dark);
+    text-align: right;
+}
+
+.transformer-profile-graph {
+    height: 220px;
+    border-style: solid;
 }
 
 .scenario-graph {
@@ -690,5 +809,19 @@ button {
         left: 16px;
         width: auto;
         max-width: calc(58vw - 32px);
+    }
+
+    .profile-date-control,
+    .profile-transformer-control {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 5px;
+    }
+
+    .profile-summary {
+        display: grid;
+    }
+
+    .profile-summary strong {
+        text-align: left;
     }
 }

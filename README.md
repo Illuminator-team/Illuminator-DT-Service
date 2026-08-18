@@ -169,7 +169,8 @@ Run the PC6, PV, Grid, Wind, Heat, and EV publication contracts and frontend lay
 ```shell
 python -m unittest discover -s tests -p "test_*.py"
 node --check policy-tool-frontend/script.js
-node --test tests/map-data.test.js
+node --check policy-tool-frontend/transformer-profiles.js
+node --test tests/map-data.test.js tests/transformer-profiles.test.js
 ```
 
 With the stack running, execute the integrated smoke test:
