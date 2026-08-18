@@ -200,12 +200,44 @@
             </div>
             <a id="download-link" href="#" class="download-link">Download processed_data.csv</a>
         </div>
+
+        <div class="transformer-profile-tool">
+            <div class="control-label">Transformer profiles</div>
+            <div id="transformer-profile-source" class="scenario-target" data-state="empty">
+                <span>Profile source</span>
+                <strong id="transformer-profile-source-value">No supported area selected</strong>
+            </div>
+            <label class="profile-date-control" for="transformer-profile-date">
+                <span>Profile date (UTC)</span>
+                <input type="date" id="transformer-profile-date" disabled>
+            </label>
+            <button id="load-transformer-profiles-btn" class="secondary-btn" disabled>
+                CALCULATE PROFILES
+            </button>
+            <div id="transformer-profile-status" class="profile-status" aria-live="polite"></div>
+
+            <div id="transformer-profile-output" class="transformer-profile-output" hidden>
+                <div class="profile-stage-control" role="group" aria-label="Transformer level">
+                    <button type="button" data-profile-stage="lv_mv" aria-pressed="true">LV/MV</button>
+                    <button type="button" data-profile-stage="mv_hv" aria-pressed="false">MV/HV</button>
+                </div>
+                <label class="profile-transformer-control" for="transformer-profile-select">
+                    <span>Transformer</span>
+                    <select id="transformer-profile-select"></select>
+                </label>
+                <div id="transformer-profile-summary" class="profile-summary"></div>
+                <div class="scenario-graph transformer-profile-graph">
+                    <canvas id="transformer-profile-canvas"></canvas>
+                </div>
+            </div>
+        </div>
     </section>
 </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="map-data.js"></script>
     <script src="heat-visualization.js"></script>
+    <script src="transformer-profiles.js"></script>
     <script src="script.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>

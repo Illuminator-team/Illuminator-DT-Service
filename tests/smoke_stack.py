@@ -20,8 +20,8 @@ WIND_LAYER = "public_wind_turbines"
 EV_LAYER = "public_ev_chargers"
 CONSUMPTION_LAYER = "consumption_electricity_areas"
 PV_FIXTURE = "BU03610302"
-PV_RELEASE_COMMIT = "4c920c47c34075831a5ad49e9d8f45d9dfac2ae7"
-PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6"
+PV_RELEASE_COMMIT = "357d7a9ede79a9da775649bed1069c196a945d39"
+PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72"
 GRID_RELEASE_COMMIT = "3fe554a05b6609bb33b2f99bd26ba4701a55d971"
 GRID_CONTAINER_DIGEST = "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c"
 GRID_BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
@@ -1385,8 +1385,8 @@ def check_transformer_profile_orchestration(client: SmokeClient) -> None:
     response = client.post_json(
         f"/policy-api/transformer-profiles/pc6/{ORCHESTRATION_PC6}",
         {
-            "start": "2022-12-31T23:00:00Z",
-            "end": "2023-01-01T00:00:00Z",
+            "start": "2023-01-01T00:00:00Z",
+            "end": "2023-01-02T00:00:00Z",
         },
         timeout=300,
         expected_status=200,
@@ -1461,12 +1461,14 @@ def check_transformer_profile_orchestration(client: SmokeClient) -> None:
     )
     for target in [*source_targets, *target_targets]:
         points = target.get("points", [])
-        require(len(points) == 4, "Transformer profile PT15M interval count drift")
+        require(len(points) == 96, "Transformer profile one-day interval count drift")
         require(
             all(
                 point.get("demand_power_kw", 0) > 0
                 and point.get("production_power_kw") == 0
                 and point.get("net_power_kw") == point.get("demand_power_kw")
+                and isinstance(point.get("timestamp"), str)
+                and point["timestamp"].endswith("Z")
                 for point in points
             ),
             "Consumption-only transformer profile values drifted",
@@ -1474,11 +1476,11 @@ def check_transformer_profile_orchestration(client: SmokeClient) -> None:
 
     source_totals = [
         sum(target["points"][index]["net_power_kw"] for target in source_targets)
-        for index in range(4)
+        for index in range(96)
     ]
     target_totals = [
         sum(target["points"][index]["net_power_kw"] for target in target_targets)
-        for index in range(4)
+        for index in range(96)
     ]
     require(
         all(abs(source - target) <= 1e-9 for source, target in zip(source_totals, target_totals)),
@@ -1543,14 +1545,20 @@ def check_transformer_profile_orchestration(client: SmokeClient) -> None:
 def check_pv_transformer_profile_orchestration(
     client: SmokeClient, grid_data_mode: str
 ) -> None:
+    request_started_at = time.monotonic()
     response = client.post_json(
         f"/policy-api/transformer-profiles/pv/cbs-buurt/{PV_ORCHESTRATION_BUURT}",
         {
-            "start": "2024-06-01T12:00:00Z",
-            "end": "2024-06-01T13:00:00Z",
+            "start": "2024-06-01T00:00:00Z",
+            "end": "2024-06-02T00:00:00Z",
         },
         timeout=300,
         expected_status=200,
+    )
+    request_elapsed_seconds = time.monotonic() - request_started_at
+    require(
+        request_elapsed_seconds < 120,
+        "PV one-day transformer orchestration exceeded the upstream timeout budget",
     )
     require(response.get("status") == "completed", "PV transformer orchestration failed")
     require(
@@ -1605,30 +1613,37 @@ def check_pv_transformer_profile_orchestration(
     )
     for target in [*source_targets, *target_targets]:
         points = target.get("points", [])
-        require(len(points) == 4, "PV transformer PT15M interval count drift")
+        require(len(points) == 96, "PV transformer one-day interval count drift")
         require(
             all(
                 point.get("demand_power_kw") == 0
-                and point.get("production_power_kw", 0) < 0
+                and point.get("production_power_kw", 0) <= 0
                 and point.get("net_power_kw") == point.get("production_power_kw")
+                and isinstance(point.get("timestamp"), str)
+                and point["timestamp"].endswith("Z")
                 for point in points
-            ),
+            )
+            and any(point.get("production_power_kw", 0) < 0 for point in points),
             "PV transformer canonical production values drifted",
         )
 
     source_totals = [
         sum(target["points"][index]["net_power_kw"] for target in source_targets)
-        for index in range(4)
+        for index in range(96)
     ]
     target_totals = [
         sum(target["points"][index]["net_power_kw"] for target in target_targets)
-        for index in range(4)
+        for index in range(96)
     ]
     require(
         all(abs(source - target) <= 1e-9 for source, target in zip(source_totals, target_totals)),
         "PV LV/MV and MV/HV aggregate totals diverged",
     )
-    require(all(value < 0 for value in target_totals), "PV daylight production is empty")
+    require(
+        all(value <= 0 for value in target_totals)
+        and any(value < 0 for value in target_totals),
+        "PV one-day production is empty or uses the wrong sign",
+    )
 
     hierarchy = result.get("hierarchy_resolutions", [])
     require(
@@ -1774,6 +1789,18 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
             f"Dashboard Heat view default drift: {view_id}",
         )
     require(b"scenario-panel" in dashboard, "Persistent scenario controls are missing")
+    require(
+        b"transformer-profiles.js" in dashboard,
+        "Dashboard does not load its transformer-profile adapter",
+    )
+    require(
+        b"load-transformer-profiles-btn" in dashboard,
+        "Dashboard transformer-profile command is missing",
+    )
+    require(
+        b"transformer-profile-select" in dashboard,
+        "Dashboard transformer selector is missing",
+    )
 
     status, script, _ = client.get("/dashboard/map-data.js")
     require(status == 200, "Map data adapter did not load")
@@ -1792,6 +1819,21 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     for layer_id in HEAT_LAYERS:
         require(layer_id.encode() in script, f"Dashboard is not configured for {layer_id}")
     require(b"alkmaar_energy_map.geojson" in script, "Static fallback is missing")
+
+    status, profile_adapter, _ = client.get("/dashboard/transformer-profiles.js")
+    require(status == 200, "Transformer profile adapter did not load")
+    require(
+        b"/policy-api/transformer-profiles/pc6/" in profile_adapter,
+        "Consumption transformer-profile route is missing from the dashboard",
+    )
+    require(
+        b"/policy-api/transformer-profiles/pv/cbs-buurt/" in profile_adapter,
+        "PV transformer-profile route is missing from the dashboard",
+    )
+    require(
+        b"source_to_lv_mv" in profile_adapter and b"lv_mv_to_mv_hv" in profile_adapter,
+        "Dashboard transformer-profile stages are incomplete",
+    )
 
     status, heat_visualization, _ = client.get("/dashboard/heat-visualization.js")
     require(status == 200, "Heat visualization adapter did not load")

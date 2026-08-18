@@ -50,7 +50,8 @@ jobs:
       - name: Test dashboard layer adapters
         run: |
           node --check policy-tool-frontend/script.js
-          node --test tests/map-data.test.js
+          node --check policy-tool-frontend/transformer-profiles.js
+          node --test tests/map-data.test.js tests/transformer-profiles.test.js
 
       - name: Authenticate to private model packages
         env:

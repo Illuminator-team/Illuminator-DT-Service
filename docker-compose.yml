@@ -1,5 +1,5 @@
 x-pv-image: &pv-image
-  image: ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
+  image: ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
 
 x-grid-image: &grid-image
   image: ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
@@ -26,7 +26,7 @@ x-consumption-cache-image: &consumption-cache-image
   image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:f4bcf9c44b39ee4e1e244502a220296d1a0cdfa9ed2bb21bf2667654f391ef59
 
 x-pv-cache-image: &pv-cache-image
-  image: ghcr.io/jortgroen/pv-map-source-cache@sha256:c81dd68136bf6a55d412897980910db1d1062f434fa2b70e8ab53374bd6b1b41
+  image: ghcr.io/jortgroen/pv-map-source-cache@sha256:630e5f8a45bbc14699254251ee125415443bc7c185518eaaf5d64e1f86b5ce50
 
 services:
 
@@ -61,8 +61,8 @@ services:
         - CONGESTION_REQUEST_TIMEOUT_SECONDS=120
         - CONSUMPTION_API_URL=http://consumption-api:8080
         - PV_API_URL=http://pv-api:8000
-        - PV_EXPECTED_RELEASE_COMMIT=4c920c47c34075831a5ad49e9d8f45d9dfac2ae7
-        - PV_EXPECTED_CONTAINER_IMAGE=ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
+        - PV_EXPECTED_RELEASE_COMMIT=357d7a9ede79a9da775649bed1069c196a945d39
+        - PV_EXPECTED_CONTAINER_IMAGE=ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
         - PV_EXPECTED_MODEL_VERSION=0.3.0
         - PV_REQUEST_TIMEOUT_SECONDS=120
       labels:
@@ -110,7 +110,7 @@ services:
       PV_RAW_CACHE_DIR: /app/data/raw
       PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
       PV_OUTPUT_DIR: /app/data/processed/pv_capacity
-      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
+      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
     volumes:
       - pv-raw-cache:/app/data/raw:ro
       - pv-generated-outputs:/app/data/processed/pv_capacity
@@ -369,8 +369,8 @@ services:
       CONSUMPTION_API_BASE_URL: http://consumption-api:8080
       PV_API_BASE_URL: http://pv-api:8000
       PV_API_TIMEOUT_SECONDS: "120"
-      PV_EXPECTED_RELEASE_COMMIT: 4c920c47c34075831a5ad49e9d8f45d9dfac2ae7
-      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
+      PV_EXPECTED_RELEASE_COMMIT: 357d7a9ede79a9da775649bed1069c196a945d39
+      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
       PV_EXPECTED_MODEL_VERSION: 0.3.0
     healthcheck:
       test:
@@ -735,8 +735,8 @@ services:
       PUBLISHER_MANIFEST_PATH: /app/layer-manifest.json
       PC6_SOURCE_PATH: /data/alkmaar_energy_map.geojson
       PV_API_URL: http://pv-api:8000
-      PV_EXPECTED_RELEASE_COMMIT: 4c920c47c34075831a5ad49e9d8f45d9dfac2ae7
-      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:b1748568535499bbb58908fd9b677ddf2f33b3569fd8c76af25672bd612478e6
+      PV_EXPECTED_RELEASE_COMMIT: 357d7a9ede79a9da775649bed1069c196a945d39
+      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
       GRID_API_URL: http://grid-api:8080
       GRID_EXPECTED_RELEASE_COMMIT: 3fe554a05b6609bb33b2f99bd26ba4701a55d971
       GRID_EXPECTED_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
