@@ -127,6 +127,24 @@ test('rejects a response that drifts from the canonical timestamp field', () => 
 });
 
 
+test('rejects a transformer response for a different source feature', () => {
+    assert.throws(
+        () => profiles.normalizeResponse(response(), 'BU03610709'),
+        /different map feature/
+    );
+});
+
+
+test('rejects a transformer response without a source feature identity', () => {
+    const payload = response();
+    delete payload.feature.source_feature_id;
+    assert.throws(
+        () => profiles.normalizeResponse(payload, '1483AA'),
+        /no source feature identity/
+    );
+});
+
+
 test('rejects missing transformer stages', () => {
     const payload = response();
     delete payload.result.lv_mv_to_mv_hv;
@@ -161,6 +179,15 @@ test('dashboard exposes transformer level, target, date and calculation controls
     assert.match(script, /demand_power_kw|data\.demand/);
     assert.match(script, /data\.production/);
     assert.match(script, /data\.net/);
+    const loadFunction = script.match(
+        /async function loadTransformerProfiles\(\)[\s\S]*?function initializeTransformerProfileControls/
+    )?.[0] || '';
+    assert.ok(
+        loadFunction.indexOf('resetTransformerProfileOutput') < loadFunction.indexOf('fetch('),
+        'a new request clears any chart left by a previous request'
+    );
+    assert.match(loadFunction, /selectedTransformerProfileSource\?\.id !== request\.source\.id/);
+    assert.match(loadFunction, /normalizeResponse\([\s\S]*request\.source\.id/);
 });
 
 

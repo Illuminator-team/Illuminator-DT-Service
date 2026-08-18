@@ -146,7 +146,7 @@
         };
     }
 
-    function normalizeResponse(payload) {
+    function normalizeResponse(payload, expectedSourceFeatureId = '') {
         requireObject(payload, 'Transformer profile response must be an object.');
         if (payload.status !== 'completed') throw new Error('Transformer profile run did not complete.');
         const result = requireObject(payload.result, 'Transformer profile result is missing.');
@@ -161,8 +161,20 @@
         if (!Number.isInteger(datacompleetheid) || datacompleetheid < 0 || datacompleetheid > 3) {
             throw new Error('Transformer profile datacompleetheid is invalid.');
         }
+        const sourceFeatureId = String(payload.feature?.source_feature_id || '')
+            .replace(/\s+/g, '')
+            .toUpperCase();
+        const expectedId = String(expectedSourceFeatureId || '')
+            .replace(/\s+/g, '')
+            .toUpperCase();
+        if (!sourceFeatureId) {
+            throw new Error('Transformer profile response has no source feature identity.');
+        }
+        if (expectedId && sourceFeatureId !== expectedId) {
+            throw new Error('Transformer profile response belongs to a different map feature.');
+        }
         return {
-            sourceFeatureId: String(payload.feature?.source_feature_id || ''),
+            sourceFeatureId,
             profile: requireObject(payload.profile, 'Transformer source profile is missing.'),
             aggregationMode: String(result.aggregation_mode || ''),
             datacompleetheid,

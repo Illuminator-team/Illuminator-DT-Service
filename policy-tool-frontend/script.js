@@ -1096,10 +1096,10 @@ function initializeScenarioControls() {
     updateScenarioControls();
 }
 
-function resetTransformerProfileOutput() {
+function resetTransformerProfileOutput({ keepPreferredTarget = false } = {}) {
     transformerProfileResult = null;
     activeTransformerProfileStage = 'lv_mv';
-    preferredTransformerProfileId = null;
+    if (!keepPreferredTarget) preferredTransformerProfileId = null;
     const output = document.getElementById('transformer-profile-output');
     output.hidden = true;
     if (transformerProfileChart) {
@@ -1288,6 +1288,7 @@ async function loadTransformerProfiles() {
     }
 
     transformerProfileRunning = true;
+    resetTransformerProfileOutput({ keepPreferredTarget: true });
     updateTransformerProfileControls();
     setTransformerProfileStatus('Calculating transformer profiles...');
     try {
@@ -1298,7 +1299,16 @@ async function loadTransformerProfiles() {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(transformerProfileError(payload, response.status));
-        transformerProfileResult = TransformerProfiles.normalizeResponse(payload);
+        if (
+            selectedTransformerProfileSource?.type !== request.source.type ||
+            selectedTransformerProfileSource?.id !== request.source.id
+        ) {
+            throw new Error('The selected map feature changed while profiles were calculated.');
+        }
+        transformerProfileResult = TransformerProfiles.normalizeResponse(
+            payload,
+            request.source.id
+        );
         activeTransformerProfileStage = 'lv_mv';
         document.getElementById('transformer-profile-output').hidden = false;
         renderTransformerProfileStage(preferredTransformerProfileId);
