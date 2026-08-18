@@ -63,6 +63,16 @@ HEAT_LAYERS = {
     },
 }
 HEAT_PC6_FIXTURE = "pc6-1812ab"
+HEAT_VIEWS = {
+    "reported_neighbourhood_heat_consumers": True,
+    "allocated_pc6_heat_consumers": True,
+    "unallocated_pc6_heat_signals": False,
+    "excluded_electric_heating_pc6": False,
+    "registered_heat_network_developments": True,
+    "documented_actual_heat_sources": True,
+    "potential_heat_sources": False,
+    "documented_large_heat_consumers": True,
+}
 EV_RELEASE_COMMIT = "54a894cc7c96c7d8c27e344ee2724012d5ae4e3d"
 EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec"
 EV_FIXTURE = "NL-ALL-NLLOC018787"
@@ -1726,6 +1736,14 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     )
     for layer_id in HEAT_LAYERS:
         require(layer_id.encode() in dashboard, f"Dashboard {layer_id} control is missing")
+    for view_id, checked in HEAT_VIEWS.items():
+        marker = f'data-heat-view="{view_id}"'.encode()
+        require(marker in dashboard, f"Dashboard Heat view is missing: {view_id}")
+        control = dashboard.split(marker, 1)[1].split(b">", 1)[0]
+        require(
+            (b" checked" in control) is checked,
+            f"Dashboard Heat view default drift: {view_id}",
+        )
     require(b"scenario-panel" in dashboard, "Persistent scenario controls are missing")
 
     status, script, _ = client.get("/dashboard/map-data.js")
@@ -1753,6 +1771,8 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
         b"inference_class",
         b"allocated_connected_dwellings_est",
         b"liander_crosscheck_status",
+        b"unallocated_pc6_heat_signals",
+        b"excluded_electric_heating_pc6",
     ):
         require(
             evidence_field in heat_visualization,

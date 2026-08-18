@@ -360,11 +360,13 @@ class HeatContractTest(unittest.TestCase):
                 session=session,
             )
 
-    def test_compose_uses_digest_pin_hardening_and_explicit_fixture_mode(self):
+    def test_compose_uses_real_local_heat_and_explicit_ci_fixture_mode(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
         local = (ROOT / "docker-compose.local.yml").read_text(encoding="utf-8")
+        ci = (ROOT / "docker-compose.ci.yml").read_text(encoding="utf-8")
         heat_init = compose.split("  heat-init:", 1)[1].split("  heat-api:", 1)[0]
         heat_api = compose.split("  heat-api:", 1)[1].split("#  --", 1)[0]
+        ci_heat_init = ci.split("  heat-init:", 1)[1].split("  reverse-proxy:", 1)[0]
         self.assertIn(DEPLOYMENT_IMAGE, compose)
         self.assertIn(RELEASE_COMMIT, compose)
         self.assertIn("real_source", heat_init)
@@ -375,8 +377,11 @@ class HeatContractTest(unittest.TestCase):
         self.assertIn("service_completed_successfully", heat_api)
         self.assertNotIn("GEOSERVER_ADMIN", heat_api)
         self.assertNotIn("POSTGRES_PASSWORD", heat_api)
-        self.assertIn("--allow-fixture", local)
-        self.assertIn("HEAT_EXPECTED_DATA_MODE: fixture", local)
+        self.assertNotIn("  heat-init:", local)
+        self.assertNotIn("HEAT_EXPECTED_DATA_MODE: fixture", local)
+        self.assertIn("heat_net_map.api", ci_heat_init)
+        self.assertIn("--allow-fixture", ci_heat_init)
+        self.assertIn("HEAT_EXPECTED_DATA_MODE: fixture", ci)
 
     def test_publisher_image_contains_the_heat_modules(self):
         dockerfile = (ROOT / "layer-publisher" / "Dockerfile").read_text()

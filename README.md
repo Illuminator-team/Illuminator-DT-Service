@@ -52,9 +52,9 @@ source download; use the model initializer's explicit `--force` option when a
 fresh Liander source rebuild is intended.
 
 The local override initializes Wind from the model-owned four-turbine Alkmaar
-fixture and all six Heat evidence layers from the Heat model's explicit fixture
-lane. Production uses each model's bounded real-source initializer and persists
-their results in `wind-model-data` and `heat-model-data`.
+fixture. Heat uses the same bounded real-source initializer locally and in
+production, persisting the model outputs in `heat-model-data`. CI alone replaces
+Heat with its deterministic six-layer fixture lane.
 The EV API serves its frozen 784-location Alkmaar charger inventory and writes
 generated run outputs to `ev-generated-outputs`.
 
