@@ -36,9 +36,11 @@ merging their records or meanings.
 ## Runtime and publication
 
 Production runs
-`python -m heat_net_map.api initialize --mode real_source --run-model`. Local
-development and CI explicitly run `--mode fixture --allow-fixture`; the model
-does not silently fall back to fixture data. The API and initializer use UID/GID
+`python -m heat_net_map.api initialize --mode real_source --run-model`. Normal
+local development uses that same real-source path and reuses its results from
+the `heat-model-data` volume. CI explicitly runs
+`--mode fixture --allow-fixture`; the model does not silently fall back to
+fixture data. The API and initializer use UID/GID
 `10001:10001`, a read-only root filesystem, dropped capabilities, and one
 persistent `/data` volume.
 
@@ -49,6 +51,25 @@ geometry, canonical values, provenance, and model-owned
 excluded from content-change hashes. A second publication of the same snapshot
 therefore reports zero changed features, while scientific or source changes
 remain detectable.
+
+## Dashboard overlays
+
+The dashboard follows the model's `alkmaar_heat_network_map.html` evidence
+layout. It displays the real neighbourhood and PC6 polygons rather than fixture
+squares and splits the six API layers into eight independently visible views:
+
+- reported heat-network neighbourhoods, coloured by connected share (on);
+- allocated PC6 estimates, coloured by inference strength and allocation basis (on);
+- signal-only PC6 areas outside reported neighbourhoods (off);
+- PC6 areas excluded as possible electric heating (off);
+- registered heat-network developments (on);
+- documented actual heat sources (on);
+- potential heat sources (off); and
+- documented connected large consumers (on).
+
+The three PC6 views are client-side partitions of
+`inferred_pc6_heat_consumers`; they do not duplicate model data or create extra
+GeoServer layers.
 
 The deterministic acceptance fixture contains one feature per layer. The
 durable PC6 assertion is `pc6-1812ab`, 18 allocated connected dwellings, 414

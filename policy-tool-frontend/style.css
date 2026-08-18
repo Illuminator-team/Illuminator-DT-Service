@@ -279,6 +279,16 @@ input[type="range"].side-slider {
     background: #2171b5;
 }
 
+.heat-signal-swatch {
+    border: 2px dashed #737373;
+    background: #fdbb30;
+}
+
+.heat-exclusion-swatch {
+    border: 2px dashed #737373;
+    background: #9e9ac8;
+}
+
 .heat-development-swatch {
     border: 2px dashed #54278f;
     background: rgba(117, 107, 177, 0.18);

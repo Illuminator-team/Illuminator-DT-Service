@@ -94,34 +94,44 @@
     <fieldset id="heat-visibility" class="grid-visibility heat-visibility" hidden>
         <legend>Heat evidence visibility</legend>
         <label class="visibility-item" for="heat-reported-neighbourhoods">
-            <input type="checkbox" id="heat-reported-neighbourhoods" data-heat-layer="reported_neighbourhood_heat_consumers" checked>
+            <input type="checkbox" id="heat-reported-neighbourhoods" data-heat-view="reported_neighbourhood_heat_consumers" data-heat-source="reported_neighbourhood_heat_consumers" checked>
             <span class="area-swatch heat-neighbourhood-swatch" aria-hidden="true"></span>
             <span>Neighbourhood connection share</span>
         </label>
-        <label class="visibility-item" for="heat-inferred-pc6">
-            <input type="checkbox" id="heat-inferred-pc6" data-heat-layer="inferred_pc6_heat_consumers" checked>
+        <label class="visibility-item" for="heat-allocated-pc6">
+            <input type="checkbox" id="heat-allocated-pc6" data-heat-view="allocated_pc6_heat_consumers" data-heat-source="inferred_pc6_heat_consumers" checked>
             <span class="area-swatch heat-pc6-swatch" aria-hidden="true"></span>
-            <span>PC6 allocation evidence</span>
+            <span>Allocated PC6 estimates</span>
+        </label>
+        <label class="visibility-item" for="heat-unallocated-signals">
+            <input type="checkbox" id="heat-unallocated-signals" data-heat-view="unallocated_pc6_heat_signals" data-heat-source="inferred_pc6_heat_consumers">
+            <span class="area-swatch heat-signal-swatch" aria-hidden="true"></span>
+            <span>Unallocated PC6 signals</span>
+        </label>
+        <label class="visibility-item" for="heat-electric-exclusions">
+            <input type="checkbox" id="heat-electric-exclusions" data-heat-view="excluded_electric_heating_pc6" data-heat-source="inferred_pc6_heat_consumers">
+            <span class="area-swatch heat-exclusion-swatch" aria-hidden="true"></span>
+            <span>Electric-heating exclusions</span>
         </label>
         <label class="visibility-item" for="heat-developments">
-            <input type="checkbox" id="heat-developments" data-heat-layer="registered_heat_network_developments" checked>
+            <input type="checkbox" id="heat-developments" data-heat-view="registered_heat_network_developments" data-heat-source="registered_heat_network_developments" checked>
             <span class="area-swatch heat-development-swatch" aria-hidden="true"></span>
             <span>Network developments</span>
         </label>
         <label class="visibility-item" for="heat-actual-sources">
-            <input type="checkbox" id="heat-actual-sources" data-heat-layer="documented_actual_heat_sources" checked>
+            <input type="checkbox" id="heat-actual-sources" data-heat-view="documented_actual_heat_sources" data-heat-source="documented_actual_heat_sources" checked>
             <span class="point-swatch heat-actual-swatch" aria-hidden="true"></span>
             <span>Actual heat sources</span>
         </label>
-        <label class="visibility-item" for="heat-large-consumers">
-            <input type="checkbox" id="heat-large-consumers" data-heat-layer="documented_large_heat_consumers" checked>
-            <span class="point-swatch heat-consumer-swatch" aria-hidden="true"></span>
-            <span>Large heat consumers</span>
-        </label>
         <label class="visibility-item" for="heat-potential-sources">
-            <input type="checkbox" id="heat-potential-sources" data-heat-layer="potential_heat_sources" checked>
+            <input type="checkbox" id="heat-potential-sources" data-heat-view="potential_heat_sources" data-heat-source="potential_heat_sources">
             <span class="point-swatch heat-potential-swatch" aria-hidden="true"></span>
             <span>Potential heat sources</span>
+        </label>
+        <label class="visibility-item" for="heat-large-consumers">
+            <input type="checkbox" id="heat-large-consumers" data-heat-view="documented_large_heat_consumers" data-heat-source="documented_large_heat_consumers" checked>
+            <span class="point-swatch heat-consumer-swatch" aria-hidden="true"></span>
+            <span>Large heat consumers</span>
         </label>
     </fieldset>
     <div id="heat-evidence-summary" class="heat-evidence-summary" hidden aria-live="polite">
