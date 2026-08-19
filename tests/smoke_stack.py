@@ -1381,7 +1381,9 @@ def check_congestion_model_api(client: SmokeClient) -> None:
     )
 
 
-def check_transformer_profile_orchestration(client: SmokeClient) -> None:
+def check_transformer_profile_orchestration(
+    client: SmokeClient, grid_data_mode: str
+) -> None:
     response = client.post_json(
         f"/policy-api/transformer-profiles/pc6/{ORCHESTRATION_PC6}",
         {},
@@ -1392,13 +1394,16 @@ def check_transformer_profile_orchestration(client: SmokeClient) -> None:
         response.get("feature", {}).get("source_feature_id") == ORCHESTRATION_PC6,
         "Transformer orchestration feature drift",
     )
-    _check_complete_transformer_baseline(response, selected_source="consumption_pc6")
+    _check_complete_transformer_baseline(
+        response,
+        selected_source="consumption_pc6",
+        expect_mixed_profiles=grid_data_mode != "fixture",
+    )
 
 
 def check_pv_transformer_profile_orchestration(
     client: SmokeClient, grid_data_mode: str
 ) -> None:
-    del grid_data_mode
     request_started_at = time.monotonic()
     response = client.post_json(
         f"/policy-api/transformer-profiles/pv/cbs-buurt/{PV_ORCHESTRATION_BUURT}",
@@ -1417,11 +1422,18 @@ def check_pv_transformer_profile_orchestration(
         == PV_ORCHESTRATION_BUURT,
         "PV transformer orchestration feature drift",
     )
-    _check_complete_transformer_baseline(response, selected_source="pv_cbs_buurt")
+    _check_complete_transformer_baseline(
+        response,
+        selected_source="pv_cbs_buurt",
+        expect_mixed_profiles=grid_data_mode != "fixture",
+    )
 
 
 def _check_complete_transformer_baseline(
-    response: dict, *, selected_source: str
+    response: dict,
+    *,
+    selected_source: str,
+    expect_mixed_profiles: bool,
 ) -> None:
     require(response.get("status") == "completed", "Transformer baseline request failed")
     profile = response.get("profile", {})
@@ -1489,10 +1501,6 @@ def _check_complete_transformer_baseline(
         "The selected source is missing from a connected transformer total",
     )
     require(
-        any(sum(target.get("contributor_counts", {}).values()) > 1 for target in all_targets),
-        "No connected transformer includes the other available contributors",
-    )
-    require(
         all(len(target.get("points", [])) == 35040 for target in all_targets),
         "Transformer baseline is not a complete PT15M year",
     )
@@ -1515,14 +1523,26 @@ def _check_complete_transformer_baseline(
         ),
         "Transformer baseline point contract drift",
     )
-    require(
-        any(point.get("demand_power_kw", 0) > 0 for point in sampled_points),
-        "Connected transformer demand is missing",
+    has_demand = any(point.get("demand_power_kw", 0) > 0 for point in sampled_points)
+    has_production = any(
+        point.get("production_power_kw", 0) < 0 for point in sampled_points
     )
-    require(
-        any(point.get("production_power_kw", 0) < 0 for point in sampled_points),
-        "Connected transformer PV production is missing",
-    )
+    if selected_source == "consumption_pc6":
+        require(has_demand, "Selected Consumption profile is missing")
+    else:
+        require(has_production, "Selected PV production profile is missing")
+    if expect_mixed_profiles:
+        require(
+            any(
+                sum(target.get("contributor_counts", {}).values()) > 1
+                for target in all_targets
+            ),
+            "No real-data transformer includes the other available contributors",
+        )
+        require(
+            has_demand and has_production,
+            "Real-data transformer totals do not combine demand and PV production",
+        )
 
 
 def check_consumption_layer(client: SmokeClient) -> None:
@@ -1894,7 +1914,7 @@ def main() -> int:
     check_heat_layers(client, args.expected_heat_data_mode)
     check_ev_layer(client)
     check_consumption_layer(client)
-    check_transformer_profile_orchestration(client)
+    check_transformer_profile_orchestration(client, args.expected_grid_data_mode)
     check_pv_transformer_profile_orchestration(client, args.expected_grid_data_mode)
     check_dashboard_and_simulation(client)
     print(
