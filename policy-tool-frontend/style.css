@@ -144,7 +144,7 @@ button:disabled {
     border-top: 1px solid var(--border-muted);
 }
 
-.profile-date-control,
+.profile-baseline-period,
 .profile-transformer-control {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 145px);
@@ -157,7 +157,6 @@ button:disabled {
     text-transform: uppercase;
 }
 
-.profile-date-control input,
 .profile-transformer-control select {
     min-width: 0;
     height: 32px;
@@ -167,6 +166,12 @@ button:disabled {
     background: #fff;
     color: var(--primary-dark);
     font: 11px/1.2 monospace;
+}
+
+.profile-baseline-period strong {
+    color: var(--primary-dark);
+    font: 700 11px/1.2 monospace;
+    text-align: right;
 }
 
 .secondary-btn {
@@ -811,7 +816,7 @@ button {
         max-width: calc(58vw - 32px);
     }
 
-    .profile-date-control,
+    .profile-baseline-period,
     .profile-transformer-control {
         grid-template-columns: minmax(0, 1fr);
         gap: 5px;

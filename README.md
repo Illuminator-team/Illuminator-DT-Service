@@ -126,6 +126,11 @@ loads `rdp:policy_tool_pc6_energy` from GeoServer
 WFS and automatically falls back to the checked-in GeoJSON if WFS is
 temporarily unavailable. The independent `rdp:pv_capacity` layer is loaded
 from GeoServer WFS without substituting consumption data when it is unavailable.
+
+Transformer profile inspection uses a persisted fixed-year baseline. See
+[`docs/transformer-profile-baseline.md`](docs/transformer-profile-baseline.md)
+for its aggregation behavior, cache lifecycle, and temporary 2023/2024 calendar
+alignment limitation.
 The Grid view loads `rdp:grid_lines`, `rdp:grid_transformers`,
 `rdp:grid_lv_mv_transformer_reach`, and
 `rdp:grid_mv_hv_transformer_reach` from GeoServer WFS. Its checkboxes

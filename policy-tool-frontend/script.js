@@ -1019,6 +1019,7 @@ let transformerProfileRunning = false;
 let transformerProfileResult = null;
 let activeTransformerProfileStage = 'lv_mv';
 let preferredTransformerProfileId = null;
+let transformerProfileHighlightLayer = null;
 
 function getActiveScenario() {
     return selectedScenarioPostcode
@@ -1106,6 +1107,37 @@ function resetTransformerProfileOutput({ keepPreferredTarget = false } = {}) {
         transformerProfileChart.destroy();
         transformerProfileChart = null;
     }
+    clearTransformerProfileHighlight();
+}
+
+function clearTransformerProfileHighlight() {
+    if (transformerProfileHighlightLayer && map.hasLayer(transformerProfileHighlightLayer)) {
+        map.removeLayer(transformerProfileHighlightLayer);
+    }
+    transformerProfileHighlightLayer = null;
+}
+
+function highlightTransformerProfileTarget(target) {
+    clearTransformerProfileHighlight();
+    const transformerType = target.transformerLevel === 'mv_hv_transformer' ? 'mv_hv' : 'lv_mv';
+    const group = gridTransformerLayers[transformerType];
+    if (!group) return;
+    let matchedLayer = null;
+    group.eachLayer((layer) => {
+        if (String(layer.feature?.properties?.component_id || '') === target.id) {
+            matchedLayer = layer;
+        }
+    });
+    if (!matchedLayer?.getLatLng) return;
+    transformerProfileHighlightLayer = L.circleMarker(matchedLayer.getLatLng(), {
+        radius: transformerType === 'mv_hv' ? 15 : 13,
+        color: '#151515',
+        weight: 4,
+        fillColor: '#f5c542',
+        fillOpacity: 0.92,
+        interactive: false
+    }).addTo(map);
+    transformerProfileHighlightLayer.bringToFront();
 }
 
 function setTransformerProfileStatus(message = '', state = '') {
@@ -1118,30 +1150,17 @@ function setTransformerProfileStatus(message = '', state = '') {
 function updateTransformerProfileControls() {
     const sourceContainer = document.getElementById('transformer-profile-source');
     const sourceValue = document.getElementById('transformer-profile-source-value');
-    const dateInput = document.getElementById('transformer-profile-date');
     const loadButton = document.getElementById('load-transformer-profiles-btn');
     const source = selectedTransformerProfileSource;
 
     sourceContainer.dataset.state = source ? 'selected' : 'empty';
     sourceValue.innerText = source?.id || 'No supported area selected';
     sourceValue.title = source?.label || '';
-    dateInput.disabled = !source || transformerProfileRunning;
     loadButton.disabled = !source || transformerProfileRunning;
     loadButton.innerText = transformerProfileRunning
         ? 'CALCULATING...'
         : 'CALCULATE PROFILES';
 
-    if (source) {
-        dateInput.min = `${source.year}-01-01`;
-        dateInput.max = `${source.year}-12-31`;
-        if (!dateInput.value || Number(dateInput.value.slice(0, 4)) !== source.year) {
-            dateInput.value = source.defaultDate;
-        }
-    } else {
-        dateInput.value = '';
-        dateInput.removeAttribute('min');
-        dateInput.removeAttribute('max');
-    }
 }
 
 function selectTransformerProfileSource(source) {
@@ -1181,7 +1200,6 @@ function renderTransformerProfileChart(target) {
     transformerProfileChart = new Chart(canvas.getContext('2d'), {
         type: 'line',
         data: {
-            labels: data.labels,
             datasets: [
                 {
                     label: 'Demand',
@@ -1209,6 +1227,9 @@ function renderTransformerProfileChart(target) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            animation: false,
+            normalized: true,
+            parsing: false,
             interaction: { mode: 'index', intersect: false },
             scales: {
                 x: {
@@ -1222,6 +1243,11 @@ function renderTransformerProfileChart(target) {
                 }
             },
             plugins: {
+                decimation: {
+                    enabled: true,
+                    algorithm: 'lttb',
+                    samples: 1000
+                },
                 legend: {
                     position: 'top',
                     labels: { boxWidth: 10, font: { size: 9 } }
@@ -1236,11 +1262,18 @@ function renderTransformerProfileTarget(target) {
     const mode = transformerProfileResult.aggregationMode
         .replace('two_stage_', '')
         .replaceAll('_', ' ');
+    const contributorCounts = target.raw.contributor_counts || {};
+    const contributorTotal = (
+        Number(contributorCounts.consumption_pc6 || 0)
+        + Number(contributorCounts.pv_cbs_buurt || 0)
+    );
     summary.innerHTML = `
         <span>${target.points.length} × ${escapeHtml(transformerProfileResult.resolution)}</span>
+        <span>${contributorTotal.toLocaleString('nl-NL')} contributors</span>
         <strong>${escapeHtml(mode)}<br>Datacompleetheid ${transformerProfileResult.datacompleetheid}/3</strong>
     `;
     renderTransformerProfileChart(target);
+    highlightTransformerProfileTarget(target);
 }
 
 function renderTransformerProfileStage(preferredId = null) {
@@ -1278,10 +1311,9 @@ function focusLoadedTransformerProfile(transformerId, transformerType) {
 
 async function loadTransformerProfiles() {
     if (!selectedTransformerProfileSource || transformerProfileRunning) return;
-    const date = document.getElementById('transformer-profile-date').value;
     let request;
     try {
-        request = TransformerProfiles.buildRequest(selectedTransformerProfileSource, date);
+        request = TransformerProfiles.buildRequest(selectedTransformerProfileSource);
     } catch (error) {
         setTransformerProfileStatus(error.message, 'error');
         return;
@@ -1294,8 +1326,7 @@ async function loadTransformerProfiles() {
     try {
         const response = await fetch(request.url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(request.body)
+            headers: { 'Content-Type': 'application/json' }
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(transformerProfileError(payload, response.status));

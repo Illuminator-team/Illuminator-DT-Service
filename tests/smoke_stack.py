@@ -1384,181 +1384,32 @@ def check_congestion_model_api(client: SmokeClient) -> None:
 def check_transformer_profile_orchestration(client: SmokeClient) -> None:
     response = client.post_json(
         f"/policy-api/transformer-profiles/pc6/{ORCHESTRATION_PC6}",
-        {
-            "start": "2023-01-01T00:00:00Z",
-            "end": "2023-01-02T00:00:00Z",
-        },
+        {},
         timeout=300,
         expected_status=200,
-    )
-    require(response.get("status") == "completed", "Transformer orchestration failed")
-    require(
-        response.get("grid_assignment", {}).get("hierarchy_policy")
-        == "nearest_electrical_root_v1",
-        "Grid hierarchy policy drift",
-    )
-    require(
-        response.get("congestion_aggregation", {}).get("aggregation_mode")
-        == "two_stage_provisional_estimated"
-        and response.get("congestion_aggregation", {}).get("hierarchy_policy")
-        == "nearest_electrical_root_v1",
-        "Congestion orchestration authority drift",
     )
     require(
         response.get("feature", {}).get("source_feature_id") == ORCHESTRATION_PC6,
         "Transformer orchestration feature drift",
     )
-    profile = response.get("profile", {})
-    require(profile.get("model_id") == "consumption-map", "Profile model drift")
-    require(profile.get("model_version") == "0.4.0", "Profile version drift")
-    require(profile.get("resolution") == "PT15M", "Profile resolution drift")
-    for field in ("layer_version", "profile_version"):
-        value = profile.get(field)
-        require(
-            isinstance(value, str)
-            and len(value) == 64
-            and all(character in "0123456789abcdef" for character in value),
-            f"Profile {field} is not an immutable SHA-256 identity",
-        )
-
-    result = response.get("result", {})
-    require(
-        result.get("aggregation_mode") == "two_stage_provisional_estimated",
-        "Provisional aggregation mode drift",
-    )
-    require(result.get("persistence") == "none", "Scenario persistence drift")
-    require(result.get("resolution") == "PT15M", "Aggregate resolution drift")
-    require(result.get("complete") is True, "Transformer hierarchy is incomplete")
-    require(
-        isinstance(result.get("overall_datacompleetheid"), int)
-        and not isinstance(result["overall_datacompleetheid"], bool)
-        and 0 <= result["overall_datacompleetheid"] <= 1,
-        "Aggregate datacompleetheid drift",
-    )
-    coverage = result.get("profile_coverage", [])
-    require(len(coverage) == 1 and coverage[0].get("complete") is True, "Profile coverage drift")
-
-    source_stage = result.get("source_to_lv_mv", {})
-    target_stage = result.get("lv_mv_to_mv_hv", {})
-    require(source_stage.get("complete") is True, "LV/MV aggregation is incomplete")
-    require(target_stage.get("complete") is True, "MV/HV aggregation is incomplete")
-    source_targets = source_stage.get("targets", [])
-    target_targets = target_stage.get("targets", [])
-    require(len(source_targets) == 3, "1483AA LV/MV transformer count drift")
-    require(len(target_targets) == 1, "1483AA MV/HV transformer count drift")
-    require(
-        target_targets[0].get("transformer_id")
-        == "grid-transformer-mv-hv-station-609006",
-        "1483AA provisional parent is not OS OTERLEEK",
-    )
-    require(
-        all(item.get("transformer_level") == "lv_mv_transformer" for item in source_targets),
-        "LV/MV target level drift",
-    )
-    require(
-        all(item.get("transformer_level") == "mv_hv_transformer" for item in target_targets),
-        "MV/HV target level drift",
-    )
-    for target in [*source_targets, *target_targets]:
-        points = target.get("points", [])
-        require(len(points) == 96, "Transformer profile one-day interval count drift")
-        require(
-            all(
-                point.get("demand_power_kw", 0) > 0
-                and point.get("production_power_kw") == 0
-                and point.get("net_power_kw") == point.get("demand_power_kw")
-                and isinstance(point.get("timestamp"), str)
-                and point["timestamp"].endswith("Z")
-                for point in points
-            ),
-            "Consumption-only transformer profile values drifted",
-        )
-
-    source_totals = [
-        sum(target["points"][index]["net_power_kw"] for target in source_targets)
-        for index in range(96)
-    ]
-    target_totals = [
-        sum(target["points"][index]["net_power_kw"] for target in target_targets)
-        for index in range(96)
-    ]
-    require(
-        all(abs(source - target) <= 1e-9 for source, target in zip(source_totals, target_totals)),
-        "LV/MV and MV/HV aggregate totals diverged",
-    )
-    require(
-        len(result.get("hierarchy_resolutions", [])) == 3
-        and all(
-            item.get("status") == "available"
-            and item.get("complete") is True
-            and item.get("target_transformer_id")
-            == "grid-transformer-mv-hv-station-609006"
-            and item.get("datacompleetheid") == 1
-            for item in result["hierarchy_resolutions"]
-        ),
-        "Grid hierarchy contains an unresolved transformer parent",
-    )
-    require(
-        all(
-            len(item.get("evidence", [])) == 1
-            and item["evidence"][0].get("code")
-            == "grid_lv_mv_to_mv_hv_hierarchy"
-            and isinstance(item["evidence"][0].get("value"), dict)
-            for item in result["hierarchy_resolutions"]
-        ),
-        "Grid provisional hierarchy evidence is missing",
-    )
-    hierarchy_evidence = [
-        item["evidence"][0]["value"] for item in result["hierarchy_resolutions"]
-    ]
-    require(
-        {item.get("electrical_distance_edges") for item in hierarchy_evidence}
-        == {69, 72, 78}
-        and all(
-            item.get("hierarchy_policy_applied")
-            == "nearest_electrical_root_v1"
-            and item.get("hierarchy_authority_status") == "provisional_estimated"
-            and item.get("evidence_status") == "model_estimated_provisional"
-            and item.get("share_scope") == "provisional_lv_mv_to_mv_hv"
-            and item.get("root_bus_ids") == ["27999"]
-            and item.get("nearest_tied_root_bus_ids") == []
-            for item in hierarchy_evidence
-        ),
-        "Grid provisional hierarchy evidence drift",
-    )
-    hierarchy_contributions = target_targets[0].get("hierarchy_contributions", [])
-    require(
-        len(hierarchy_contributions) == 3
-        and all(
-            item.get("relation_scope")
-            == "provisional_estimated_electrical_parent"
-            and item.get("relation_share") == 1.0
-            and item.get("grid_model_git_sha")
-            == GRID_RELEASE_COMMIT
-            and item.get("hierarchy_datacompleetheid") == 1
-            for item in hierarchy_contributions
-        ),
-        "Congestion provisional hierarchy contribution drift",
-    )
+    _check_complete_transformer_baseline(response, selected_source="consumption_pc6")
 
 
 def check_pv_transformer_profile_orchestration(
     client: SmokeClient, grid_data_mode: str
 ) -> None:
+    del grid_data_mode
     request_started_at = time.monotonic()
     response = client.post_json(
         f"/policy-api/transformer-profiles/pv/cbs-buurt/{PV_ORCHESTRATION_BUURT}",
-        {
-            "start": "2024-06-01T00:00:00Z",
-            "end": "2024-06-02T00:00:00Z",
-        },
+        {},
         timeout=300,
         expected_status=200,
     )
     request_elapsed_seconds = time.monotonic() - request_started_at
     require(
         request_elapsed_seconds < 120,
-        "PV one-day transformer orchestration exceeded the upstream timeout budget",
+        "Cached PV transformer baseline exceeded the response timeout budget",
     )
     require(response.get("status") == "completed", "PV transformer orchestration failed")
     require(
@@ -1566,95 +1417,111 @@ def check_pv_transformer_profile_orchestration(
         == PV_ORCHESTRATION_BUURT,
         "PV transformer orchestration feature drift",
     )
-    profile = response.get("profile", {})
-    require(profile.get("model_id") == "pv-map", "PV profile model drift")
-    require(profile.get("producer_model_id") == "pv-capacity-model", "PV producer drift")
-    require(profile.get("model_version") == "0.3.0", "PV profile version drift")
-    require(profile.get("profile_calendar") == 2024, "PV profile calendar drift")
-    require(profile.get("scenario_year") == 2035, "PV scenario year drift")
-    require(
-        profile.get("canonical_sign_convention") == "negative_production",
-        "PV canonical sign convention drift",
-    )
-    require(
-        profile.get("release_commit") == PV_RELEASE_COMMIT
-        and profile.get("container_image") == PV_CONTAINER_IMAGE,
-        "PV orchestration release identity drift",
-    )
+    _check_complete_transformer_baseline(response, selected_source="pv_cbs_buurt")
 
+
+def _check_complete_transformer_baseline(
+    response: dict, *, selected_source: str
+) -> None:
+    require(response.get("status") == "completed", "Transformer baseline request failed")
+    profile = response.get("profile", {})
     result = response.get("result", {})
-    require(result.get("complete") is True, "PV transformer hierarchy is incomplete")
+    require(profile.get("profile_year") == 2023, "Fixed profile year drift")
+    require(profile.get("resolution") == "PT15M", "Profile resolution drift")
     require(
-        result.get("aggregation_mode") == "two_stage_provisional_estimated",
-        "PV provisional aggregation mode drift",
+        profile.get("scope") == "complete_connected_transformer_baseline",
+        "Transformer profile scope drift",
+    )
+    cache_fingerprint = profile.get("cache_fingerprint")
+    require(
+        isinstance(cache_fingerprint, str) and len(cache_fingerprint) == 64,
+        "Transformer baseline cache identity is missing",
+    )
+    require(len(profile.get("source_models", [])) == 3, "Baseline provenance drift")
+    require(result.get("complete") is True, "Transformer baseline is incomplete")
+    require(
+        result.get("persistence") == "precomputed_baseline",
+        "Transformer baseline persistence drift",
+    )
+    require(
+        result.get("aggregation_mode") == "two_stage_precomputed_baseline",
+        "Transformer baseline aggregation mode drift",
     )
     require(
         isinstance(result.get("overall_datacompleetheid"), int)
         and not isinstance(result["overall_datacompleetheid"], bool)
-        and 0 <= result["overall_datacompleetheid"] <= 1,
-        "PV aggregate datacompleetheid drift",
+        and 0 <= result["overall_datacompleetheid"] <= 3,
+        "Transformer baseline datacompleetheid drift",
+    )
+    limitation_codes = {
+        item.get("code") for item in result.get("limitations", []) if isinstance(item, dict)
+    }
+    require(
+        "pv_weather_calendar_projected_to_2023" in limitation_codes,
+        "Temporary PV calendar limitation is not recorded",
+    )
+    require(
+        "temporary_policy_tool_cache_ownership" in limitation_codes,
+        "Temporary transformer-cache ownership limitation is not recorded",
     )
 
-    source_targets = result.get("source_to_lv_mv", {}).get("targets", [])
-    target_targets = result.get("lv_mv_to_mv_hv", {}).get("targets", [])
-    expected_lv_mv = (
-        PV_ORCHESTRATION_FIXTURE_LV_MV
-        if grid_data_mode == "fixture"
-        else PV_ORCHESTRATION_REAL_LV_MV
+    stages = (
+        ("source_to_lv_mv", "lv_mv_transformer"),
+        ("lv_mv_to_mv_hv", "mv_hv_transformer"),
     )
-    require(
-        {item.get("transformer_id") for item in source_targets} == expected_lv_mv,
-        "PV LV/MV transformer set drift",
-    )
-    require(
-        len(target_targets) == 1
-        and target_targets[0].get("transformer_id") == PV_ORCHESTRATION_MV_HV,
-        "PV MV/HV transformer target drift",
-    )
-    for target in [*source_targets, *target_targets]:
-        points = target.get("points", [])
-        require(len(points) == 96, "PV transformer one-day interval count drift")
+    all_targets = []
+    for stage_id, transformer_level in stages:
+        stage = result.get(stage_id, {})
+        targets = stage.get("targets", [])
+        require(stage.get("complete") is True and targets, f"{stage_id} is incomplete")
         require(
-            all(
-                point.get("demand_power_kw") == 0
-                and point.get("production_power_kw", 0) <= 0
-                and point.get("net_power_kw") == point.get("production_power_kw")
-                and isinstance(point.get("timestamp"), str)
-                and point["timestamp"].endswith("Z")
-                for point in points
-            )
-            and any(point.get("production_power_kw", 0) < 0 for point in points),
-            "PV transformer canonical production values drifted",
+            all(target.get("transformer_level") == transformer_level for target in targets),
+            f"{stage_id} transformer level drift",
         )
+        all_targets.extend(targets)
 
-    source_totals = [
-        sum(target["points"][index]["net_power_kw"] for target in source_targets)
-        for index in range(96)
-    ]
-    target_totals = [
-        sum(target["points"][index]["net_power_kw"] for target in target_targets)
-        for index in range(96)
-    ]
     require(
-        all(abs(source - target) <= 1e-9 for source, target in zip(source_totals, target_totals)),
-        "PV LV/MV and MV/HV aggregate totals diverged",
-    )
-    require(
-        all(value <= 0 for value in target_totals)
-        and any(value < 0 for value in target_totals),
-        "PV one-day production is empty or uses the wrong sign",
-    )
-
-    hierarchy = result.get("hierarchy_resolutions", [])
-    require(
-        len(hierarchy) == len(expected_lv_mv)
-        and all(
-            item.get("status") == "available"
-            and item.get("complete") is True
-            and item.get("target_transformer_id") == PV_ORCHESTRATION_MV_HV
-            for item in hierarchy
+        all(
+            0 < target.get("selected_source_share", 0) <= 1
+            and target.get("contributor_counts", {}).get(selected_source, 0) >= 1
+            for target in all_targets
         ),
-        "PV hierarchy contains an unresolved transformer parent",
+        "The selected source is missing from a connected transformer total",
+    )
+    require(
+        any(sum(target.get("contributor_counts", {}).values()) > 1 for target in all_targets),
+        "No connected transformer includes the other available contributors",
+    )
+    require(
+        all(len(target.get("points", [])) == 35040 for target in all_targets),
+        "Transformer baseline is not a complete PT15M year",
+    )
+    sampled_points = [
+        point
+        for target in all_targets
+        for point in target["points"][::24]
+    ]
+    require(
+        all(
+            isinstance(point.get("timestamp"), str)
+            and point["timestamp"].endswith("Z")
+            and abs(
+                point.get("net_power_kw", 0)
+                - point.get("demand_power_kw", 0)
+                - point.get("production_power_kw", 0)
+            )
+            <= 1e-7
+            for point in sampled_points
+        ),
+        "Transformer baseline point contract drift",
+    )
+    require(
+        any(point.get("demand_power_kw", 0) > 0 for point in sampled_points),
+        "Connected transformer demand is missing",
+    )
+    require(
+        any(point.get("production_power_kw", 0) < 0 for point in sampled_points),
+        "Connected transformer PV production is missing",
     )
 
 

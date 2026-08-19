@@ -145,5 +145,23 @@ services:
       orchestration-grid-api:
         condition: service_healthy
 
+  transformer-profile-init:
+    command:
+      - python
+      - -m
+      - profile_cache_init
+      - --output
+      - /app/data/transformer-profiles/baseline-2023.json.gz
+      - --consumption-root
+      - /model-data/consumption
+      - --grid-url
+      - http://orchestration-grid-api:8080
+      - --pv-url
+      - http://pv-api:8000
+      - --reuse-ready-cache
+    depends_on:
+      orchestration-grid-api:
+        condition: service_healthy
+
 volumes:
   orchestration-grid-model-data:

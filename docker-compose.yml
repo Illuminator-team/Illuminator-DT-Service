@@ -50,6 +50,7 @@ services:
       build: ./policy-tool-backend
       volumes:
         - policy-tool-data:/app/data/processed
+        - transformer-profile-cache:/app/data/transformer-profiles:ro
         - ./layer-publisher/layer-manifest.json:/app/config/layer-manifest.json:ro
         - ./policy-tool-frontend/data/alkmaar_energy_map.geojson:/app/config/alkmaar_energy_map.geojson:ro
       environment:
@@ -65,6 +66,10 @@ services:
         - PV_EXPECTED_CONTAINER_IMAGE=ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
         - PV_EXPECTED_MODEL_VERSION=0.3.0
         - PV_REQUEST_TIMEOUT_SECONDS=120
+        - TRANSFORMER_PROFILE_CACHE_PATH=/app/data/transformer-profiles/baseline-2023.json.gz
+      depends_on:
+        transformer-profile-init:
+          condition: service_completed_successfully
       labels:
         - "traefik.enable=true"
         # path to /policy-api is needed to out frontend to make calls to the backend
@@ -502,6 +507,33 @@ services:
       - "traefik.http.services.consumption-api.loadbalancer.server.port=8080"
     restart: unless-stopped
 
+  transformer-profile-init:
+      build: ./policy-tool-backend
+      command:
+        - python
+        - -m
+        - profile_cache_init
+        - --output
+        - /app/data/transformer-profiles/baseline-2023.json.gz
+        - --consumption-root
+        - /model-data/consumption
+        - --grid-url
+        - http://grid-api:8080
+        - --pv-url
+        - http://pv-api:8000
+        - --reuse-ready-cache
+      volumes:
+        - transformer-profile-cache:/app/data/transformer-profiles
+        - consumption-model-data:/model-data/consumption:ro
+      depends_on:
+        consumption-api:
+          condition: service_healthy
+        grid-api:
+          condition: service_healthy
+        pv-api:
+          condition: service_healthy
+      restart: "no"
+
 #  ------------------------------------END OF PLAYGROUND -------------------------------------
 
 
@@ -809,6 +841,7 @@ volumes:
   grafana-data:
   volumes:
   policy-tool-data:
+  transformer-profile-cache:
   pv-raw-cache:
   pv-generated-outputs:
   grid-crosswalk-data:
