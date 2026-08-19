@@ -28,9 +28,10 @@ function response() {
         profile: { profile_id: 'consumption-profile', resolution: 'PT15M' },
         result: {
             complete: true,
-            persistence: 'none',
+            persistence: 'precomputed_baseline',
+            profile_year: 2023,
             resolution: 'PT15M',
-            aggregation_mode: 'two_stage_provisional_estimated',
+            aggregation_mode: 'two_stage_precomputed_baseline',
             overall_datacompleetheid: 1,
             source_to_lv_mv: {
                 complete: true,
@@ -55,40 +56,26 @@ function response() {
 }
 
 
-test('builds a one-day Consumption transformer request', () => {
-    const request = profiles.buildRequest(
-        { type: 'pc6', id: '1483 aa', label: '1483AA' },
-        '2023-01-01'
-    );
+test('builds a fixed-year Consumption transformer request', () => {
+    const request = profiles.buildRequest({ type: 'pc6', id: '1483 aa', label: '1483AA' });
     assert.equal(request.url, '/policy-api/transformer-profiles/pc6/1483AA');
-    assert.deepEqual(request.body, {
-        start: '2023-01-01T00:00:00Z',
-        end: '2023-01-02T00:00:00Z'
-    });
+    assert.equal(request.body, null);
+    assert.equal(request.source.year, 2023);
 });
 
 
-test('builds a one-day PV transformer request on the 2024 calendar', () => {
-    const request = profiles.buildRequest(
-        { type: 'cbs_buurt', id: 'bu03610709', label: 'Landelijk gebied Noord' },
-        '2024-06-01'
-    );
+test('builds a fixed-year PV transformer request on the common 2023 calendar', () => {
+    const request = profiles.buildRequest({
+        type: 'cbs_buurt',
+        id: 'bu03610709',
+        label: 'Landelijk gebied Noord'
+    });
     assert.equal(
         request.url,
         '/policy-api/transformer-profiles/pv/cbs-buurt/BU03610709'
     );
-    assert.deepEqual(request.body, {
-        start: '2024-06-01T00:00:00Z',
-        end: '2024-06-02T00:00:00Z'
-    });
-});
-
-
-test('rejects a profile date outside the model calendar', () => {
-    assert.throws(
-        () => profiles.buildRequest({ type: 'pc6', id: '1483AA' }, '2024-01-01'),
-        /must be in 2023/
-    );
+    assert.equal(request.body, null);
+    assert.equal(request.source.year, 2023);
 });
 
 
@@ -97,10 +84,18 @@ test('normalizes both transformer stages and chart values', () => {
     assert.equal(result.stages.lv_mv.targets[0].id, 'grid-transformer-lv-mv-1');
     assert.equal(result.stages.mv_hv.targets[0].id, 'grid-transformer-mv-hv-1');
     assert.deepEqual(profiles.chartData(result.stages.lv_mv.targets[0]), {
-        labels: ['2023-01-01T00:00:00Z', '2023-01-01T01:00:00Z'],
-        demand: [10, 12],
-        production: [0, 0],
-        net: [10, 12]
+        demand: [
+            { x: Date.parse('2023-01-01T00:00:00Z'), y: 10 },
+            { x: Date.parse('2023-01-01T01:00:00Z'), y: 12 }
+        ],
+        production: [
+            { x: Date.parse('2023-01-01T00:00:00Z'), y: 0 },
+            { x: Date.parse('2023-01-01T01:00:00Z'), y: 0 }
+        ],
+        net: [
+            { x: Date.parse('2023-01-01T00:00:00Z'), y: 10 },
+            { x: Date.parse('2023-01-01T01:00:00Z'), y: 12 }
+        ]
     });
 });
 
@@ -155,14 +150,15 @@ test('rejects missing transformer stages', () => {
 });
 
 
-test('dashboard exposes transformer level, target, date and calculation controls', () => {
+test('dashboard exposes fixed-year transformer controls and map highlighting', () => {
     const frontend = path.join(__dirname, '..', 'policy-tool-frontend');
     const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
     const script = fs.readFileSync(path.join(frontend, 'script.js'), 'utf8');
     const scenarioPanel = html.match(/<section id="scenario-panel"[\s\S]*?<\/section>/)?.[0];
 
     assert.ok(scenarioPanel, 'scenario panel is present');
-    assert.match(scenarioPanel, /id="transformer-profile-date"/);
+    assert.doesNotMatch(scenarioPanel, /id="transformer-profile-date"/);
+    assert.match(scenarioPanel, /2023 baseline/);
     assert.match(scenarioPanel, /id="load-transformer-profiles-btn"/);
     assert.match(scenarioPanel, /data-profile-stage="lv_mv"/);
     assert.match(scenarioPanel, /data-profile-stage="mv_hv"/);
@@ -174,6 +170,8 @@ test('dashboard exposes transformer level, target, date and calculation controls
     );
     assert.match(script, /function loadTransformerProfiles\(\)/);
     assert.match(script, /function renderTransformerProfileChart\(target\)/);
+    assert.match(script, /function highlightTransformerProfileTarget\(target\)/);
+    assert.match(script, /transformerProfileHighlightLayer/);
     assert.match(script, /type: 'pc6'/);
     assert.match(script, /type: 'cbs_buurt'/);
     assert.match(script, /demand_power_kw|data\.demand/);

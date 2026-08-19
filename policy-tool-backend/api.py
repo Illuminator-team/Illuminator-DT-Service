@@ -1,15 +1,12 @@
 import json
 import os
 import subprocess
-from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
-from orchestration import ModelApiClient, OrchestrationError, TransformerProfileOrchestrator
-from orchestration import validate_request_timeout
+from transformer_baseline import BaselineUnavailable, TransformerBaselineStore
 
 app = FastAPI()
 
@@ -28,32 +25,13 @@ PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 LAYER_REGISTRY_PATH = Path(
     os.getenv("LAYER_REGISTRY_PATH", "/app/config/layer-manifest.json")
 )
-PC6_GEOMETRY_PATH = Path(
-    os.getenv("PC6_GEOMETRY_PATH", "/app/config/alkmaar_energy_map.geojson")
+TRANSFORMER_PROFILE_CACHE_PATH = Path(
+    os.getenv(
+        "TRANSFORMER_PROFILE_CACHE_PATH",
+        "/app/data/transformer-profiles/baseline-2023.json.gz",
+    )
 )
-GRID_API_URL = os.getenv("GRID_API_URL", "http://grid-api:8080")
-CONGESTION_API_URL = os.getenv("CONGESTION_API_URL", "http://congestion-backend:8080")
-CONSUMPTION_API_URL = os.getenv("CONSUMPTION_API_URL", "http://consumption-api:8080")
-CONGESTION_REQUEST_TIMEOUT_SECONDS = validate_request_timeout(
-    os.getenv("CONGESTION_REQUEST_TIMEOUT_SECONDS", "120")
-)
-PV_API_URL = os.getenv("PV_API_URL", "http://pv-api:8000")
-PV_EXPECTED_RELEASE_COMMIT = os.getenv("PV_EXPECTED_RELEASE_COMMIT", "")
-PV_EXPECTED_CONTAINER_IMAGE = os.getenv("PV_EXPECTED_CONTAINER_IMAGE", "")
-PV_EXPECTED_MODEL_VERSION = os.getenv("PV_EXPECTED_MODEL_VERSION", "")
-PV_REQUEST_TIMEOUT_SECONDS = validate_request_timeout(
-    os.getenv("PV_REQUEST_TIMEOUT_SECONDS", "120")
-)
-
-
-class TransformerProfileScenario(BaseModel):
-    start: datetime = datetime.fromisoformat("2022-12-31T23:00:00+00:00")
-    end: datetime = datetime.fromisoformat("2023-01-01T00:00:00+00:00")
-
-
-class PvTransformerProfileScenario(BaseModel):
-    start: datetime = datetime.fromisoformat("2024-06-01T12:00:00+00:00")
-    end: datetime = datetime.fromisoformat("2024-06-01T13:00:00+00:00")
+TRANSFORMER_BASELINE = TransformerBaselineStore(TRANSFORMER_PROFILE_CACHE_PATH)
 
 
 @app.get("/")
@@ -99,59 +77,19 @@ def layers():
 
 
 @app.post("/transformer-profiles/pc6/{pc6}")
-def transformer_profiles_pc6(
-    pc6: str, scenario: TransformerProfileScenario
-):
-    orchestrator = TransformerProfileOrchestrator(
-        consumption_client=ModelApiClient(CONSUMPTION_API_URL, "consumption"),
-        grid_client=ModelApiClient(GRID_API_URL, "grid"),
-        congestion_client=ModelApiClient(
-            CONGESTION_API_URL,
-            "congestion",
-            request_timeout=CONGESTION_REQUEST_TIMEOUT_SECONDS,
-        ),
-        pc6_geometry_path=PC6_GEOMETRY_PATH,
-    )
+def transformer_profiles_pc6(pc6: str):
     try:
-        return orchestrator.aggregate_pc6(
-            pc6,
-            start=scenario.start,
-            end=scenario.end,
-        )
-    except OrchestrationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.as_detail()) from exc
+        return TRANSFORMER_BASELINE.response_for("pc6", pc6)
+    except BaselineUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/transformer-profiles/pv/cbs-buurt/{buurt_code}")
-def transformer_profiles_pv_buurt(
-    buurt_code: str, scenario: PvTransformerProfileScenario
-):
-    orchestrator = TransformerProfileOrchestrator(
-        consumption_client=ModelApiClient(CONSUMPTION_API_URL, "consumption"),
-        grid_client=ModelApiClient(GRID_API_URL, "grid"),
-        congestion_client=ModelApiClient(
-            CONGESTION_API_URL,
-            "congestion",
-            request_timeout=CONGESTION_REQUEST_TIMEOUT_SECONDS,
-        ),
-        pc6_geometry_path=PC6_GEOMETRY_PATH,
-        pv_client=ModelApiClient(
-            PV_API_URL,
-            "pv",
-            request_timeout=PV_REQUEST_TIMEOUT_SECONDS,
-        ),
-        pv_expected_release_commit=PV_EXPECTED_RELEASE_COMMIT,
-        pv_expected_container_image=PV_EXPECTED_CONTAINER_IMAGE,
-        pv_expected_model_version=PV_EXPECTED_MODEL_VERSION,
-    )
+def transformer_profiles_pv_buurt(buurt_code: str):
     try:
-        return orchestrator.aggregate_pv_buurt(
-            buurt_code,
-            start=scenario.start,
-            end=scenario.end,
-        )
-    except OrchestrationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.as_detail()) from exc
+        return TRANSFORMER_BASELINE.response_for("cbs_buurt", buurt_code)
+    except BaselineUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 @app.get("/simulate/{pc6}")
 async def run_simulation(pc6: str, electrification: float = 0.0):

@@ -69,8 +69,11 @@ bootstrapped with networking disabled, ran the full 35,136-interval physical
 validation, and wrote a separate identity-bound production marker only after
 that validation passed. A daylight HTTP check for `BU03610302` returned four
 positive PT15M values without runtime network traffic. The PV API remains on a
-2024 reference-weather calendar; it is not combined with Consumption's 2023
-calendar until an explicit calendar-alignment policy is agreed.
+2024 reference-weather calendar. The later transformer-baseline decision keeps
+that native contract intact but temporarily removes 29 February and projects
+the remaining PV intervals onto the fixed 2023 Consumption axis. This is an
+explicit low-confidence (`datacompleetheid` 1/3) MVP limitation, not a shared
+observed-weather calendar.
 
 The first cache-backed Illuminator run reached the publisher but exposed an
 extra closing parenthesis in the PostGIS bulk-insert template. The next run

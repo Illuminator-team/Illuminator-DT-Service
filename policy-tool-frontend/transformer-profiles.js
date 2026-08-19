@@ -21,13 +21,11 @@
     const SOURCES = Object.freeze({
         pc6: Object.freeze({
             year: 2023,
-            defaultDate: '2023-01-01',
             idPattern: /^\d{4}[A-Z]{2}$/,
             path: (id) => `/policy-api/transformer-profiles/pc6/${encodeURIComponent(id)}`
         }),
         cbs_buurt: Object.freeze({
-            year: 2024,
-            defaultDate: '2024-06-01',
+            year: 2023,
             idPattern: /^BU\d{8}$/,
             path: (id) => (
                 `/policy-api/transformer-profiles/pv/cbs-buurt/${encodeURIComponent(id)}`
@@ -53,35 +51,17 @@
             type: source.type,
             id,
             label: String(source.label || id),
-            year: definition.year,
-            defaultDate: definition.defaultDate
+            year: definition.year
         };
     }
 
-    function dayWindow(date, expectedYear) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
-            throw new Error('Select a valid profile date.');
-        }
-        const start = new Date(`${date}T00:00:00Z`);
-        if (Number.isNaN(start.getTime()) || start.getUTCFullYear() !== expectedYear) {
-            throw new Error(`The profile date must be in ${expectedYear}.`);
-        }
-        const normalizedDate = start.toISOString().slice(0, 10);
-        if (normalizedDate !== date) throw new Error('Select a valid profile date.');
-        const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-        return {
-            start: start.toISOString().replace('.000Z', 'Z'),
-            end: end.toISOString().replace('.000Z', 'Z')
-        };
-    }
-
-    function buildRequest(source, date) {
+    function buildRequest(source) {
         const normalized = normalizeSource(source);
         const definition = SOURCES[normalized.type];
         return {
             source: normalized,
             url: definition.path(normalized.id),
-            body: dayWindow(date, definition.year)
+            body: null
         };
     }
 
@@ -152,7 +132,8 @@
         const result = requireObject(payload.result, 'Transformer profile result is missing.');
         if (
             result.complete !== true ||
-            result.persistence !== 'none' ||
+            result.persistence !== 'precomputed_baseline' ||
+            result.profile_year !== 2023 ||
             result.resolution !== 'PT15M'
         ) {
             throw new Error('Transformer profile result contract is incompatible.');
@@ -193,11 +174,14 @@
         if (!Array.isArray(target.points) || target.points.length === 0) {
             throw new Error('Selected transformer has no profile points.');
         }
+        const series = (field) => target.points.map((point) => ({
+            x: Date.parse(point.timestamp),
+            y: point[field]
+        }));
         return {
-            labels: target.points.map((point) => point.timestamp),
-            demand: target.points.map((point) => point.demandPowerKw),
-            production: target.points.map((point) => point.productionPowerKw),
-            net: target.points.map((point) => point.netPowerKw)
+            demand: series('demandPowerKw'),
+            production: series('productionPowerKw'),
+            net: series('netPowerKw')
         };
     }
 
