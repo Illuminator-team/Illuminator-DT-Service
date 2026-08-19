@@ -8,6 +8,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import zipfile
 from collections import defaultdict
 from datetime import datetime
@@ -112,15 +113,15 @@ def source_identity(
     consumption_root: Path,
     grid: JsonClient,
     pv: JsonClient,
+    *,
+    pv_metadata: dict[str, Any] | None = None,
+    pv_capacity_output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     state = _read_json(consumption_root / "state.json")
     grid_ready = grid.json("GET", "/ready")
     pv_ready = pv.json("GET", "/ready")
-    pv_metadata = pv.json("GET", "/metadata")
-    pv_latest_path = pv_metadata.get("links", {}).get("latest_output")
-    if not isinstance(pv_latest_path, str):
-        raise CacheBuildError("PV capacity output is unavailable")
-    pv_latest_output = pv.json("GET", pv_latest_path)
+    if pv_metadata is None or pv_capacity_output is None:
+        pv_metadata, pv_capacity_output = _resolve_pv_capacity_output(pv)
     return {
         "consumption": {
             "dataset_id": state.get("dataset_id"),
@@ -140,9 +141,9 @@ def source_identity(
             "config_fingerprint": pv_ready.get("config_fingerprint"),
             "release_commit": pv_metadata.get("release_commit"),
             "container_image": pv_metadata.get("container_image"),
-            "capacity_output_id": pv_latest_output.get("output_id"),
-            "capacity_artifact_sha256": pv_latest_output.get("artifact_sha256")
-            or pv_latest_output.get("sha256"),
+            "capacity_output_id": pv_capacity_output.get("output_id"),
+            "capacity_artifact_sha256": pv_capacity_output.get("artifact_sha256")
+            or pv_capacity_output.get("sha256"),
         },
     }
 
@@ -157,7 +158,14 @@ def initialize(
 ) -> None:
     grid = JsonClient(grid_url)
     pv = JsonClient(pv_url, timeout=600.0)
-    identity = source_identity(consumption_root, grid, pv)
+    pv_metadata, pv_capacity_output = _resolve_pv_capacity_output(pv)
+    identity = source_identity(
+        consumption_root,
+        grid,
+        pv,
+        pv_metadata=pv_metadata,
+        pv_capacity_output=pv_capacity_output,
+    )
     if reuse_ready_cache and _cache_matches(output_path, identity):
         print("Transformer profile baseline is current; reused persisted cache.", flush=True)
         return
@@ -168,7 +176,11 @@ def initialize(
     grid_layers = _export_grid_layers(grid)
     consumption_sources, target_names = _reach_assignments(grid_layers)
     print("[3/5] Deriving the two shared full-year PV shapes...", flush=True)
-    pv_inputs = _pv_inputs(pv)
+    pv_inputs = _pv_inputs(
+        pv,
+        metadata=pv_metadata,
+        capacity_output=pv_capacity_output,
+    )
     print("[4/5] Asking Grid to assign PV buurten to transformer hierarchies...", flush=True)
     pv_sources = _pv_assignments(grid, pv_inputs)
 
@@ -357,12 +369,49 @@ def _reach_assignments(
     }, target_names
 
 
-def _pv_inputs(pv: JsonClient) -> dict[str, Any]:
-    metadata = pv.json("GET", "/metadata")
-    latest_path = metadata.get("links", {}).get("latest_output")
-    if not isinstance(latest_path, str):
-        raise CacheBuildError("PV capacity output is unavailable")
-    capacity_output = pv.json("GET", latest_path)
+def _resolve_pv_capacity_output(
+    pv: JsonClient,
+    *,
+    wait_seconds: float = 15.0,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    deadline = time.monotonic() + wait_seconds
+    announced_wait = False
+    while True:
+        metadata = pv.json("GET", "/metadata")
+        latest_path = metadata.get("links", {}).get("latest_output")
+        if isinstance(latest_path, str):
+            return metadata, pv.json("GET", latest_path)
+        if time.monotonic() >= deadline:
+            break
+        if not announced_wait:
+            print(
+                "Waiting briefly for the initial PV capacity output from the layer publisher...",
+                flush=True,
+            )
+            announced_wait = True
+        time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+
+    print("PV capacity output is absent; creating the standard all-feature output...", flush=True)
+    run = pv.json(
+        "POST",
+        "/runs",
+        json={"spatial_selection": {"type": "all"}, "parameters": {}},
+    )
+    output_ids = run.get("output_ids")
+    if run.get("status") != "succeeded" or not isinstance(output_ids, list) or len(output_ids) != 1:
+        raise CacheBuildError("PV capacity run did not produce exactly one output")
+    output_id = output_ids[0]
+    if not isinstance(output_id, str) or not output_id:
+        raise CacheBuildError("PV capacity run returned an invalid output identity")
+    return pv.json("GET", "/metadata"), pv.json("GET", f"/outputs/{output_id}")
+
+
+def _pv_inputs(
+    pv: JsonClient,
+    *,
+    metadata: dict[str, Any],
+    capacity_output: dict[str, Any],
+) -> dict[str, Any]:
     capacity_path = capacity_output.get("links", {}).get("data")
     capacity = json.loads(pv.bytes(capacity_path))
     features: dict[str, dict[str, Any]] = {}

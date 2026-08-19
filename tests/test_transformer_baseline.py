@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "policy-tool-backend"))
 
 from transformer_baseline import BaselineUnavailable, TransformerBaselineStore  # noqa: E402
-from profile_cache_init import source_identity  # noqa: E402
+from profile_cache_init import _resolve_pv_capacity_output, source_identity  # noqa: E402
 
 
 def baseline_document():
@@ -142,7 +142,7 @@ def test_source_identity_tracks_the_latest_pv_capacity_artifact(tmp_path):
         def __init__(self, responses):
             self.responses = responses
 
-        def json(self, method, path):
+        def json(self, method, path, **kwargs):
             assert method == "GET"
             return self.responses[path]
 
@@ -173,3 +173,30 @@ def test_source_identity_tracks_the_latest_pv_capacity_artifact(tmp_path):
 
     assert identity["pv"]["capacity_output_id"] == "capacity-v2"
     assert identity["pv"]["capacity_artifact_sha256"] == "artifact-v2"
+
+
+def test_missing_latest_pv_output_uses_the_standard_capacity_run():
+    class StubClient:
+        def __init__(self):
+            self.requests = []
+
+        def json(self, method, path, **kwargs):
+            self.requests.append((method, path, kwargs.get("json")))
+            if (method, path) == ("GET", "/metadata"):
+                return {"model_id": "pv-capacity-model", "links": {}}
+            if (method, path) == ("POST", "/runs"):
+                return {"status": "succeeded", "output_ids": ["capacity-output"]}
+            if (method, path) == ("GET", "/outputs/capacity-output"):
+                return {"output_id": "capacity-output", "sha256": "artifact-sha"}
+            raise AssertionError(f"Unexpected request: {method} {path}")
+
+    client = StubClient()
+    metadata, output = _resolve_pv_capacity_output(client, wait_seconds=0)
+
+    assert metadata["model_id"] == "pv-capacity-model"
+    assert output["sha256"] == "artifact-sha"
+    assert (
+        "POST",
+        "/runs",
+        {"spatial_selection": {"type": "all"}, "parameters": {}},
+    ) in client.requests
