@@ -542,8 +542,18 @@ services:
   ## -----------------------------------------------------------------
   redis:
     image: "redis:7.2.17-alpine"
-    command: >
-      --requirepass ${REDIS_PASSWORD}
+    # The password is written to a config file at start instead of being passed
+    # as a command-line argument, which any user on the host can read with `ps`.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        umask 077
+        printf 'requirepass "%s"\n' "$$REDIS_PASSWORD" > /tmp/redis.conf
+        chown redis:redis /tmp/redis.conf
+        exec docker-entrypoint.sh redis-server /tmp/redis.conf
     volumes:
       - redis-data:/data
     restart: always
