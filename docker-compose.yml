@@ -581,7 +581,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
       TIMESCALEDB_TELEMETRY: "off"
     volumes:
-      - timescale-data:/var/lib/postgresql/data
+      # The timescaledb-ha image keeps PGDATA under /home/postgres/pgdata (not
+      # /var/lib/postgresql/data), so the volume must be mounted there or the
+      # database lives in the container's writable layer and is lost when the
+      # container is recreated.
+      - timescale-data:/home/postgres/pgdata
     restart: always
     ports:
       - "127.0.0.1:5432:5432"  # local diagnostics or an SSH tunnel only
