@@ -907,7 +907,7 @@
       "model": "wind",
       "group": "production",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/wind-turbine-map",
-      "model_version": "0.2.0",
+      "model_version": "0.3.0",
       "metadata_contract_version": "1.0.0",
       "schema_contract_version": "1.0.0",
       "table": "public_wind_turbines",
