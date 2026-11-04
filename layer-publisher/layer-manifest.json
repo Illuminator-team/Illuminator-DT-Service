@@ -183,8 +183,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.1.0",
-      "metadata_contract_version": "2.4.0",
+      "model_version": "2.7.0",
+      "metadata_contract_version": "2.9.0",
       "table": "grid_lines",
       "geoserver_layer": "grid_lines",
       "source": {
@@ -326,8 +326,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.1.0",
-      "metadata_contract_version": "2.4.0",
+      "model_version": "2.7.0",
+      "metadata_contract_version": "2.9.0",
       "table": "grid_transformers",
       "geoserver_layer": "grid_transformers",
       "source": {
@@ -489,8 +489,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.1.0",
-      "metadata_contract_version": "2.4.0",
+      "model_version": "2.7.0",
+      "metadata_contract_version": "2.9.0",
       "table": "grid_lv_mv_transformer_reach",
       "geoserver_layer": "grid_lv_mv_transformer_reach",
       "source": {
@@ -698,8 +698,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.1.0",
-      "metadata_contract_version": "2.4.0",
+      "model_version": "2.7.0",
+      "metadata_contract_version": "2.9.0",
       "table": "grid_mv_hv_transformer_reach",
       "geoserver_layer": "grid_mv_hv_transformer_reach",
       "source": {
