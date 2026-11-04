@@ -836,7 +836,7 @@ services:
   ## For debugging: use Redis Insight browser to explore the content of redis streams.
   ## ---------------------------------------------------------------------------------
   redis-insight:
-    image: redis/redisinsight
+    image: redis/redisinsight:3.8.0
     restart: always
     environment:
       - RI_REDIS_HOST0=redis
