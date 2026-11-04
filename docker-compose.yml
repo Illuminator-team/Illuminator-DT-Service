@@ -633,7 +633,7 @@ services:
   ## Use grafana for visualization of data in the timescale DB.
   ## ----------------------------------------------------------
   grafana:
-    image: grafana/grafana-oss:10.2.3
+    image: grafana/grafana-oss:12.4.3
     environment:
       GF_SERVER_ROOT_URL: "https://%(domain)s:443/grafana"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
@@ -748,7 +748,7 @@ services:
   ## Accessible at: http://localhost/geoserver and https://localhost/geoserver
   ## --------------------------------------------------
   geo:
-    image: kartoza/geoserver:latest
+    image: kartoza/geoserver:2.28.5
     environment:
       - STABLE_EXTENSIONS=postgis-plugin
       - GEOSERVER_ADMIN_USER=${GEOSERVER_ADMIN_USER:?set GEOSERVER_ADMIN_USER in .env}
