@@ -47,11 +47,15 @@ class RedisPasswordTest(unittest.TestCase):
                 line for line in SCRIPT.splitlines()
                 if not line.startswith(("chown", "exec"))
             ]
-            script = "\n".join(lines).replace("/tmp/redis.conf", conf.as_posix())
+            # Send the script on stdin (not via -c) so no platform's argument
+            # quoting can alter it, and write to a relative path in a temp cwd.
+            script = "\n".join(lines).replace("/tmp/redis.conf", "redis.conf") + "\n"
             result = subprocess.run(
-                [SH, "-c", script], env={**os.environ, "REDIS_PASSWORD": password},
-                capture_output=True, text=True,
+                [SH, "-s"], input=script.encode(), cwd=tmp,
+                env={**os.environ, "REDIS_PASSWORD": password},
+                capture_output=True,
             )
+            result.stderr = result.stderr.decode(errors="replace")
             return result, conf.read_text() if conf.exists() else None
 
     @unittest.skipUnless(SH, "needs a POSIX shell (runs on the Linux CI runner)")
