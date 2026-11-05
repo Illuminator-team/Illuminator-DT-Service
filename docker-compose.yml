@@ -545,13 +545,17 @@ services:
     # The password is written to a config file at start instead of being passed
     # as a command-line argument, which any user on the host can read with `ps`.
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set to a non-empty value}
     entrypoint:
       - sh
       - -c
       - |
         umask 077
-        printf 'requirepass "%s"\n' "$$REDIS_PASSWORD" > /tmp/redis.conf
+        [ -n "$$REDIS_PASSWORD" ] || { echo "REDIS_PASSWORD is empty" >&2; exit 1; }
+        # Inside a quoted Redis directive a backslash and a double quote are
+        # escape characters, so escape them to store the password literally.
+        esc=$$(printf '%s' "$$REDIS_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        printf 'requirepass "%s"\n' "$$esc" > /tmp/redis.conf
         chown redis:redis /tmp/redis.conf
         exec docker-entrypoint.sh redis-server /tmp/redis.conf
     volumes:
