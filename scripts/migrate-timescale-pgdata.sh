@@ -146,8 +146,16 @@ rollback)
   [ -n "$ref" ] || refuse "the Compose files do not name an image for $SERVICE"
   [ "$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)" = "$(cat "$backup/image-id")" ] || refuse "image $ref is not the backed-up image $(cat "$backup/image-id")"
   # ---- recreate in the old layout, restore, start ----
-  "${DC[@]}" up --no-start --force-recreate $SERVICE
-  cid=$("${DC[@]}" ps -aq $SERVICE)
+  # Never pull or build: the validated local image must be the one that is used, even
+  # if the Compose file sets pull_policy: always or a build section.
+  "${DC[@]}" up --no-start --force-recreate --pull never --no-build $SERVICE
+  cid=$("${DC[@]}" ps -aq $SERVICE) || refuse "could not find the recreated $SERVICE container"
+  [ -n "$cid" ] || refuse "could not find the recreated $SERVICE container"
+  actual=$(docker inspect -f '{{.Image}}' "$cid") || actual=
+  if [ "$actual" != "$(cat "$backup/image-id")" ]; then
+    docker rm -f "$cid" >/dev/null 2>&1 || true   # never started, holds no data
+    refuse "the recreated container uses image '$actual', not the backed-up $(cat "$backup/image-id"); nothing was restored (the data volume, if any, is untouched)"
+  fi
   docker cp - "$cid:/home/postgres" < "$backup/pgdata.tar"
   "${DC[@]}" start $SERVICE
   echo "OK: old layout restored from $backup/pgdata.tar"

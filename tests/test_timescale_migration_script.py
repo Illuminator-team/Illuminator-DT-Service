@@ -36,8 +36,17 @@ if args[0] == "compose":
     elif "ps" in args:
         out("cid123")
     sys.exit(0)
+def after_up():
+    return "up --no-start" in open(env["FAKE_LOG"]).read()
 if args[0] == "inspect":
-    out(env["FAKE_MOUNTS"] if "Mounts" in j else env["FAKE_IMAGE"])
+    if "Mounts" in j:
+        out(env["FAKE_MOUNTS"])
+    elif after_up() and env.get("FAKE_IMAGE_AFTER_UP"):
+        out(env["FAKE_IMAGE_AFTER_UP"])
+    else:
+        out(env["FAKE_IMAGE"])
+elif args[0] == "rm":
+    pass
 elif args[:2] == ["volume", "inspect"]:
     if env.get("FAKE_VOLUME_INSPECT_ERR"):
         sys.stderr.write(env["FAKE_VOLUME_INSPECT_ERR"] + "\n"); sys.exit(1)
@@ -134,6 +143,22 @@ class MigrationScriptTest(unittest.TestCase):
         result = self.run_script("rollback")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("up --no-start --force-recreate", self.calls())
+
+    def test_rollback_never_pulls_or_builds(self):
+        self.make_backup()
+        self.assertEqual(self.run_script("rollback").returncode, 0)
+        up = [line for line in self.calls().splitlines() if "up --no-start" in line][0]
+        self.assertIn("--pull never", up)
+        self.assertIn("--no-build", up)
+
+    def test_rollback_image_changed_between_preflight_and_recreate_restores_nothing(self):
+        self.make_backup()
+        result = self.run_script("rollback", FAKE_IMAGE_AFTER_UP="sha256:" + "c" * 64)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not the backed-up", result.stderr)
+        calls = self.calls()
+        self.assertNotIn("cp -", calls)
+        self.assertNotIn("start timescale", calls)
 
     def test_rollback_wrong_image_changes_nothing(self):
         self.make_backup()
