@@ -1,8 +1,9 @@
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install poetry~=2.1.2 --progress-bar off
+RUN pip install --upgrade pip --progress-bar off \
+    && pip install poetry~=2.3.4 --progress-bar off
 
 RUN touch README.md
 COPY src/poetry.lock src/pyproject.toml ./

@@ -28,7 +28,7 @@ CONSUMPTION_RUN_ID = "run_55555555555545558555555555555555"
 CONSUMPTION_OUTPUT_ID = "out_66666666666646668666666666666666"
 CONSUMPTION_LAYER_VERSION = "7" * 64
 CONSUMPTION_PROFILE_VERSION = "8" * 64
-CONSUMPTION_RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
+CONSUMPTION_RELEASE_COMMIT = "8b148ea7562dbd3681e51dbb7bfd5b87e5730f8c"
 PV_RELEASE_COMMIT = "357d7a9ede79a9da775649bed1069c196a945d39"
 PV_IMAGE = (
     "ghcr.io/jortgroen/pv-map-api@sha256:"
@@ -129,7 +129,7 @@ def consumption_routes(*, semantic_sha256=None):
     document = {
         "metadata_contract_version": "reformers-consumption-v1",
         "model_id": "consumption-map",
-        "model_version": "0.4.0",
+        "model_version": "0.5.0",
         "dataset_id": "alkmaar_2023",
         "layer_id": "residential_electricity_pc6_profiles_pt15m",
         "layer_version": CONSUMPTION_LAYER_VERSION,
@@ -434,7 +434,7 @@ class TransformerProfileOrchestrationTest(unittest.TestCase):
             grid_payload["source"],
             {
                 "source_model_id": "consumption-map",
-                "source_model_version": "0.4.0",
+                "source_model_version": "0.5.0",
                 "source_layer_id": (
                     "residential_electricity_pc6_profiles_pt15m"
                 ),

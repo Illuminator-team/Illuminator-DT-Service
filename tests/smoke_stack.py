@@ -27,14 +27,14 @@ GRID_CONTAINER_DIGEST = "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b
 GRID_BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
 WIND_FIXTURE = "wind-turbine-2811"
-WIND_RELEASE_COMMIT = "b89bd49c717a1e301954aa0b8c1bdb98a91f8d44"
+WIND_RELEASE_COMMIT = "ad47d56cc6abe814ba7259f04e551ffe77c37764"
 WIND_CONTAINER_IMAGE = (
     "ghcr.io/jortgroen/wind-turbine-map-api:"
-    "sha-b89bd49c717a1e301954aa0b8c1bdb98a91f8d44"
+    "sha-ad47d56cc6abe814ba7259f04e551ffe77c37764"
 )
-WIND_CONTAINER_DIGEST = "sha256:820822bfa5300bc8e2126482147b1d430d075c1834bd080999334825caa21828"
-HEAT_RELEASE_COMMIT = "1f2b2c8b770e5c59efbed4ab58641b40b164845a"
-HEAT_CONTAINER_DIGEST = "sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda"
+WIND_CONTAINER_DIGEST = "sha256:c578d2b922397c15783771ff52a72f35b5a47b78b0f585c08984e70bfafd7d7b"
+HEAT_RELEASE_COMMIT = "28d8f7a1ac4da78e91a49465417d464eb66e371a"
+HEAT_CONTAINER_DIGEST = "sha256:4982fd84e6ec70fb92c2811b0ff3cdb3e2c16d254e9b6b748a57cd644663e3d1"
 HEAT_QUALITY_METHOD = "datacompleetheid-heat-net-v1"
 HEAT_LAYERS = {
     "reported_neighbourhood_heat_consumers": {
@@ -73,11 +73,11 @@ HEAT_VIEWS = {
     "potential_heat_sources": False,
     "documented_large_heat_consumers": True,
 }
-EV_RELEASE_COMMIT = "54a894cc7c96c7d8c27e344ee2724012d5ae4e3d"
-EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec"
+EV_RELEASE_COMMIT = "2bf386e8a0b9e43c22e8353d2fa82fbb073695e8"
+EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9"
 EV_FIXTURE = "NL-ALL-NLLOC018787"
-CONSUMPTION_RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
-CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e"
+CONSUMPTION_RELEASE_COMMIT = "8b148ea7562dbd3681e51dbb7bfd5b87e5730f8c"
+CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0"
 CONSUMPTION_FIXTURE = "BU03610308"
 FIXTURE = "1842EM"
 ORCHESTRATION_PC6 = "1483AA"
@@ -416,7 +416,7 @@ def check_wind_model_api(client: SmokeClient) -> None:
         metadata.get("container_image") == WIND_CONTAINER_IMAGE,
         "Wind container identity drift",
     )
-    require(metadata.get("model", {}).get("version") == "0.2.0", "Wind version drift")
+    require(metadata.get("model", {}).get("version") == "0.3.0", "Wind version drift")
     require(metadata.get("contract_version") == "1.0.0", "Wind contract drift")
 
     layers = client.get_json("/models/wind/layers")
@@ -1272,7 +1272,7 @@ def check_consumption_model_api(client: SmokeClient) -> None:
 
     metadata = client.get_json("/models/consumption/metadata")
     require(metadata.get("model_id") == "consumption-map", "Consumption model ID drift")
-    require(metadata.get("model_version") == "0.4.0", "Consumption model version drift")
+    require(metadata.get("model_version") == "0.5.0", "Consumption model version drift")
     require(metadata.get("ready") is True, "Consumption metadata is not ready")
 
     layers = client.get_json("/models/consumption/layers")
@@ -1801,7 +1801,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     )
     consumption_record = records["layer:consumption-map:electricity-areas"]
     require(
-        consumption_record["model_version"] == "0.4.0",
+        consumption_record["model_version"] == "0.5.0",
         "Consumption registry version drift",
     )
     require(
@@ -1819,7 +1819,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
         "Consumption registry GeoServer layer drift",
     )
     wind_record = records["layer:wind-turbine-map:public-turbines"]
-    require(wind_record["model_version"] == "0.2.0", "Wind registry version drift")
+    require(wind_record["model_version"] == "0.3.0", "Wind registry version drift")
     require(wind_record["crs"] == "EPSG:4326", "Wind registry CRS drift")
     require(
         wind_record["data_quality"]["method_version"] == "WIND-DATA-COMPLETE-001",

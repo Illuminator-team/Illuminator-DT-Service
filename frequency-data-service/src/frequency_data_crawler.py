@@ -2,7 +2,7 @@ import data_crawler.sources.abc.http_cache as http_cache
 import data_crawler.access.jsonpath as jx
 
 import itertools
-import pathlib
+import posixpath
 import requests
 
 from datetime import datetime, timedelta, timezone
@@ -34,7 +34,7 @@ class FrequencyDataCrawler(http_cache.GenericHTTPSourceAPI):
         """
         Returns the request URL
         """
-        return pathlib.posixpath.join(self._base_url, self._service_endpoint)
+        return posixpath.join(self._base_url, self._service_endpoint)
 
     @property
     def request_parameters(self) -> Dict[str, str]:
