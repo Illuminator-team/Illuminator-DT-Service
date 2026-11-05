@@ -104,6 +104,36 @@ Verify that both backup files are non-empty before continuing. Existing named
 model caches should remain in place; this deployment must never use
 `docker compose down --volumes`.
 
+## Moving An Existing Timescale Database (one-time, before the mount fix)
+
+Installs created before the `timescale-data` mount fix keep the database in the
+Timescale container's writable layer (the volume is mounted where the image does
+not store its data). `docker compose up` with the corrected mount creates a
+**new, empty** cluster and does not carry that data over, and a same-project
+Compose recreation does not preserve the old container for rollback. Do **not**
+run `docker compose up -d --build` on such an install until you have done this:
+
+1. Stop everything that writes to the database (all services except Timescale).
+2. With the **old** Compose files, run
+   `scripts/migrate-timescale-pgdata.sh prepare -p <project> -f <old-compose> -b <empty-backup-dir>`.
+   It refuses an already-migrated install, a non-empty volume or backup
+   directory, and a database with no tables. It records the image id and per-table
+   row counts, stops Timescale, writes an independent tar of PGDATA to the backup
+   directory and copies it into the empty `<project>_timescale-data` volume.
+3. Switch to the **new** Compose files and run `docker compose up -d timescale`.
+4. Run `scripts/migrate-timescale-pgdata.sh verify -p <project> -f <new-compose> -b <backup-dir>`.
+   It checks the mount and compares row counts with the counts from step 2.
+   Only then start the other services.
+5. Rollback: switch back to the **old** Compose files and run
+   `scripts/migrate-timescale-pgdata.sh rollback -p <project> -f <old-compose> -b <backup-dir>`.
+   It recreates the old layout, checks the image id and restores PGDATA from the tar.
+
+Keep the backup directory until the migrated database has run correctly for a
+while. It contains the full database (including role password hashes): keep it
+mode 700 and off shared storage. This procedure was rehearsed under the same
+Compose project on a copy of a real database (27 user tables, 263,181-row
+hypertable): counts identical after cutover and after rollback.
+
 ## Promote And Start
 
 After the owner merges the reviewed `dev` to `main`, deploy only the resulting
