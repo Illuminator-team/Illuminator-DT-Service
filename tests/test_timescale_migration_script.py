@@ -10,6 +10,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -86,6 +87,7 @@ MUTATING = ("compose -p proj -f c.yml stop", "up --no-start", "start timescale",
             "volume create", "cp -", "tar")
 
 
+@unittest.skipIf(sys.platform == "win32", "POSIX-only harness (bash, PATH and shebang semantics); runs on the Linux CI runner")
 @unittest.skipUnless(BASH and PYTHON, "needs bash and python3")
 class MigrationScriptTest(unittest.TestCase):
     def setUp(self):
@@ -132,10 +134,11 @@ class MigrationScriptTest(unittest.TestCase):
         self.backup.mkdir(exist_ok=True)
         data = pathlib.Path(tar or self.tar).read_bytes()
         (self.backup / "pgdata.tar").write_bytes(data)
-        (self.backup / "pgdata.tar.sha256").write_text(
-            hashlib.sha256(data).hexdigest() + "  pgdata.tar\n")
-        (self.backup / "image-id").write_text(image + "\n")
-        (self.backup / "project").write_text(project + "\n")
+        # bytes, so no platform can turn the line ending into CRLF
+        (self.backup / "pgdata.tar.sha256").write_bytes(
+            (hashlib.sha256(data).hexdigest() + "  pgdata.tar\n").encode())
+        (self.backup / "image-id").write_bytes((image + "\n").encode())
+        (self.backup / "project").write_bytes((project + "\n").encode())
 
     # ---- rollback: everything is validated before anything is changed ----
     def test_rollback_happy_path(self):
