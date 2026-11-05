@@ -416,7 +416,7 @@ def check_wind_model_api(client: SmokeClient) -> None:
         metadata.get("container_image") == WIND_CONTAINER_IMAGE,
         "Wind container identity drift",
     )
-    require(metadata.get("model", {}).get("version") == "0.2.0", "Wind version drift")
+    require(metadata.get("model", {}).get("version") == "0.3.0", "Wind version drift")
     require(metadata.get("contract_version") == "1.0.0", "Wind contract drift")
 
     layers = client.get_json("/models/wind/layers")
@@ -1272,7 +1272,7 @@ def check_consumption_model_api(client: SmokeClient) -> None:
 
     metadata = client.get_json("/models/consumption/metadata")
     require(metadata.get("model_id") == "consumption-map", "Consumption model ID drift")
-    require(metadata.get("model_version") == "0.4.0", "Consumption model version drift")
+    require(metadata.get("model_version") == "0.5.0", "Consumption model version drift")
     require(metadata.get("ready") is True, "Consumption metadata is not ready")
 
     layers = client.get_json("/models/consumption/layers")
@@ -1801,7 +1801,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     )
     consumption_record = records["layer:consumption-map:electricity-areas"]
     require(
-        consumption_record["model_version"] == "0.4.0",
+        consumption_record["model_version"] == "0.5.0",
         "Consumption registry version drift",
     )
     require(
@@ -1819,7 +1819,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
         "Consumption registry GeoServer layer drift",
     )
     wind_record = records["layer:wind-turbine-map:public-turbines"]
-    require(wind_record["model_version"] == "0.2.0", "Wind registry version drift")
+    require(wind_record["model_version"] == "0.3.0", "Wind registry version drift")
     require(wind_record["crs"] == "EPSG:4326", "Wind registry CRS drift")
     require(
         wind_record["data_quality"]["method_version"] == "WIND-DATA-COMPLETE-001",
