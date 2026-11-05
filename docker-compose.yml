@@ -550,11 +550,18 @@ services:
       - sh
       - -c
       - |
+        set -e
         umask 077
         [ -n "$$REDIS_PASSWORD" ] || { echo "REDIS_PASSWORD is empty" >&2; exit 1; }
+        nl=$$(printf '\nx'); nl=$${nl%x}; cr=$$(printf '\rx'); cr=$${cr%x}
+        case "$$REDIS_PASSWORD" in
+          *"$$nl"*|*"$$cr"*)
+            echo "REDIS_PASSWORD must not contain a line break" >&2; exit 1;;
+        esac
         # Inside a quoted Redis directive a backslash and a double quote are
         # escape characters, so escape them to store the password literally.
         esc=$$(printf '%s' "$$REDIS_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        [ -n "$$esc" ] || { echo "could not encode REDIS_PASSWORD" >&2; exit 1; }
         printf 'requirepass "%s"\n' "$$esc" > /tmp/redis.conf
         chown redis:redis /tmp/redis.conf
         exec docker-entrypoint.sh redis-server /tmp/redis.conf

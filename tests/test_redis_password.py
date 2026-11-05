@@ -1,8 +1,10 @@
 """The Redis password must be required and stored literally in redis.conf."""
+import os
 import pathlib
 import re
 import subprocess
 import tempfile
+import shutil
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -26,6 +28,9 @@ def parse_redis_quoted(text):
     return "".join(out)
 
 
+SH = shutil.which("sh")
+
+
 class RedisPasswordTest(unittest.TestCase):
     def test_compose_requires_a_nonempty_password(self):
         self.assertRegex(REDIS_ENV, r"^\$\{REDIS_PASSWORD:\?.+\}$")
@@ -42,18 +47,28 @@ class RedisPasswordTest(unittest.TestCase):
                 line for line in SCRIPT.splitlines()
                 if not line.startswith(("chown", "exec"))
             ]
-            script = "\n".join(lines).replace("/tmp/redis.conf", str(conf))
+            script = "\n".join(lines).replace("/tmp/redis.conf", conf.as_posix())
             result = subprocess.run(
-                ["sh", "-c", script], env={"REDIS_PASSWORD": password, "PATH": "/usr/bin:/bin"},
+                [SH, "-c", script], env={**os.environ, "REDIS_PASSWORD": password},
                 capture_output=True, text=True,
             )
             return result, conf.read_text() if conf.exists() else None
 
+    @unittest.skipUnless(SH, "needs a POSIX shell (runs on the Linux CI runner)")
     def test_empty_password_stops_the_container(self):
         result, conf = self.run_entrypoint("")
         self.assertNotEqual(result.returncode, 0)
         self.assertIsNone(conf)
 
+    @unittest.skipUnless(SH, "needs a POSIX shell (runs on the Linux CI runner)")
+    def test_line_breaks_are_rejected(self):
+        for password in ("a\nb", "a\rb", "ab\n"):
+            with self.subTest(password=password):
+                result, conf = self.run_entrypoint(password)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIsNone(conf)
+
+    @unittest.skipUnless(SH, "needs a POSIX shell (runs on the Linux CI runner)")
     def test_quotes_backslashes_and_spaces_are_stored_literally(self):
         for password in ('plain', 'qu"ote', 'back\\slash', '\\x41 \\" sp ace $HOME %s'):
             with self.subTest(password=password):
