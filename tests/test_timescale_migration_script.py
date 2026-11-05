@@ -30,6 +30,8 @@ def out(text=""):
     sys.stdout.write(text if text.endswith("\n") or not text else text + "\n")
 if args[0] == "compose":
     if "config" in args:
+        if env.get("FAKE_CONFIG_FAIL") == "1":
+            sys.stderr.write("config failed\n"); sys.exit(1)
         out(env["FAKE_CONFIG_JSON"])
     elif "ps" in args:
         out("cid123")
@@ -37,13 +39,19 @@ if args[0] == "compose":
 if args[0] == "inspect":
     out(env["FAKE_MOUNTS"] if "Mounts" in j else env["FAKE_IMAGE"])
 elif args[:2] == ["volume", "inspect"]:
-    sys.exit(0 if env.get("FAKE_VOLUME_EXISTS") == "1" else 1)
+    if env.get("FAKE_VOLUME_INSPECT_ERR"):
+        sys.stderr.write(env["FAKE_VOLUME_INSPECT_ERR"] + "\n"); sys.exit(1)
+    if env.get("FAKE_VOLUME_EXISTS") == "1":
+        sys.exit(0)
+    sys.stderr.write("Error response from daemon: get x: no such volume\n"); sys.exit(1)
 elif args[:2] == ["image", "inspect"]:
     out(env["FAKE_REF_IMAGE_ID"])
 elif args[:2] == ["volume", "create"]:
     pass
 elif args[0] == "run":
     if "ls -A" in j:
+        if env.get("FAKE_LS_FAIL") == "1":
+            sys.exit(1)
         out(env.get("FAKE_VOLUME_ENTRIES", "0"))
     else:
         sys.stdin.buffer.read()
@@ -141,6 +149,25 @@ class MigrationScriptTest(unittest.TestCase):
         self.assertIn("NEW layout", result.stderr)
         self.assertNothingMutated()
 
+    def test_rollback_mount_directly_on_the_data_directory_changes_nothing(self):
+        self.make_backup()
+        for target in ("/home/postgres/pgdata/data", "/home/postgres", "/"):
+            with self.subTest(target=target):
+                self.log.write_text("")
+                config = {"services": {"timescale": {
+                    "image": "timescale/timescaledb-ha:pg14-latest",
+                    "volumes": [{"target": target}]}}}
+                result = self.run_script("rollback", config=config)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("covers PGDATA", result.stderr)
+                self.assertNothingMutated()
+
+    def test_rollback_fails_closed_when_the_compose_render_fails(self):
+        self.make_backup()
+        result = self.run_script("rollback", FAKE_CONFIG_FAIL="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNothingMutated()
+
     def test_rollback_wrong_project_changes_nothing(self):
         self.make_backup(project="other")
         self.assertNotEqual(self.run_script("rollback").returncode, 0)
@@ -188,6 +215,37 @@ class MigrationScriptTest(unittest.TestCase):
         result = self.run_script("prepare", FAKE_MOUNTS="/home/postgres/pgdata\n")
         self.assertNotEqual(result.returncode, 0)
         self.assertNothingMutated()
+
+    def test_prepare_fails_closed_when_the_compose_render_fails(self):
+        result = self.run_script("prepare", FAKE_CONFIG_FAIL="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("REFUSE", result.stderr)
+        self.assertNothingMutated()
+
+    def test_prepare_fails_closed_when_the_emptiness_check_fails(self):
+        result = self.run_script("prepare", FAKE_VOLUME_EXISTS="1", FAKE_LS_FAIL="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not check", result.stderr)
+        self.assertNothingMutated()
+
+    def test_prepare_fails_closed_on_a_garbled_emptiness_result(self):
+        result = self.run_script("prepare", FAKE_VOLUME_EXISTS="1", FAKE_VOLUME_ENTRIES="")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNothingMutated()
+
+    def test_prepare_fails_closed_when_the_volume_cannot_be_inspected(self):
+        result = self.run_script("prepare", FAKE_VOLUME_INSPECT_ERR="permission denied")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not inspect volume", result.stderr)
+        self.assertNothingMutated()
+
+    def test_prepare_refuses_a_mount_below_pgdata(self):
+        for mount in ("/home/postgres/pgdata/data", "/home/postgres"):
+            with self.subTest(mount=mount):
+                self.log.write_text("")
+                result = self.run_script("prepare", FAKE_MOUNTS=mount + "\n")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNothingMutated()
 
     def test_prepare_refuses_nonempty_volume(self):
         result = self.run_script("prepare", FAKE_VOLUME_EXISTS="1", FAKE_VOLUME_ENTRIES="2")

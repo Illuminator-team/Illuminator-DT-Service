@@ -33,6 +33,26 @@ VOLUME=${project}_timescale-data
 
 refuse() { echo "REFUSE: $*" >&2; exit 1; }
 
+# True if a mount at $1 covers or lies inside PGDATA ($DATA and everything below it,
+# e.g. $DATA/data), or is one of its parents (/, /home, /home/postgres).
+overlaps_pgdata() {
+  local m=${1%/}; [ -n "$m" ] || m=/
+  [ "$m" = "$DATA" ] && return 0
+  case "$m" in "$DATA"/*) return 0;; esac
+  [ "$m" = / ] && return 0
+  case "$DATA" in "$m"/*) return 0;; esac
+  return 1
+}
+# Succeeds (prints the offending target) if any mount target on stdin overlaps PGDATA.
+any_overlap() {
+  local m
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    if overlaps_pgdata "$m"; then echo "$m"; return 0; fi
+  done
+  return 1
+}
+
 # Print "image=<ref>" and one "mount=<target>" line per mount of the service, as rendered by Compose.
 rendered() {
   "${DC[@]}" config --format json | python3 -c '
@@ -69,14 +89,23 @@ case $cmd in
 prepare)
   cid=$("${DC[@]}" ps -q $SERVICE)
   [ -n "$cid" ] || refuse "$SERVICE is not running in project $project"
-  if docker inspect -f '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$cid" | grep -qx "$DATA"; then
-    refuse "$DATA is already a mount; this install is already migrated"
+  mounts=$(docker inspect -f '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$cid") || refuse "could not inspect the mounts of $cid"
+  if hit=$(printf '%s\n' "$mounts" | any_overlap); then
+    refuse "the container already has a mount ($hit) that covers PGDATA ($DATA); this install is already migrated or not in the supported old layout"
   fi
-  rendered | grep -qx "mount=$DATA" && refuse "these Compose files already mount $DATA; pass the OLD Compose files to prepare"
-  image=$(docker inspect -f '{{.Image}}' "$cid")
-  if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
-    n=$(docker run --rm --entrypoint sh -v "$VOLUME":/v "$image" -c 'ls -A /v | wc -l')
+  info=$(rendered) || refuse "could not render the Compose configuration"
+  if hit=$(printf '%s\n' "$info" | sed -n 's/^mount=//p' | any_overlap); then
+    refuse "these Compose files mount $hit, which covers PGDATA ($DATA); pass the OLD Compose files to prepare"
+  fi
+  image=$(docker inspect -f '{{.Image}}' "$cid") || refuse "could not read the image of $cid"
+  [ -n "$image" ] || refuse "empty image id for $cid"
+  if vol_out=$(docker volume inspect "$VOLUME" 2>&1); then
+    # The volume exists: it must be provably empty (read-only check, numeric result).
+    n=$(docker run --rm --entrypoint sh -v "$VOLUME":/v:ro "$image" -c 'set -e; ls -A /v >/dev/null; ls -A /v | wc -l') || refuse "could not check whether volume $VOLUME is empty"
+    case $n in ''|*[!0-9]*) refuse "could not check whether volume $VOLUME is empty (got '$n')";; esac
     [ "$n" = 0 ] || refuse "volume $VOLUME is not empty ($n entries)"
+  else
+    case $vol_out in *[Nn]"o such volume"*) ;; *) refuse "could not inspect volume $VOLUME: $vol_out";; esac
   fi
   mkdir -p "$backup"; chmod 700 "$backup"
   [ -z "$(ls -A "$backup")" ] || refuse "$backup is not empty"
@@ -109,9 +138,12 @@ rollback)
   (cd "$backup" && sha256sum -c --status pgdata.tar.sha256) || refuse "backup archive failed its sha256 check"
   tar -tf "$backup/pgdata.tar" >/dev/null 2>&1 || refuse "backup archive is not a readable tar"
   [ "$(tar -tf "$backup/pgdata.tar" | head -1 | cut -d/ -f1)" = pgdata ] || refuse "backup archive does not hold a pgdata directory"
-  info=$(rendered)
-  printf '%s\n' "$info" | grep -qx "mount=$DATA" && refuse "these Compose files mount $DATA (the NEW layout); pass the OLD Compose files to rollback"
+  info=$(rendered) || refuse "could not render the Compose configuration"
+  if hit=$(printf '%s\n' "$info" | sed -n 's/^mount=//p' | any_overlap); then
+    refuse "these Compose files mount $hit, which covers PGDATA ($DATA) (the NEW layout, or an unsupported one); pass the OLD Compose files to rollback"
+  fi
   ref=$(printf '%s\n' "$info" | sed -n 's/^image=//p')
+  [ -n "$ref" ] || refuse "the Compose files do not name an image for $SERVICE"
   [ "$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)" = "$(cat "$backup/image-id")" ] || refuse "image $ref is not the backed-up image $(cat "$backup/image-id")"
   # ---- recreate in the old layout, restore, start ----
   "${DC[@]}" up --no-start --force-recreate $SERVICE
