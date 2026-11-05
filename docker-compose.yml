@@ -11,19 +11,19 @@ x-congestion-image: &congestion-image
   image: ghcr.io/jortgroen/congestion-backend@sha256:d44df2b778508747fa2133740130fa97692a1198e5d91f0e14e0474f671eceea
 
 x-wind-image: &wind-image
-  image: ghcr.io/jortgroen/wind-turbine-map-api@sha256:820822bfa5300bc8e2126482147b1d430d075c1834bd080999334825caa21828
+  image: ghcr.io/jortgroen/wind-turbine-map-api@sha256:c578d2b922397c15783771ff52a72f35b5a47b78b0f585c08984e70bfafd7d7b
 
 x-heat-image: &heat-image
-  image: ghcr.io/jortgroen/heat-net-map-api@sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda
+  image: ghcr.io/jortgroen/heat-net-map-api@sha256:4982fd84e6ec70fb92c2811b0ff3cdb3e2c16d254e9b6b748a57cd644663e3d1
 
 x-ev-image: &ev-image
-  image: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+  image: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
 
 x-consumption-image: &consumption-image
-  image: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
+  image: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
 
 x-consumption-cache-image: &consumption-cache-image
-  image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:f4bcf9c44b39ee4e1e244502a220296d1a0cdfa9ed2bb21bf2667654f391ef59
+  image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:b26a1cb702407cb7e9b2f4c66954e844ea587636e31ab569ddee97965169ba3f
 
 x-pv-cache-image: &pv-cache-image
   image: ghcr.io/jortgroen/pv-map-source-cache@sha256:630e5f8a45bbc14699254251ee125415443bc7c185518eaaf5d64e1f86b5ce50
@@ -404,8 +404,8 @@ services:
     <<: *ev-image
     init: true
     environment:
-      EV_RELEASE_COMMIT: 54a894cc7c96c7d8c27e344ee2724012d5ae4e3d
-      EV_IMAGE_IDENTITY: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+      EV_RELEASE_COMMIT: 2bf386e8a0b9e43c22e8353d2fa82fbb073695e8
+      EV_IMAGE_IDENTITY: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
       EV_OUTPUT_DIR: /var/lib/ev-map/outputs
     volumes:
       - ev-generated-outputs:/var/lib/ev-map/outputs
@@ -481,7 +481,7 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
+      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
     depends_on:
       consumption-runtime-init:
         condition: service_completed_successfully
@@ -541,9 +541,30 @@ services:
   ## Use Redis streams for data access of micro-services in real-time.
   ## -----------------------------------------------------------------
   redis:
-    image: "redis:7.2.4-alpine"
-    command: >
-      --requirepass ${REDIS_PASSWORD}
+    image: "redis:7.2.17-alpine"
+    # The password is written to a config file at start instead of being passed
+    # as a command-line argument, which any user on the host can read with `ps`.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set to a non-empty value}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        umask 077
+        [ -n "$$REDIS_PASSWORD" ] || { echo "REDIS_PASSWORD is empty" >&2; exit 1; }
+        nl=$$(printf '\nx'); nl=$${nl%x}; cr=$$(printf '\rx'); cr=$${cr%x}
+        case "$$REDIS_PASSWORD" in
+          *"$$nl"*|*"$$cr"*)
+            echo "REDIS_PASSWORD must not contain a line break" >&2; exit 1;;
+        esac
+        # Inside a quoted Redis directive a backslash and a double quote are
+        # escape characters, so escape them to store the password literally.
+        esc=$$(printf '%s' "$$REDIS_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        [ -n "$$esc" ] || { echo "could not encode REDIS_PASSWORD" >&2; exit 1; }
+        printf 'requirepass "%s"\n' "$$esc" > /tmp/redis.conf
+        chown redis:redis /tmp/redis.conf
+        exec docker-entrypoint.sh redis-server /tmp/redis.conf
     volumes:
       - redis-data:/data
     restart: always
@@ -598,7 +619,7 @@ services:
   ## This micro-service stores selected data from the Redis stream to the TtimescaleDB.
   ## ----------------------------------------------------------------------------------
   data-sync-service:
-    image: ait1/rdp-redsql:latest-dev
+    image: ait1/rdp-redsql@sha256:f703b663f0e9c50c82c4c7674c5e2b844283c86bb3cf51d01c5de432417c8991
     environment:
       POSTGRES_USER: ${POSTGRES_DATA_SOURCE_USER}
       POSTGRES_PASSWORD: ${POSTGRES_DATA_SOURCE_PASSWORD}
@@ -619,7 +640,7 @@ services:
   ## Use grafana for visualization of data in the timescale DB.
   ## ----------------------------------------------------------
   grafana:
-    image: grafana/grafana-oss:10.2.3
+    image: grafana/grafana-oss:12.4.3
     environment:
       GF_SERVER_ROOT_URL: "https://%(domain)s:443/grafana"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
@@ -734,7 +755,7 @@ services:
   ## Accessible at: http://localhost/geoserver and https://localhost/geoserver
   ## --------------------------------------------------
   geo:
-    image: kartoza/geoserver:latest
+    image: kartoza/geoserver:2.28.5
     environment:
       - STABLE_EXTENSIONS=postgis-plugin
       - GEOSERVER_ADMIN_USER=${GEOSERVER_ADMIN_USER:?set GEOSERVER_ADMIN_USER in .env}
@@ -775,20 +796,20 @@ services:
       GRID_EXPECTED_DATA_MODE: real_source
       GRID_EXPORT_BBOX: 4.60,52.50,4.98,52.88
       WIND_API_URL: http://wind-api:8080
-      WIND_EXPECTED_RELEASE_COMMIT: b89bd49c717a1e301954aa0b8c1bdb98a91f8d44
-      WIND_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/wind-turbine-map-api:sha-b89bd49c717a1e301954aa0b8c1bdb98a91f8d44
-      WIND_EXPECTED_CONTAINER_DIGEST: sha256:820822bfa5300bc8e2126482147b1d430d075c1834bd080999334825caa21828
+      WIND_EXPECTED_RELEASE_COMMIT: ad47d56cc6abe814ba7259f04e551ffe77c37764
+      WIND_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/wind-turbine-map-api:sha-ad47d56cc6abe814ba7259f04e551ffe77c37764
+      WIND_EXPECTED_CONTAINER_DIGEST: sha256:c578d2b922397c15783771ff52a72f35b5a47b78b0f585c08984e70bfafd7d7b
       WIND_EXPECTED_DATA_MODE: real_source
       HEAT_API_URL: http://heat-api:8080
-      HEAT_EXPECTED_RELEASE_COMMIT: 1f2b2c8b770e5c59efbed4ab58641b40b164845a
-      HEAT_EXPECTED_CONTAINER_DIGEST: sha256:2a1afe08732e98b00a880cad0ed3ffff2dbc8c38c960be4c643dd5358676dbda
+      HEAT_EXPECTED_RELEASE_COMMIT: 28d8f7a1ac4da78e91a49465417d464eb66e371a
+      HEAT_EXPECTED_CONTAINER_DIGEST: sha256:4982fd84e6ec70fb92c2811b0ff3cdb3e2c16d254e9b6b748a57cd644663e3d1
       HEAT_EXPECTED_DATA_MODE: real_source
       EV_API_URL: http://ev-api:8000
-      EV_EXPECTED_RELEASE_COMMIT: 54a894cc7c96c7d8c27e344ee2724012d5ae4e3d
-      EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:94050f345344626b8c05d42abc116fbfc57f7578a450bf9662be2ebe56525aec
+      EV_EXPECTED_RELEASE_COMMIT: 2bf386e8a0b9e43c22e8353d2fa82fbb073695e8
+      EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
       CONSUMPTION_API_URL: http://consumption-api:8080
-      CONSUMPTION_EXPECTED_RELEASE_COMMIT: e5f44368b01bee9f4a77a409e6894f22f57f9684
-      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e
+      CONSUMPTION_EXPECTED_RELEASE_COMMIT: 8b148ea7562dbd3681e51dbb7bfd5b87e5730f8c
+      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
@@ -822,7 +843,7 @@ services:
   ## For debugging: use Redis Insight browser to explore the content of redis streams.
   ## ---------------------------------------------------------------------------------
   redis-insight:
-    image: redis/redisinsight
+    image: redis/redisinsight:3.8.0
     restart: always
     environment:
       - RI_REDIS_HOST0=redis

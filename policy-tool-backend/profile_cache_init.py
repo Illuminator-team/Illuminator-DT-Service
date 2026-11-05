@@ -450,7 +450,15 @@ def _pv_inputs(
             "parameters": {},
         },
     )
-    output_id = run["output_ids"][0]
+    output_ids = run.get("output_ids")
+    if run.get("status") != "succeeded" or not isinstance(output_ids, list) or len(output_ids) != 1:
+        raise CacheBuildError(
+            "PV production-profile run did not produce exactly one output: "
+            f"run_id={run.get('run_id')!r} status={run.get('status')!r} "
+            f"outputs={len(output_ids) if isinstance(output_ids, list) else output_ids!r} "
+            f"errors={run.get('errors')!r}"
+        )
+    output_id = output_ids[0]
     output = pv.json("GET", f"/outputs/{output_id}")
     rows = list(csv.DictReader(io.StringIO(pv.bytes(output["links"]["data"]).decode("utf-8"))))
     by_feature: dict[str, list[float]] = defaultdict(list)
