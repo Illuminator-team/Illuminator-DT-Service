@@ -12,10 +12,10 @@ sys.path.insert(0, str(ROOT / "layer-publisher"))
 from consumption import fetch_consumption_artifact, load_consumption_records  # noqa: E402
 from pc6 import get_layer_config, load_manifest  # noqa: E402
 
-RELEASE_COMMIT = "e5f44368b01bee9f4a77a409e6894f22f57f9684"
-IMAGE_IDENTITY = "ghcr.io/jortgroen/consumption-map-api@sha256:a1116b2e4bfd32167c2277089523a7d1f8c82aaf82641059412c9cd03415d43e"
-SOURCE_CACHE_IMAGE = "ghcr.io/jortgroen/consumption-map-source-cache@sha256:f4bcf9c44b39ee4e1e244502a220296d1a0cdfa9ed2bb21bf2667654f391ef59"
-MODEL_VERSION = "0.4.0"
+RELEASE_COMMIT = "8b148ea7562dbd3681e51dbb7bfd5b87e5730f8c"
+IMAGE_IDENTITY = "ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0"
+SOURCE_CACHE_IMAGE = "ghcr.io/jortgroen/consumption-map-source-cache@sha256:b26a1cb702407cb7e9b2f4c66954e844ea587636e31ab569ddee97965169ba3f"
+MODEL_VERSION = "0.5.0"
 CONTRACT_VERSION = "reformers-consumption-v1"
 QUALITY_RULE = "datacompleetheid-qualitative-v1"
 RUN_ID = "run_acceptance"
