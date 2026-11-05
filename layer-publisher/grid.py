@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import math
 import re
 from dataclasses import dataclass
@@ -8,6 +9,8 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import requests
+
+LOGGER = logging.getLogger(__name__)
 
 
 GRID_LAYER_IDS = (
@@ -470,11 +473,13 @@ def load_grid_records(
             in_service = properties.get("in_service")
             if in_service is not None and not isinstance(in_service, bool):
                 raise ValueError(f"{feature_id}: in_service must be boolean or null")
+            # Model 2.7 also publishes the MV/MV couplings (20 kV <-> 10 kV) it
+            # finds in the source as grid_transformers features.
             if properties.get("component_type") not in {
-                "lv_mv_transformer", "mv_hv_transformer"
+                "lv_mv_transformer", "mv_hv_transformer", "mv_mv_coupling"
             }:
                 raise ValueError(f"{feature_id}: transformer component type drift")
-            if properties.get("transformer_type") not in {"lv_mv", "mv_hv"}:
+            if properties.get("transformer_type") not in {"lv_mv", "mv_hv", "mv_mv"}:
                 raise ValueError(f"{feature_id}: transformer type drift")
             for field in (
                 "primary_nominal_voltage_kv",
@@ -816,9 +821,13 @@ def fetch_grid_artifact(
         "GET /layers",
     )
     layers = catalog.get("layers")
-    if not isinstance(layers, list) or {item.get("id") for item in layers} != set(GRID_LAYER_IDS):
+    # Newer grid models add layers (grid_mv_attachment_points, grid_capacity_limits);
+    # the publisher only needs its own layers to be present, and ignores the rest.
+    if not isinstance(layers, list) or not set(GRID_LAYER_IDS) <= {item.get("id") for item in layers}:
         raise ValueError("GET /layers: grid layer set drift")
     for layer in layers:
+        if layer.get("id") not in GRID_LAYER_IDS:
+            continue
         runtime = _mapping(layer.get("runtime"), f"GET /layers {layer.get('id')} runtime")
         count = runtime.get("feature_count")
         if isinstance(count, bool) or not isinstance(count, int) or count < 1:
@@ -881,6 +890,31 @@ def fetch_grid_artifact(
             collection = json.loads(content)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError(f"{layer_id} output is not valid UTF-8 GeoJSON") from exc
+        # Model 2.7 reports a PC6 whose MV/HV station cannot be determined as an
+        # explicit `assignment_status=unavailable` row with no dominant
+        # transformer. The published table has one station per PC6, so such a
+        # PC6 is left out (absent = no answer) rather than stored with an empty
+        # station; the count is logged and checked against the output.
+        skipped_unavailable = 0
+        if layer_id == "grid_mv_hv_transformer_reach" and isinstance(collection, dict):
+            features = collection.get("features")
+            if isinstance(features, list):
+                kept = [
+                    feature for feature in features
+                    if not (
+                        isinstance(feature, dict)
+                        and isinstance(feature.get("properties"), dict)
+                        and feature["properties"].get("assignment_status") == "unavailable"
+                    )
+                ]
+                skipped_unavailable = len(features) - len(kept)
+                if skipped_unavailable:
+                    collection = {**collection, "features": kept}
+                    LOGGER.warning(
+                        "%s: %s of %s PC6 areas have assignment_status=unavailable "
+                        "and are not published",
+                        layer_id, skipped_unavailable, len(features),
+                    )
         records = load_grid_records(
             collection,
             layer_id=layer_id,
@@ -889,7 +923,8 @@ def fetch_grid_artifact(
             expected_grid_data_version=grid_data_version,
             expected_output_id=output_id,
         )
-        if len(records) != output.get("feature_count") or len(records) != summary.get("feature_count"):
+        total = len(records) + skipped_unavailable
+        if total != output.get("feature_count") or total != summary.get("feature_count"):
             raise ValueError(f"{layer_id} feature count does not match its records")
         records_by_layer[layer_id] = records
         output_ids[layer_id] = output_id
