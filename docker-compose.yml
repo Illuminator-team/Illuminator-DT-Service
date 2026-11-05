@@ -624,7 +624,8 @@ services:
   ## This micro-service stores selected data from the Redis stream to the TtimescaleDB.
   ## ----------------------------------------------------------------------------------
   data-sync-service:
-    image: ait1/rdp-redsql@sha256:f703b663f0e9c50c82c4c7674c5e2b844283c86bb3cf51d01c5de432417c8991
+    build: ./images/redsql
+    image: illuminator-dev-redsql:latest
     environment:
       POSTGRES_USER: ${POSTGRES_DATA_SOURCE_USER}
       POSTGRES_PASSWORD: ${POSTGRES_DATA_SOURCE_PASSWORD}
@@ -645,7 +646,8 @@ services:
   ## Use grafana for visualization of data in the timescale DB.
   ## ----------------------------------------------------------
   grafana:
-    image: grafana/grafana-oss:12.4.3
+    build: ./images/grafana
+    image: illuminator-dev-grafana:12.4.3
     environment:
       GF_SERVER_ROOT_URL: "https://%(domain)s:443/grafana"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
@@ -850,7 +852,8 @@ services:
   ## For debugging: use Redis Insight browser to explore the content of redis streams.
   ## ---------------------------------------------------------------------------------
   redis-insight:
-    image: redis/redisinsight:3.8.0
+    build: ./images/redisinsight
+    image: illuminator-dev-redisinsight:3.8.0
     restart: always
     environment:
       - RI_REDIS_HOST0=redis
