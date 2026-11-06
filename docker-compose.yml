@@ -32,7 +32,8 @@ services:
 
 #  --------------------------------------- PLAYGROUND ---------------------------------------
   policy-tool-frontend:
-      image: nginx:alpine
+      build: ./images/nginx
+      image: illuminator-dev-nginx:alpine
       volumes:
         # Mount HTML/JS/CSS code
         - ./policy-tool-frontend:/usr/share/nginx/html/dashboard:ro
@@ -712,7 +713,7 @@ services:
   ## Use a reverse proxy to secure this RDP deployment.
   ## --------------------------------------------------
   reverse-proxy:
-    image: traefik:v3.6
+    image: traefik@sha256:68ae5fe5b64ca166704b746a9e8afcd385e36b3f569a5691401bf652d57b3748 # traefik v3.7.17
     user: root
     ports:
       - "80:80"
@@ -759,7 +760,9 @@ services:
   ## Accessible at: http://localhost/geoserver and https://localhost/geoserver
   ## --------------------------------------------------
   geo:
-    image: kartoza/geoserver:2.28.5
+    # kartoza/geoserver 2.28.5 with OS updates applied and the unused kernel headers removed
+    build: ./images/geoserver
+    image: illuminator-dev-geoserver:2.28.5
     environment:
       - STABLE_EXTENSIONS=postgis-plugin
       - GEOSERVER_ADMIN_USER=${GEOSERVER_ADMIN_USER:?set GEOSERVER_ADMIN_USER in .env}
