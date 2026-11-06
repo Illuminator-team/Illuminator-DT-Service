@@ -144,10 +144,17 @@ git fetch origin
 git switch main
 git pull --ff-only origin main
 git rev-parse HEAD
+scripts/preflight-timescale.sh -p <project> -f docker-compose.yml
 docker compose pull --ignore-buildable
 docker compose build --pull
 docker compose up -d --build
 ```
+
+The preflight refuses (exit 1, nothing changed) when an existing PostgreSQL 14
+database has not been migrated to PostgreSQL 17 yet; see "Upgrading The Database To
+PostgreSQL 17". Even without it, `docker compose up` cannot start an empty PostgreSQL 17
+database next to PostgreSQL 14 data: the `timescale-guard` service fails first and
+`timescale` is never started.
 
 Record the deployed commit. Do not add the local or CI override files. PV can
 take more than ten minutes on a cold cache, and a clean Grid initialization can
@@ -215,6 +222,10 @@ dashboard loses an existing workflow, or either acceptance script fails.
 2. Check out the previously recorded release commit without rewriting Git
    history.
 3. Re-render its Compose configuration and run `docker compose up -d --build`.
+   If the release you are leaving is the PostgreSQL 17 database move, do **not** do this
+   with plain Compose: use `scripts/upgrade-timescale-pg17.sh rollback` so that the rows
+   written to PostgreSQL 17 since the cutover are kept (see "Upgrading The Database To
+   PostgreSQL 17").
 4. Keep named volumes; never add `--volumes` to rollback commands.
 5. Restore `rdp_db` and the GeoServer configuration only when the release made
    an incompatible data change and the previous services cannot use the current
@@ -223,3 +234,146 @@ dashboard loses an existing workflow, or either acceptance script fails.
 
 Do not continue forward with fixture data, unpinned images, missing provenance,
 or partially initialized caches to make the deployment appear healthy.
+
+## Upgrading The Database To PostgreSQL 17 (TimescaleDB 2.31)
+
+The `timescale/timescaledb-ha:pg14-latest` tag was last built in April 2023 and
+carries well over a thousand scanner findings. Compose now pins
+`timescale/timescaledb-ha` (PostgreSQL 17, TimescaleDB 2.31, PostGIS 3.6) by digest
+and keeps the data in a new `timescale-pg17-data` volume. A TimescaleDB 2.10 dump
+cannot be restored into 2.31 and the images contain only one PostgreSQL major, so
+the move is a logical copy into a fresh cluster. The old `timescale-data` volume is
+never modified.
+
+The measurement data is small (three tables: `data_points`, `raw_bitemporal_double`,
+`raw_unitemporal_double`). The schema comes from `db-scheme` (same Alembic head) and the
+layer publisher re-creates the PostGIS layers.
+
+### Guards against an accidental empty database
+
+* `timescale-guard` (Compose) runs before `timescale` and fails when the PostgreSQL 14
+  volume holds data and the PostgreSQL 17 volume does not carry the **migration-complete
+  marker** (`.illuminator-pg17-migration-complete` in the volume root). An initialised
+  PostgreSQL 17 cluster (`data/PG_VERSION` = 17) is *not* proof of a migration: PostgreSQL 17
+  initialises before the data is copied, so a failed or interrupted copy leaves an empty or
+  partial cluster that a routine deploy would otherwise start. A new volume is not
+  literally empty (Docker copies the image's empty `backup/` and `data/` directories
+  into it), so "empty" means "no regular files".
+* The marker is written by the cutover script only after the counts and checksums of the
+  three data tables are identical, and the rollback script removes it again. A failed
+  cutover never writes it. If you migrated by hand, write it yourself only after you
+  have compared the counts and checksums:
+  `docker exec -i <timescale> sh -c 'cat > /home/postgres/pgdata/.illuminator-pg17-migration-complete' < <checksums-file>`.
+* `scripts/preflight-timescale.sh` (run before every deploy) also catches installs from
+  before the mount fix, where the database lives in the container's writable layer; it
+  requires the same marker.
+* `TIMESCALE_ALLOW_EMPTY_PG17=yes` overrides both on purpose (an empty database). The
+  cutover script sets it only for its own `up timescale` call.
+
+### Cutover
+
+```bash
+scripts/upgrade-timescale-pg17.sh cutover -p <project> -o <old-compose.yml> -n <new-compose.yml> \
+    -b ../rdp-pg17-cutover-$(date -u +%Y%m%dT%H%M%SZ) [-x docker-compose.ports.yml]
+```
+
+No password is read or printed; the admin user name comes from the running container.
+The script:
+
+1. takes a `pg_dumpall` of the running PostgreSQL 14 database;
+2. **stops the writers** (`data-sync-service`, `layer-publisher`, `grafana`; override with `WRITERS`);
+3. **then** records `count(*)` and an md5 checksum of the three tables, exports them, and
+   records the checksums again after the export. The baseline and the export therefore
+   come from the same snapshot, and a change during the export aborts the cutover;
+4. starts PostgreSQL 17 on the new volume, runs `db-scheme`, creates `postgis`;
+5. loads the tables (`COPY ... FROM STDIN (FORMAT binary)`; for the hypertables the export
+   uses `COPY (SELECT * FROM t ORDER BY 1,2,3)`, because a plain `COPY t` of a hypertable
+   silently copies nothing) and sets `data_points_id_seq`;
+6. requires identical counts and checksums **before the writers are started again**, and
+   only then writes the migration-complete marker. Otherwise it restores the PostgreSQL 14
+   deployment (nothing was written to PostgreSQL 17 yet, so nothing is lost), writes no
+   marker and exits 2.
+
+A counts-and-checksums report only counts when every query succeeded and every table has a
+line `<table> <row count> <md5>` (an empty table reports `0 empty`). A failed query, or an
+answer in any other shape, fails the step instead of producing a report that happens to
+compare equal, and a failure while the baseline or the loaded copy is being summed restores
+PostgreSQL 14 like any other failure.
+
+The automatic restore starts the writers again only when PostgreSQL 14 was recreated, is
+the database that answers (`show server_version_num` starts with 14) and is ready. If not,
+the writers **stay stopped** and the script exits 3 with the command to recover by hand; the
+old volume is untouched. The rollback script makes the same check before it believes it is
+talking to PostgreSQL 14.
+
+A failed attempt leaves an initialised PostgreSQL 17 volume without a marker. The guard
+refuses to start it, and a second `cutover` refuses to load on top of it ("already holds a
+cluster", nothing is changed): inspect the volume and, if it is only a leftover, remove
+that one volume yourself (`docker volume rm <project>_timescale-pg17-data`; the script never
+deletes a volume) before you run the cutover again.
+
+Afterwards check the routes, that nothing is unhealthy, that the layer-publisher log is
+clean and that `data-sync-service` inserts rows. `<backup-dir>/cutover-baseline.txt` is the
+recovery point used by a rollback.
+
+### Rollback after the cutover
+
+Once the writers run against PostgreSQL 17, the rows they write exist only there, so
+switching back to the PostgreSQL 14 volume with plain Compose loses them. Use:
+
+```bash
+scripts/upgrade-timescale-pg17.sh rollback -p <project> -o <old-compose.yml> -n <new-compose.yml> \
+    -b <the cutover backup dir> (--replay | --discard-post-cutover-writes)
+```
+
+The choice is mandatory (the script exits 64 without it) and is the approval of the
+recovery point. In both modes the script first stops the writers, **exports the
+PostgreSQL 17 tables to `<backup-dir>/pg17-at-rollback`** and prints the row counts at the
+cutover and now, removes the marker, then starts PostgreSQL 14 from the old volume and
+requires it to equal `cutover-baseline.txt`. The PostgreSQL 17 volume is kept.
+
+The export is written once. It is built in `pg17-at-rollback.partial` and becomes
+`pg17-at-rollback` (with an `EXPORT_COMPLETE` file and its `sums.txt`) only when every table
+is exported, and only a database that answers as PostgreSQL 17 is exported. If a rollback
+fails after PostgreSQL 14 has started (for example a failed replay) and you run it again, the
+script reuses that completed export and never exports PostgreSQL 14 data over it. With no
+completed export and PostgreSQL 14 already running it refuses and tells you to start the
+PostgreSQL 17 deployment again first. If PostgreSQL 17 is running again and has changed
+since the export, it refuses until you move the old export aside (keep it).
+
+* `--replay` inserts the PostgreSQL 17 rows into PostgreSQL 14 through a staging schema
+  (`INSERT ... ON CONFLICT DO NOTHING` on the primary keys; `data_points` first, then
+  the sequence), verifies that every staged row is present (a count of staged rows with
+  no match must be 0) and only then starts the writers. It is safe to repeat.
+  Limits: PostgreSQL 14 / TimescaleDB 2.10 cannot insert into a *compressed* chunk, so a
+  replayed row that falls into an already compressed chunk makes the replay fail and the
+  writers stay stopped (decompress that chunk and run the rollback again); and rows that
+  were *updated in place* in PostgreSQL 17 are not overwritten (the bitemporal table
+  stores changes as new rows, so this does not occur for forecasts).
+  **Resuming:** once a replay has committed and been verified, the script records the
+  resulting PostgreSQL 14 state (`REPLAY_VERIFIED` next to the export). If only the start of
+  the writers failed, run the same command again: PostgreSQL 14 then differs from the
+  cutover baseline, and the script accepts exactly that recorded state (and nothing else),
+  checks again that every row of the retained PostgreSQL 17 export is present, does not
+  replay or export again, and starts the writers. Any other difference from the baseline
+  still stops the script with the writers stopped.
+* `--discard-post-cutover-writes` restores PostgreSQL 14 as it was at the cutover. The
+  rows written since then remain only in the export and in the PostgreSQL 17 volume.
+
+After a few days without problems, and once a fresh backup exists, the old volume can be
+removed (`docker volume rm <project>_timescale-data`). Do that only after the rollback
+option is no longer wanted.
+
+### Tested
+
+`tests/test_timescale_upgrade_guards.py` (guard against real directories, preflight against
+a fake `docker`; refuses an existing PostgreSQL 14 install and an initialised PostgreSQL 17
+cluster without the marker, allows a fresh and a migrated one),
+`tests/test_upgrade_timescale_pg17_script.py` (order of the calls with a fake `docker`:
+writers stopped before baseline and export, comparison before the writers start, marker
+only after the comparison, a failing or malformed checksum query never approves, a rollback resumes after a committed replay only from the recorded state, a failed
+restore of PostgreSQL 14 keeps the writers stopped, export before PostgreSQL 14 starts, a rollback retry keeps the
+PostgreSQL 17 export byte for byte, replay verified before the writers start) and a rehearsal on
+throwaway databases: after a replay the PostgreSQL 14 copy had the same counts and
+checksums as the PostgreSQL 17 state, including a new `data_points` row, and replaying twice
+changed nothing.

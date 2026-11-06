@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOCKER = os.environ.get("DOCKER", "docker").split()
 REDIS_IMAGE = "redis:7.2.17-alpine"
-TIMESCALE_IMAGE = "timescale/timescaledb-ha:pg14-latest"
+TIMESCALE_IMAGE = "timescale/timescaledb-ha@sha256:3f0b3f6bdf4912878444a36e6113a18346309583c4d1a61d81a0c511342a1afd"
 SCHEMA_IMAGE = "ait1/rdp-database:latest-dev"
 STREAM = "geosphere.forecasts.nwp.WIEN-HOHE_WARTE"
 ADMIN = ("postgres", "smk-" + uuid.uuid4().hex[:10])
