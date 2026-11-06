@@ -2,9 +2,8 @@
 
 import subprocess
 import sys
+import unittest
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import smoke_redsql_image as smoke  # noqa: E402
@@ -25,29 +24,32 @@ class FakeDocker:
         return [a[-1] for a in self.calls if a[0] == "rm"]
 
 
-@pytest.fixture(autouse=True)
-def reset(monkeypatch):
-    smoke.created.update(containers=[], networks=[], images=[])
-    yield
-    smoke.created.update(containers=[], networks=[], images=[])
+class SmokeCleanupTests(unittest.TestCase):
+    def setUp(self):
+        self._docker = smoke.docker
+        smoke.created.update(containers=[], networks=[], images=[])
+
+    def tearDown(self):
+        smoke.docker = self._docker
+        smoke.created.update(containers=[], networks=[], images=[])
+
+    def test_name_collision_on_first_container_removes_nothing(self):
+        fake = smoke.docker = FakeDocker(fail_run_of=smoke.REDIS)
+        with self.assertRaises(SystemExit):
+            smoke.main()
+        self.assertEqual(fake.removed(), [])  # the colliding container is not ours
+
+    def test_failure_on_second_container_removes_only_the_first_with_its_volume(self):
+        fake = smoke.docker = FakeDocker(fail_run_of=smoke.DB)
+        with self.assertRaises(SystemExit):
+            smoke.main()
+        self.assertEqual(fake.removed(), [smoke.REDIS])
+        self.assertTrue(all(a[:2] == ("rm", "-fv") for a in fake.calls if a[0] == "rm"))
+
+    def test_names_are_unique_per_invocation(self):
+        for name in (smoke.DB, smoke.REDIS, smoke.SYNC):
+            self.assertIn(smoke.RUN, name)
 
 
-def test_name_collision_on_first_container_removes_nothing(monkeypatch):
-    fake = FakeDocker(fail_run_of=smoke.REDIS)
-    monkeypatch.setattr(smoke, "docker", fake)
-    with pytest.raises(SystemExit):
-        smoke.main()
-    assert fake.removed() == []  # the colliding container is not ours, so it is never removed
-
-
-def test_failure_on_second_container_removes_only_the_first(monkeypatch):
-    fake = FakeDocker(fail_run_of=smoke.DB)
-    monkeypatch.setattr(smoke, "docker", fake)
-    with pytest.raises(SystemExit):
-        smoke.main()
-    assert fake.removed() == [smoke.REDIS]
-    assert all(a[:2] == ("rm", "-fv") for a in fake.calls if a[0] == "rm")  # data volumes go too
-
-
-def test_names_are_unique_per_invocation():
-    assert smoke.RUN in smoke.DB and smoke.RUN in smoke.REDIS and smoke.RUN in smoke.SYNC
+if __name__ == "__main__":
+    unittest.main()
