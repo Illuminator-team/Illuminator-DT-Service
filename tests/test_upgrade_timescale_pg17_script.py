@@ -40,7 +40,11 @@ if a[0] == "compose":
     if rest[:2] == ["config", "--images"]:
         out("timescale/timescaledb-ha@sha256:" + "3" * 64)
     if "up" in rest and "timescale" in rest:
-        setphase("pg17" if f == "new.yml" else "pg14")
+        mode = os.environ.get("FAKE_PG14_UP", "") if f == "old.yml" else ""
+        if mode == "fail":
+            sys.stderr.write("cannot recreate\n"); sys.exit(1)
+        if mode != "noop":                      # noop: exits 0 but the old container is not what answers
+            setphase("pg17" if f == "new.yml" else "pg14")
     sys.exit(0)
 if a[0] == "inspect":
     out("0"); sys.exit(0)
@@ -73,13 +77,19 @@ if a[0] == "exec":
     if "md5(string_agg" in sql:
         t = sql.split(" from ")[1].split()[0]
         n = {"data_points": 31, "raw_bitemporal_double": 1000, "raw_unitemporal_double": 50}[t]
-        h = "aaaa"
+        if phase() in os.environ.get("FAKE_SUMS_FAIL", "").split(","):
+            sys.exit(1)                          # psql fails; the script must not treat the empty answer as a report
+        if os.environ.get("FAKE_SUMS_GARBAGE") == "1":
+            sys.exit(0)
+        h = "a" * 32
         if phase() == "pg17" and os.environ.get("FAKE_PG17_EXTRA") == "1":
-            n += 7; h = "bbbb"
+            n += 7; h = "b" * 32
         if phase() == "pg17" and os.environ.get("FAKE_MISMATCH") == "1":
-            h = "cccc"
+            h = "c" * 32
         if phase() == "pg14" and os.environ.get("FAKE_PG14_DIFF") == "1":
-            h = "dddd"
+            h = "d" * 32
+        if os.environ.get("FAKE_EMPTY_TABLE") == t:
+            n, h = 0, "empty"
         out("%d %s" % (n, h)); sys.exit(0)
     if "last_value from data_points_id_seq" in sql:
         out("31"); sys.exit(0)
@@ -90,7 +100,7 @@ sys.stderr.write("unexpected docker call: %s\n" % " ".join(a)); sys.exit(99)
 '''
 
 
-def sums_file(n=(31, 1000, 50), h="aaaa"):
+def sums_file(n=(31, 1000, 50), h="a" * 32):
     return "".join("%s %d %s\n" % (t, c, h) for t, c in zip(("data_points", "raw_bitemporal_double", "raw_unitemporal_double"), n))
 
 
@@ -179,6 +189,69 @@ class UpgradeScriptTests(unittest.TestCase):
         run = [c for c in self.calls() if c.startswith("run ")]
         self.assertEqual(len(run), 1); self.assertIn(":/new:ro", run[0])    # looked at read-only
         self.assertFalse([c for c in self.calls() if c.startswith("pg_dumpall") or "stop" in c or "FROM STDIN" in c or "marker" in c])
+
+    # A failed checksum query used to leave only the table names in the report; the comparison
+    # then passed and the marker was written (review of 5609d4d).
+    def no_approval(self):
+        calls = self.calls()
+        self.assertFalse([c for c in calls if "marker-write" in c], "marker written")
+        self.assertFalse([c for c in calls if "compose[new.yml] up -d --no-deps data-sync-service" in c], "writers started on PG17")
+
+    def test_failing_checksum_queries_on_both_databases_never_approve_the_migration(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_SUMS_FAIL="pg14,pg17")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.no_approval()
+
+    def test_a_failing_checksum_query_after_the_load_never_approves_the_migration(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_SUMS_FAIL="pg17")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.no_approval()
+        self.assertGreater(self.idx("compose[old.yml] up -d --no-deps data-sync-service"), self.idx("compose[old.yml] up -d --no-deps --force-recreate timescale"))
+
+    def test_an_answer_without_count_and_checksum_never_approves_the_migration(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_SUMS_GARBAGE="1")
+        self.assertNotEqual(r.returncode, 0)
+        self.no_approval()
+
+    def test_an_empty_table_has_a_defined_checksum_and_the_migration_goes_through(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_EMPTY_TABLE="raw_unitemporal_double")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("raw_unitemporal_double 0 empty", (self.bk / "cutover-baseline.txt").read_text())
+        self.assertTrue([c for c in self.calls() if "marker-write" in c])
+
+    # A failed automatic recovery must not start the writers on the partial PG17 database.
+    def test_failed_recreation_of_postgres_14_keeps_the_writers_stopped(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_MISMATCH="1", FAKE_PG14_UP="fail")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("STAY STOPPED", r.stderr)
+        self.assertFalse([c for c in self.calls() if "up -d --no-deps data-sync-service" in c])
+        self.no_approval()
+
+    def test_recreation_that_leaves_postgres_17_answering_keeps_the_writers_stopped(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_MISMATCH="1", FAKE_PG14_UP="noop")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("not PostgreSQL 14", r.stderr)
+        self.assertFalse([c for c in self.calls() if "up -d --no-deps data-sync-service" in c])
+
+    def test_successful_recovery_still_starts_the_writers_on_postgres_14(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_MISMATCH="1")
+        self.assertEqual(r.returncode, 2)
+        self.assertTrue([c for c in self.calls() if "compose[old.yml] up -d --no-deps data-sync-service" in c])
+
+    def test_rollback_with_postgres_17_still_answering_never_starts_the_writers(self):
+        # PG17 unchanged since the cutover has the same checksums as the baseline: only the version tells them apart.
+        self.prepare_rollback()
+        r = self.run_script("rollback", "--replay", FAKE_PG14_UP="noop")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("not PostgreSQL 14", r.stderr)
+        self.assertFalse([c for c in self.calls() if "up -d --no-deps data-sync-service" in c or "COPY replay." in c])
 
     def test_cutover_refuses_when_the_running_database_is_not_postgres_14(self):
         self.phase("pg17")

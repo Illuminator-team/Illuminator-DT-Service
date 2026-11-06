@@ -75,7 +75,17 @@ dc() { local f=$1; shift; if [ -n "$EXTRA" ]; then $DOCKER compose -p "$PROJECT"
 cid() { dc "$NEWC" ps -q timescale; }
 pq() { $DOCKER exec "$(cid)" psql -U "$ADMIN" -d "$DB" -tAF'|' -c "$1"; }
 ready() { local i; for i in $(seq 1 60); do $DOCKER exec "$(cid)" pg_isready -U "$ADMIN" >/dev/null 2>&1 && return 0; sleep 2; done; return 1; }
-sums() { local t; for t in $TABLES; do echo "$t $(pq "select count(*)||' '||md5(string_agg(x::text,'|' order by x::text)) from $t x")"; done; }
+# One line per table: "<table> <row count> <md5>" ("empty" stands in for the md5 of an empty table).
+# Any failed query, or an answer that is not exactly that shape, fails the whole report.
+sums() {
+  local t r
+  for t in $TABLES; do
+    r=$(pq "select count(*)||' '||coalesce(md5(string_agg(x::text,'|' order by x::text)),'empty') from $t x") || return 1
+    [[ $r =~ ^[0-9]+\ ([0-9a-f]{32}|empty)$ ]] || { echo "upgrade-timescale-pg17: no usable count/checksum for $t: '$r'" >&2; return 1; }
+    echo "$t $r"
+  done
+}
+active_major() { pq 'show server_version_num' | head -n 1 | cut -c1-2; }
 copy_out_sql() { if [ "$1" = data_points ]; then echo "COPY $1 TO STDOUT (FORMAT binary)"; else echo "COPY (SELECT * FROM $1 ORDER BY 1,2,3) TO STDOUT (FORMAT binary)"; fi; }
 export_tables() { # export_tables DIR  (a plain COPY of a hypertable copies nothing, hence the SELECT)
   local t; mkdir -p "$1"; for t in $TABLES; do $DOCKER exec "$(cid)" psql -U "$ADMIN" -d "$DB" -qc "$(copy_out_sql "$t")" > "$1/$t.bin" || return 1; done
@@ -93,15 +103,24 @@ ADMIN=$($DOCKER exec "$(cid)" printenv POSTGRES_USER) && [ -n "$ADMIN" ] || die 
 
 restore_old() { # PG14 deployment back, nothing written to PG17 yet
   echo "!!!! restoring the PostgreSQL 14 deployment: $1"
-  dc "$OLDC" up -d --no-deps --force-recreate timescale
-  ready || echo "the PostgreSQL 14 database did not become ready" >&2
+  stop_writers >/dev/null 2>&1 || true
+  # The writers only start again when PostgreSQL 14 was recreated, is the database that answers, and is ready.
+  if ! dc "$OLDC" up -d --no-deps --force-recreate timescale; then
+    echo "!!!! could not recreate PostgreSQL 14; the writers STAY STOPPED. The old volume is untouched; recover by hand with: docker compose -p $PROJECT -f $OLDC up -d timescale" >&2; exit 3
+  fi
+  if ! ready; then
+    echo "!!!! the PostgreSQL 14 database did not become ready; the writers STAY STOPPED" >&2; exit 3
+  fi
+  if [ "$(active_major)" != 14 ]; then
+    echo "!!!! the database that answers is not PostgreSQL 14 (the PostgreSQL 17 container is still running); the writers STAY STOPPED" >&2; exit 3
+  fi
   start_writers "$OLDC"
   exit 2
 }
 
 if [ "$cmd" = cutover ]; then
   echo "=== 0. pre-checks"
-  [ "$(pq 'show server_version_num' | head -n 1 | cut -c1-2)" = 14 ] || die "the running database is not PostgreSQL 14"
+  [ "$(active_major)" = 14 ] || die "the running database is not PostgreSQL 14"
   if pg17_volume_has_cluster; then
     die "the PostgreSQL 17 volume (${PROJECT}_timescale-pg17-data) already holds a cluster, for example from a failed earlier attempt, and the load would run into it. Inspect it; if it is only a leftover, remove that volume yourself and run the cutover again. Nothing was changed."
   fi
@@ -110,10 +129,11 @@ if [ "$cmd" = cutover ]; then
   echo "=== 2. stop the writers"
   stop_writers || die "could not stop the writers"
   echo "=== 3. baseline and export from the same snapshot (writers are stopped)"
-  sums > "$BK/cutover-baseline.txt" || die "baseline failed"
+  sums > "$BK/cutover-baseline.txt" || restore_old "the baseline counts and checksums could not be computed"
   export_tables "$BK/pg14-at-cutover" || die "export failed"
-  echo "$(pq 'select last_value from data_points_id_seq')" > "$BK/data_points_id_seq.txt"
-  sums > "$BK/cutover-baseline-after-export.txt"
+  seq=$(pq 'select last_value from data_points_id_seq') && [[ $seq =~ ^[0-9]+$ ]] || restore_old "cannot read data_points_id_seq"
+  echo "$seq" > "$BK/data_points_id_seq.txt"
+  sums > "$BK/cutover-baseline-after-export.txt" || restore_old "the checksums after the export could not be computed"
   diff -q "$BK/cutover-baseline.txt" "$BK/cutover-baseline-after-export.txt" >/dev/null || restore_old "the data changed while it was being exported"
   cat "$BK/cutover-baseline.txt"
   echo "=== 4. start PostgreSQL 17 on the new volume"
@@ -127,7 +147,7 @@ if [ "$cmd" = cutover ]; then
     $DOCKER exec -i "$(cid)" psql -U "$ADMIN" -d "$DB" -v ON_ERROR_STOP=1 -qc "COPY $t FROM STDIN (FORMAT binary)" < "$BK/pg14-at-cutover/$t.bin" || restore_old "load of $t failed"
   done
   pq "select setval('data_points_id_seq', $(cat "$BK/data_points_id_seq.txt"), true)" >/dev/null || restore_old "sequence"
-  sums > "$BK/pg17-after-load.txt"
+  sums > "$BK/pg17-after-load.txt" || restore_old "the counts and checksums of the loaded PostgreSQL 17 tables could not be computed"
   diff "$BK/cutover-baseline.txt" "$BK/pg17-after-load.txt" || restore_old "counts or checksums differ after the load"
   echo "identical: $(tr '\n' ';' < "$BK/pg17-after-load.txt")"
   $DOCKER exec -i "$(cid)" sh -c "cat > $MARKER" < "$BK/pg17-after-load.txt" || restore_old "could not write the migration-complete marker"
@@ -143,7 +163,7 @@ echo "=== 1. stop the writers (the PostgreSQL 17 state must stop changing)"
 stop_writers || die "could not stop the writers"
 echo "=== 2. keep the PostgreSQL 17 state: export it before PostgreSQL 14 is started"
 RB="$BK/pg17-at-rollback"
-active=$(pq 'show server_version_num' | head -n 1 | cut -c1-2) || die "cannot ask the running database for its version; nothing was changed, the writers are stopped"
+active=$(active_major) || die "cannot ask the running database for its version; nothing was changed, the writers are stopped"
 if [ -f "$RB/EXPORT_COMPLETE" ]; then
   # A completed export exists (this is a retry). Never replace it.
   if [ "$active" = 17 ]; then
@@ -168,7 +188,8 @@ paste -d' ' "$BK/cutover-baseline.txt" "$RB/sums.txt" | awk '{print "  "$1": "$2
 echo "=== 3. restore PostgreSQL 14 (old volume, untouched since the cutover)"
 dc "$OLDC" up -d --no-deps --force-recreate timescale || die "could not start PostgreSQL 14; the PostgreSQL 17 volume and export are intact, the writers are stopped"
 ready || die "PostgreSQL 14 did not become ready; the writers stay stopped"
-sums > "$RB/pg14-after-restore.txt"
+[ "$(active_major)" = 14 ] || die "the database that answers is not PostgreSQL 14 (is the PostgreSQL 17 container still running?); the writers stay stopped"
+sums > "$RB/pg14-after-restore.txt" || die "cannot checksum PostgreSQL 14; the writers stay stopped"
 diff -q "$BK/cutover-baseline.txt" "$RB/pg14-after-restore.txt" >/dev/null || die "PostgreSQL 14 does not match the cutover baseline; writers stay stopped"
 echo "PostgreSQL 14 matches the cutover baseline"
 if [ "$MODE" = replay ]; then
@@ -191,7 +212,7 @@ if [ "$MODE" = replay ]; then
        + (select count(*) from replay.raw_unitemporal_double r where not exists (select 1 from raw_unitemporal_double t where t.dp_id=r.dp_id and t.valid_time=r.valid_time))")
   [ "$missing" = 0 ] || die "$missing replayed rows are missing from PostgreSQL 14; the writers stay stopped"
   pq "drop schema replay cascade" >/dev/null
-  sums > "$RB/pg14-after-replay.txt"
+  sums > "$RB/pg14-after-replay.txt" || die "cannot checksum PostgreSQL 14 after the replay; the writers stay stopped"
   echo "replayed; every PostgreSQL 17 row is present. PostgreSQL 14 now: $(tr '\n' ';' < "$RB/pg14-after-replay.txt")"
 else
   echo "=== 4. --discard-post-cutover-writes: the rows written since the cutover are kept only in $RB and the PostgreSQL 17 volume"

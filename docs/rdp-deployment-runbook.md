@@ -294,6 +294,18 @@ The script:
    deployment (nothing was written to PostgreSQL 17 yet, so nothing is lost), writes no
    marker and exits 2.
 
+A counts-and-checksums report only counts when every query succeeded and every table has a
+line `<table> <row count> <md5>` (an empty table reports `0 empty`). A failed query, or an
+answer in any other shape, fails the step instead of producing a report that happens to
+compare equal, and a failure while the baseline or the loaded copy is being summed restores
+PostgreSQL 14 like any other failure.
+
+The automatic restore starts the writers again only when PostgreSQL 14 was recreated, is
+the database that answers (`show server_version_num` starts with 14) and is ready. If not,
+the writers **stay stopped** and the script exits 3 with the command to recover by hand; the
+old volume is untouched. The rollback script makes the same check before it believes it is
+talking to PostgreSQL 14.
+
 A failed attempt leaves an initialised PostgreSQL 17 volume without a marker. The guard
 refuses to start it, and a second `cutover` refuses to load on top of it ("already holds a
 cluster", nothing is changed): inspect the volume and, if it is only a leftover, remove
@@ -352,7 +364,8 @@ a fake `docker`; refuses an existing PostgreSQL 14 install and an initialised Po
 cluster without the marker, allows a fresh and a migrated one),
 `tests/test_upgrade_timescale_pg17_script.py` (order of the calls with a fake `docker`:
 writers stopped before baseline and export, comparison before the writers start, marker
-only after the comparison, export before PostgreSQL 14 starts, a rollback retry keeps the
+only after the comparison, a failing or malformed checksum query never approves, a failed
+restore of PostgreSQL 14 keeps the writers stopped, export before PostgreSQL 14 starts, a rollback retry keeps the
 PostgreSQL 17 export byte for byte, replay verified before the writers start) and a rehearsal on
 throwaway databases: after a replay the PostgreSQL 14 copy had the same counts and
 checksums as the PostgreSQL 17 state, including a new `data_points` row, and replaying twice
