@@ -624,8 +624,7 @@ services:
   ## This micro-service stores selected data from the Redis stream to the TtimescaleDB.
   ## ----------------------------------------------------------------------------------
   data-sync-service:
-    build: ./images/redsql
-    image: illuminator-dev-redsql:latest
+    image: ait1/rdp-redsql@sha256:f703b663f0e9c50c82c4c7674c5e2b844283c86bb3cf51d01c5de432417c8991
     environment:
       POSTGRES_USER: ${POSTGRES_DATA_SOURCE_USER}
       POSTGRES_PASSWORD: ${POSTGRES_DATA_SOURCE_PASSWORD}
