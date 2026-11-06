@@ -37,11 +37,16 @@ if a[0] == "compose":
     log("compose[%s] %s ALLOW=%s" % (f, " ".join(rest), os.environ.get("TIMESCALE_ALLOW_EMPTY_PG17", "")))
     if rest[:2] == ["ps", "-q"] or rest[:2] == ["ps", "-aq"]:
         out("cid-" + rest[-1])
+    if rest[:2] == ["config", "--images"]:
+        out("timescale/timescaledb-ha@sha256:" + "3" * 64)
     if "up" in rest and "timescale" in rest:
         setphase("pg17" if f == "new.yml" else "pg14")
     sys.exit(0)
 if a[0] == "inspect":
     out("0"); sys.exit(0)
+if a[0] == "run":
+    log("run %s" % " ".join(a[1:]))
+    sys.exit(0 if os.environ.get("FAKE_PG17_CLUSTER") == "1" else 1)
 if a[0] == "exec":
     if "printenv" in a:
         out("postgres"); sys.exit(0)
@@ -49,6 +54,10 @@ if a[0] == "exec":
         sys.exit(0)
     if "pg_dumpall" in a:
         log("pg_dumpall"); out("-- dump"); sys.exit(0)
+    if "rm" in a and "-f" in a:
+        log("marker-remove[%s]" % phase()); sys.exit(0)
+    if "sh" in a and any("migration-complete" in x for x in a):
+        log("marker-write stdin=%d" % len(sys.stdin.buffer.read())); sys.exit(0)
     sql = a[a.index("-c") + 1] if "-c" in a else (a[a.index("-qc") + 1] if "-qc" in a else "")
     stdin = ""
     if "-i" in a:
@@ -56,7 +65,9 @@ if a[0] == "exec":
     short = " ".join(sql.split())[:90]
     log("psql[%s] %s%s" % (phase(), short, (" stdin=" + stdin) if stdin else ""))
     if "show server_version_num" in sql:
-        out(os.environ.get("FAKE_VERSION", "140007")); sys.exit(0)
+        out(os.environ.get("FAKE_VERSION", "170011" if phase() == "pg17" else "140007")); sys.exit(0)
+    if "COPY replay." in sql and os.environ.get("FAKE_FAIL_REPLAY_ONCE") == "1" and not os.path.exists(state + "/failed"):
+        open(state + "/failed", "w").write("x"); sys.stderr.write("staging load failed\n"); sys.exit(1)
     if "TO STDOUT" in sql:
         sys.stdout.write("BINARY-" + phase()); sys.exit(0)
     if "md5(string_agg" in sql:
@@ -144,6 +155,31 @@ class UpgradeScriptTests(unittest.TestCase):
         restore = self.idx("compose[old.yml] up -d --no-deps --force-recreate timescale")
         self.assertGreater(self.idx("compose[old.yml] up -d --no-deps data-sync-service"), restore)
 
+    def test_cutover_writes_the_completion_marker_only_after_the_comparison_and_before_the_writers(self):
+        self.phase("pg14")
+        r = self.run_script("cutover")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        check = self.idx("md5(string_agg", start=self.idx("FROM STDIN", last=True))
+        marker = self.idx("marker-write")
+        self.assertGreater(marker, check)
+        self.assertLess(marker, self.idx("compose[new.yml] up -d --no-deps data-sync-service"))
+        self.assertNotIn("stdin=0", self.calls()[marker])                  # it carries the verified checksums
+
+    def test_a_failed_cutover_never_writes_the_marker(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_MISMATCH="1")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse([c for c in self.calls() if "marker-write" in c])
+
+    def test_cutover_refuses_to_run_on_top_of_a_leftover_pg17_cluster(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_PG17_CLUSTER="1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("already holds a cluster", r.stderr)
+        run = [c for c in self.calls() if c.startswith("run ")]
+        self.assertEqual(len(run), 1); self.assertIn(":/new:ro", run[0])    # looked at read-only
+        self.assertFalse([c for c in self.calls() if c.startswith("pg_dumpall") or "stop" in c or "FROM STDIN" in c or "marker" in c])
+
     def test_cutover_refuses_when_the_running_database_is_not_postgres_14(self):
         self.phase("pg17")
         r = self.run_script("cutover", FAKE_VERSION="170011")
@@ -198,6 +234,63 @@ class UpgradeScriptTests(unittest.TestCase):
         r = self.run_script("rollback", "--replay", FAKE_PG14_DIFF="1")
         self.assertEqual(r.returncode, 1)
         self.assertFalse([c for c in self.calls() if "COPY replay." in c or "data-sync-service" in c and "up" in c])
+
+    def test_rollback_removes_the_marker_after_the_export_and_before_postgres_14_starts(self):
+        self.prepare_rollback()
+        r = self.run_script("rollback", "--discard-post-cutover-writes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        remove = self.idx("marker-remove[pg17]")
+        self.assertGreater(remove, self.idx("TO STDOUT", last=True))
+        self.assertLess(remove, self.idx("compose[old.yml] up -d --no-deps --force-recreate timescale"))
+        self.assertTrue((self.bk / "pg17-at-rollback" / "EXPORT_COMPLETE").exists())
+
+    def export_bytes(self):
+        d = self.bk / "pg17-at-rollback"
+        return {f.name: f.read_bytes() for f in sorted(d.iterdir()) if f.suffix == ".bin"}
+
+    def test_a_replay_retry_on_postgres_14_keeps_the_pg17_export_byte_for_byte(self):
+        self.prepare_rollback()
+        first = self.run_script("rollback", "--replay", FAKE_PG17_EXTRA="1", FAKE_FAIL_REPLAY_ONCE="1")
+        self.assertEqual(first.returncode, 1, first.stdout + first.stderr)
+        self.assertEqual((self.state / "phase").read_text().strip(), "pg14")  # failed after the switch
+        original = self.export_bytes()
+        self.assertEqual(set(original), {"data_points.bin", "raw_bitemporal_double.bin", "raw_unitemporal_double.bin"})
+        self.assertTrue(all(v == b"BINARY-pg17" for v in original.values()))
+        sums = (self.bk / "pg17-at-rollback" / "sums.txt").read_bytes()
+        before = len(self.calls())
+        second = self.run_script("rollback", "--replay", FAKE_PG17_EXTRA="1", FAKE_FAIL_REPLAY_ONCE="1")
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertEqual(self.export_bytes(), original)                       # byte for byte
+        self.assertEqual((self.bk / "pg17-at-rollback" / "sums.txt").read_bytes(), sums)
+        self.assertFalse([c for c in self.calls()[before:] if "TO STDOUT" in c])  # nothing was exported again
+        self.assertIn("reusing the completed PostgreSQL 17 export", second.stdout)
+        self.assertGreater(len([c for c in self.calls() if "insert into data_points" in c]), 0)
+
+    def test_a_rollback_on_postgres_14_without_a_completed_pg17_export_refuses_and_exports_nothing(self):
+        self.prepare_rollback(); self.phase("pg14")
+        r = self.run_script("rollback", "--replay")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no completed PostgreSQL 17 export", r.stderr)
+        self.assertFalse([c for c in self.calls() if "TO STDOUT" in c or "FROM STDIN" in c or "up -d" in c])
+        self.assertFalse((self.bk / "pg17-at-rollback").exists())
+
+    def test_an_interrupted_pg17_export_is_never_promoted_to_the_recovery_export(self):
+        self.prepare_rollback(); self.phase("pg14")
+        part = self.bk / "pg17-at-rollback.partial"; part.mkdir(); (part / "data_points.bin").write_bytes(b"half")
+        r = self.run_script("rollback", "--discard-post-cutover-writes")
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse((self.bk / "pg17-at-rollback").exists())
+
+    def test_a_completed_export_is_not_replaced_when_pg17_has_changed_since(self):
+        self.prepare_rollback()
+        done = self.bk / "pg17-at-rollback"; done.mkdir()
+        (done / "data_points.bin").write_bytes(b"original"); (done / "EXPORT_COMPLETE").write_text("")
+        (done / "sums.txt").write_text(sums_file())
+        r = self.run_script("rollback", "--discard-post-cutover-writes", FAKE_PG17_EXTRA="1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("has changed since", r.stderr)
+        self.assertEqual((done / "data_points.bin").read_bytes(), b"original")
+        self.assertFalse([c for c in self.calls() if "TO STDOUT" in c or "up -d" in c])
 
     def test_rollback_requires_the_backup_directory_of_a_cutover(self):
         self.phase("pg17"); self.bk.mkdir()

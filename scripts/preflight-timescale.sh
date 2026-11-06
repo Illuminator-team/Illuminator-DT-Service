@@ -9,7 +9,9 @@
 # `timescale-data` mount fix, where the database lives in the Timescale container's
 # writable layer (the volume is empty). This script catches that case: an existing
 # `timescale` container that does not run the PostgreSQL 17 image is refused until the
-# PostgreSQL 17 volume holds a verified cluster (data/PG_VERSION = 17).
+# PostgreSQL 17 volume carries the migration-complete marker written by
+# scripts/upgrade-timescale-pg17.sh (data/PG_VERSION = 17 alone is not proof: a failed copy
+# leaves an initialised, empty cluster).
 #
 # Exit 0: fresh install, already on PostgreSQL 17, or a verified PG17 copy exists.
 # Exit 1: refuse; nothing was changed. No credentials are read or printed.
@@ -42,7 +44,7 @@ for id in $ids; do
     continue
   fi
   version=$($DOCKER run --rm --entrypoint sh -v "${project}_timescale-pg17-data:/new:ro" "$target" \
-              -c 'cat /new/data/PG_VERSION 2>/dev/null' 2>/dev/null || true)
+              -c 'v=$(cat /new/data/PG_VERSION 2>/dev/null); if [ -s /new/.illuminator-pg17-migration-complete ]; then echo "$v"; fi' 2>/dev/null || true)
   if [ "$version" = "17" ]; then
     echo "preflight: existing timescale container ($image) and a verified PostgreSQL 17 volume: ok"
     continue
@@ -53,7 +55,7 @@ for id in $ids; do
   fi
   {
     echo "preflight: REFUSING to deploy."
-    echo "  An existing timescale container runs $image, and the PostgreSQL 17 volume holds no cluster."
+    echo "  An existing timescale container runs $image, and the PostgreSQL 17 volume has no migration-complete marker."
     echo "  Deploying now would start an empty PostgreSQL 17 database and leave the history behind."
     echo "  Migrate first (docs/rdp-deployment-runbook.md, \"Upgrading The Database To PostgreSQL 17\"; installs from"
     echo "  before the mount fix also need \"Moving An Existing Timescale Database\"), or set TIMESCALE_ALLOW_EMPTY_PG17=yes."

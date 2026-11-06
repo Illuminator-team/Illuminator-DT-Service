@@ -17,8 +17,12 @@
 #      so the baseline and the export come from the same snapshot (checked again after the export).
 #   4. Starts PostgreSQL 17 on the new volume (the compose guard is overridden for this one call
 #      only), runs db-scheme, creates the postgis extension, loads the tables.
-#   5. Requires identical counts and checksums before the writers are started again. On any
-#      failure the PG14 deployment is restored (nothing has been written to PG17 yet).
+#   5. Requires identical counts and checksums before the writers are started again, and only then
+#      writes the completion marker into the PG17 volume (the compose guard and the deploy
+#      preflight accept PG17 next to PG14 data only with that marker). On any failure the PG14
+#      deployment is restored (nothing has been written to PG17 yet) and no marker exists.
+#   A failed attempt leaves an initialised but unmarked PG17 volume. A second cutover refuses to
+#   run on top of it: inspect and remove it by hand first (the script never deletes a volume).
 #   The old volume is never modified.
 #
 # rollback  (after the writers have written to PG17, those rows exist only there)
@@ -30,12 +34,18 @@
 #                                      then stay only in the PG17 export and the PG17 volume.
 #   Either way the PG17 volume is kept and the PG17 tables are exported to BACKUP_DIR/pg17-at-rollback
 #   before PG14 is started, and the writers stay stopped until the chosen step is done.
+#   The completion marker is removed from the PG17 volume at rollback.
+#   The PG17 export is written once: into a partial directory that only becomes pg17-at-rollback
+#   (with an EXPORT_COMPLETE file) after every table is exported. Only a database that answers
+#   as PostgreSQL 17 is exported. A retry after a failure (for example a failed replay on PG14)
+#   reuses the completed export, or refuses with an instruction; it never exports PG14 data over it.
 set -uo pipefail
 
 DOCKER=${DOCKER:-docker}
 WRITERS=${WRITERS:-"data-sync-service layer-publisher grafana"}
 TABLES="data_points raw_bitemporal_double raw_unitemporal_double"
 DB=rdp_db
+MARKER=/home/postgres/pgdata/.illuminator-pg17-migration-complete
 
 usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 die() { echo "upgrade-timescale-pg17: $*" >&2; exit 1; }
@@ -70,6 +80,11 @@ copy_out_sql() { if [ "$1" = data_points ]; then echo "COPY $1 TO STDOUT (FORMAT
 export_tables() { # export_tables DIR  (a plain COPY of a hypertable copies nothing, hence the SELECT)
   local t; mkdir -p "$1"; for t in $TABLES; do $DOCKER exec "$(cid)" psql -U "$ADMIN" -d "$DB" -qc "$(copy_out_sql "$t")" > "$1/$t.bin" || return 1; done
 }
+pg17_volume_has_cluster() { # read-only look at the PG17 volume, with the PG17 image from the new Compose file
+  local image; image=$(dc "$NEWC" config --images | grep timescaledb-ha | sort -u | head -n 1)
+  [ -n "$image" ] || die "cannot find the timescaledb-ha image in $NEWC"
+  $DOCKER run --rm --entrypoint sh -v "${PROJECT}_timescale-pg17-data:/new:ro" "$image" -c 'test -f /new/data/PG_VERSION'
+}
 stop_writers() { dc "$NEWC" stop $WRITERS; }
 start_writers() { dc "$1" up -d --no-deps $WRITERS; }
 
@@ -87,6 +102,9 @@ restore_old() { # PG14 deployment back, nothing written to PG17 yet
 if [ "$cmd" = cutover ]; then
   echo "=== 0. pre-checks"
   [ "$(pq 'show server_version_num' | head -n 1 | cut -c1-2)" = 14 ] || die "the running database is not PostgreSQL 14"
+  if pg17_volume_has_cluster; then
+    die "the PostgreSQL 17 volume (${PROJECT}_timescale-pg17-data) already holds a cluster, for example from a failed earlier attempt, and the load would run into it. Inspect it; if it is only a leftover, remove that volume yourself and run the cutover again. Nothing was changed."
+  fi
   echo "=== 1. backup"
   $DOCKER exec "$(cid)" pg_dumpall -U "$ADMIN" > "$BK/pg14-dumpall-before-pg17-cutover.sql" || die "pg_dumpall failed"
   echo "=== 2. stop the writers"
@@ -112,6 +130,7 @@ if [ "$cmd" = cutover ]; then
   sums > "$BK/pg17-after-load.txt"
   diff "$BK/cutover-baseline.txt" "$BK/pg17-after-load.txt" || restore_old "counts or checksums differ after the load"
   echo "identical: $(tr '\n' ';' < "$BK/pg17-after-load.txt")"
+  $DOCKER exec -i "$(cid)" sh -c "cat > $MARKER" < "$BK/pg17-after-load.txt" || restore_old "could not write the migration-complete marker"
   echo "=== 6. start the writers"
   start_writers "$NEWC" || die "could not start the writers (PostgreSQL 17 holds the verified data)"
   echo "=== CUTOVER DONE; baseline in $BK/cutover-baseline.txt"
@@ -124,8 +143,26 @@ echo "=== 1. stop the writers (the PostgreSQL 17 state must stop changing)"
 stop_writers || die "could not stop the writers"
 echo "=== 2. keep the PostgreSQL 17 state: export it before PostgreSQL 14 is started"
 RB="$BK/pg17-at-rollback"
-export_tables "$RB" || die "export of the PostgreSQL 17 tables failed; nothing was changed, the writers are still stopped"
-sums > "$RB/sums.txt"
+active=$(pq 'show server_version_num' | head -n 1 | cut -c1-2) || die "cannot ask the running database for its version; nothing was changed, the writers are stopped"
+if [ -f "$RB/EXPORT_COMPLETE" ]; then
+  # A completed export exists (this is a retry). Never replace it.
+  if [ "$active" = 17 ]; then
+    sums > "$BK/pg17-now.txt" || die "cannot checksum the running PostgreSQL 17 tables; the writers are stopped"
+    cmp -s "$BK/pg17-now.txt" "$RB/sums.txt" || die "a completed PostgreSQL 17 export exists in $RB, but PostgreSQL 17 has changed since. Move that export aside (keep it) and run the rollback again; nothing was changed, the writers are stopped"
+  fi
+  echo "reusing the completed PostgreSQL 17 export from the earlier attempt ($RB)"
+else
+  [ "$active" = 17 ] || die "the running database is PostgreSQL $active and there is no completed PostgreSQL 17 export in $RB. Start the PostgreSQL 17 deployment ($NEWC) again, then repeat the rollback; PostgreSQL $active data is never exported as the PostgreSQL 17 state. Nothing was changed, the writers are stopped"
+  rm -rf "$RB.partial"
+  export_tables "$RB.partial" || die "export of the PostgreSQL 17 tables failed; nothing was changed, the writers are still stopped"
+  sums > "$RB.partial/sums.txt" || die "checksums of the PostgreSQL 17 tables failed; the writers are still stopped"
+  touch "$RB.partial/EXPORT_COMPLETE"
+  [ ! -e "$RB" ] || die "$RB exists without a completed export; move it aside and repeat the rollback (the new export is in $RB.partial); the writers are stopped"
+  mv "$RB.partial" "$RB" || die "cannot move the export into place; it is in $RB.partial; the writers are stopped"
+fi
+if [ "$active" = 17 ]; then # PG14 becomes the live database again: the PG17 copy no longer counts as migrated
+  $DOCKER exec "$(cid)" rm -f "$MARKER" || die "cannot remove the migration-complete marker; the writers are stopped"
+fi
 echo "rows at the cutover vs now (the difference is the recovery point):"
 paste -d' ' "$BK/cutover-baseline.txt" "$RB/sums.txt" | awk '{print "  "$1": "$2" -> "$5}'
 echo "=== 3. restore PostgreSQL 14 (old volume, untouched since the cutover)"
