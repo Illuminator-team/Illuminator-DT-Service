@@ -223,3 +223,38 @@ dashboard loses an existing workflow, or either acceptance script fails.
 
 Do not continue forward with fixture data, unpinned images, missing provenance,
 or partially initialized caches to make the deployment appear healthy.
+
+## Upgrading The Database To PostgreSQL 17 (TimescaleDB 2.31)
+
+The `timescale/timescaledb-ha:pg14-latest` tag was last built in April 2023 and
+carries well over a thousand scanner findings. Compose now pins
+`timescale/timescaledb-ha` (PostgreSQL 17, TimescaleDB 2.31, PostGIS 3.6) by digest
+and keeps the data in a new `timescale-pg17-data` volume. A TimescaleDB 2.10 dump
+cannot be restored into 2.31 and the images contain only one PostgreSQL major, so
+the move is a logical copy into a fresh cluster. The old `timescale-data` volume is
+never modified; it is the rollback.
+
+The measurement data is small (three tables: `data_points`, `raw_bitemporal_double`,
+`raw_unitemporal_double`). Everything else is rebuilt: the schema comes from
+`db-scheme` (same Alembic head), and the layer publisher re-creates the PostGIS
+layers.
+
+1. Backup: `pg_dumpall` from the running database, kept outside the checkout (mode 700).
+2. Record `count(*)` and `md5(string_agg(x::text, '|' ORDER BY x::text))` of the three tables.
+3. Stop `data-sync-service`, `layer-publisher` and `grafana`.
+4. Export the three tables with `COPY ... TO STDOUT (FORMAT binary)`. For the two
+   hypertables use `COPY (SELECT * FROM t ORDER BY 1,2,3) ...`; a plain `COPY t` of a
+   hypertable silently copies nothing.
+5. Switch to the new Compose file, `docker compose up -d --no-deps timescale`, then
+   `docker compose up --no-deps db-scheme`, then `CREATE EXTENSION IF NOT EXISTS postgis`.
+6. `COPY ... FROM STDIN (FORMAT binary)` each table, `setval('data_points_id_seq', <old last_value>, true)`,
+   and compare counts and checksums with step 2. Also compare `count(*)` of `forecasts_latest`
+   and of `forecasts` as `vis_user` and `data_source_user`.
+7. Start `data-sync-service`, `grafana`, recreate `layer-publisher`, restart `geo`.
+   Check the routes, that nothing is unhealthy and that the publisher log is clean.
+
+Rollback: restore the previous Compose file and
+`docker compose up -d --no-deps --force-recreate timescale`, then start the other
+services. The old volume still holds everything up to the moment of the cutover.
+After a few days without problems the old volume can be removed
+(`docker volume rm <project>_timescale-data`) once a fresh backup exists.
