@@ -32,8 +32,7 @@ services:
 
 #  --------------------------------------- PLAYGROUND ---------------------------------------
   policy-tool-frontend:
-      build: ./images/nginx
-      image: illuminator-dev-nginx:alpine
+      image: nginx@sha256:713fc2ebfd92e8217db451477182ee91944b123d2b1ee9fd5a8c6e91ca6c3a11 # nginx:alpine 1.31.8
       volumes:
         # Mount HTML/JS/CSS code
         - ./policy-tool-frontend:/usr/share/nginx/html/dashboard:ro
@@ -668,8 +667,7 @@ services:
   ## Use grafana for visualization of data in the timescale DB.
   ## ----------------------------------------------------------
   grafana:
-    build: ./images/grafana
-    image: illuminator-dev-grafana:12.4.3
+    image: grafana/grafana-oss@sha256:2e986801428cd689c2358605289c90ab37d2b39e24808874971f54c99bcdc412 # 12.4.3
     environment:
       GF_SERVER_ROOT_URL: "https://%(domain)s:443/grafana"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
@@ -784,9 +782,7 @@ services:
   ## Accessible at: http://localhost/geoserver and https://localhost/geoserver
   ## --------------------------------------------------
   geo:
-    # kartoza/geoserver 2.28.5 with OS updates applied and the unused kernel headers removed
-    build: ./images/geoserver
-    image: illuminator-dev-geoserver:2.28.5
+    image: kartoza/geoserver:2.28.5@sha256:a500f30ec973014be203851290e89996cfccfe4335b1b4345047f64eda05521d
     environment:
       - STABLE_EXTENSIONS=postgis-plugin
       - GEOSERVER_ADMIN_USER=${GEOSERVER_ADMIN_USER:?set GEOSERVER_ADMIN_USER in .env}
@@ -874,8 +870,7 @@ services:
   ## For debugging: use Redis Insight browser to explore the content of redis streams.
   ## ---------------------------------------------------------------------------------
   redis-insight:
-    build: ./images/redisinsight
-    image: illuminator-dev-redisinsight:3.8.0
+    image: redis/redisinsight@sha256:b5e19ee240abef6edb435871b90ff8a210995422e8e018ab61c0339d318a1f84 # 3.8.0
     restart: always
     environment:
       - RI_REDIS_HOST0=redis
