@@ -39,6 +39,9 @@ if a[0] == "compose":
         out("cid-" + rest[-1])
     if rest[:2] == ["config", "--images"]:
         out("timescale/timescaledb-ha@sha256:" + "3" * 64)
+    if "up" in rest and "data-sync-service" in rest and f == "old.yml" and os.environ.get("FAKE_FAIL_WRITERS_ONCE") == "1" \
+            and not os.path.exists(state + "/wfailed"):
+        open(state + "/wfailed", "w").write("x"); sys.stderr.write("writer start failed\n"); sys.exit(1)
     if "up" in rest and "timescale" in rest:
         mode = os.environ.get("FAKE_PG14_UP", "") if f == "old.yml" else ""
         if mode == "fail":
@@ -67,6 +70,8 @@ if a[0] == "exec":
     if "-i" in a:
         stdin = str(len(sys.stdin.buffer.read()))
     short = " ".join(sql.split())[:90]
+    if "insert into data_points" in sql and phase() == "pg14":
+        open(state + "/replayed", "w").write("x")   # the replay committed into PG14
     log("psql[%s] %s%s" % (phase(), short, (" stdin=" + stdin) if stdin else ""))
     if "show server_version_num" in sql:
         out(os.environ.get("FAKE_VERSION", "170011" if phase() == "pg17" else "140007")); sys.exit(0)
@@ -86,6 +91,10 @@ if a[0] == "exec":
             n += 7; h = "b" * 32
         if phase() == "pg17" and os.environ.get("FAKE_MISMATCH") == "1":
             h = "c" * 32
+        if phase() == "pg14" and os.environ.get("FAKE_PG14_DIFF") == "1":
+            h = "d" * 32
+        if phase() == "pg14" and os.path.exists(state + "/replayed"):
+            n += 7; h = "e" * 32
         if phase() == "pg14" and os.environ.get("FAKE_PG14_DIFF") == "1":
             h = "d" * 32
         if os.environ.get("FAKE_EMPTY_TABLE") == t:
@@ -338,6 +347,63 @@ class UpgradeScriptTests(unittest.TestCase):
         self.assertFalse([c for c in self.calls()[before:] if "TO STDOUT" in c])  # nothing was exported again
         self.assertIn("reusing the completed PostgreSQL 17 export", second.stdout)
         self.assertGreater(len([c for c in self.calls() if "insert into data_points" in c]), 0)
+
+    def after_committed_replay_with_failed_writer_start(self, **env):
+        self.prepare_rollback()
+        first = self.run_script("rollback", "--replay", FAKE_PG17_EXTRA="1", FAKE_FAIL_WRITERS_ONCE="1", **env)
+        self.assertEqual(first.returncode, 1, first.stdout + first.stderr)
+        self.assertTrue([c for c in self.calls() if "insert into data_points" in c])   # the replay did commit
+        self.assertTrue((self.bk / "pg17-at-rollback" / "REPLAY_VERIFIED").exists())
+        return first
+
+    def test_a_rollback_resumes_when_only_the_writer_start_failed_after_a_committed_replay(self):
+        self.after_committed_replay_with_failed_writer_start()
+        original = self.export_bytes()
+        before = len(self.calls())
+        second = self.run_script("rollback", "--replay", FAKE_PG17_EXTRA="1", FAKE_FAIL_WRITERS_ONCE="1")
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        later = self.calls()[before:]
+        self.assertEqual(self.export_bytes(), original)                                  # the PG17 export is untouched
+        self.assertFalse([c for c in later if "TO STDOUT" in c])                         # not exported again
+        self.assertFalse([c for c in later if "insert into data_points" in c])           # not replayed again
+        self.assertTrue([c for c in later if "not exists" in c])                         # verified against the export
+        self.assertIn("earlier replay is verified", second.stdout)
+        start = [i for i, c in enumerate(later) if "compose[old.yml] up -d --no-deps data-sync-service" in c]
+        self.assertTrue(start)
+        self.assertGreater(start[0], max(i for i, c in enumerate(later) if "not exists" in c))
+
+    def test_a_resume_refuses_when_pg14_changed_since_the_recorded_replay(self):
+        self.after_committed_replay_with_failed_writer_start()
+        before = len(self.calls())
+        second = self.run_script("rollback", "--replay", FAKE_PG17_EXTRA="1", FAKE_PG14_DIFF="1")
+        self.assertEqual(second.returncode, 1)
+        self.assertIn("does not match the cutover baseline", second.stderr)
+        self.assertFalse([c for c in self.calls()[before:] if "data-sync-service" in c and "up" in c])
+
+    def test_a_resume_refuses_when_the_export_rows_are_not_all_in_pg14(self):
+        self.after_committed_replay_with_failed_writer_start()
+        before = len(self.calls())
+        second = self.run_script("rollback", "--replay", FAKE_PG17_EXTRA="1", FAKE_MISSING="2")
+        self.assertEqual(second.returncode, 1)
+        self.assertIn("2 rows of the retained PostgreSQL 17 export are missing", second.stderr)
+        self.assertFalse([c for c in self.calls()[before:] if "data-sync-service" in c and "up" in c])
+
+    def test_a_different_pg14_state_without_a_recorded_replay_is_never_resumed(self):
+        self.prepare_rollback()
+        (self.bk / "pg17-at-rollback").mkdir()
+        done = self.bk / "pg17-at-rollback"
+        (done / "EXPORT_COMPLETE").write_text(""); (done / "sums.txt").write_text(sums_file())
+        self.phase("pg14")
+        r = self.run_script("rollback", "--replay", FAKE_PG14_DIFF="1")
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse([c for c in self.calls() if "COPY replay." in c or "insert into" in c])
+
+    def test_discard_mode_does_not_resume_a_replayed_pg14(self):
+        self.after_committed_replay_with_failed_writer_start()
+        before = len(self.calls())
+        second = self.run_script("rollback", "--discard-post-cutover-writes", FAKE_PG17_EXTRA="1")
+        self.assertEqual(second.returncode, 1)
+        self.assertFalse([c for c in self.calls()[before:] if "data-sync-service" in c and "up" in c])
 
     def test_a_rollback_on_postgres_14_without_a_completed_pg17_export_refuses_and_exports_nothing(self):
         self.prepare_rollback(); self.phase("pg14")

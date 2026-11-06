@@ -350,6 +350,13 @@ since the export, it refuses until you move the old export aside (keep it).
   writers stay stopped (decompress that chunk and run the rollback again); and rows that
   were *updated in place* in PostgreSQL 17 are not overwritten (the bitemporal table
   stores changes as new rows, so this does not occur for forecasts).
+  **Resuming:** once a replay has committed and been verified, the script records the
+  resulting PostgreSQL 14 state (`REPLAY_VERIFIED` next to the export). If only the start of
+  the writers failed, run the same command again: PostgreSQL 14 then differs from the
+  cutover baseline, and the script accepts exactly that recorded state (and nothing else),
+  checks again that every row of the retained PostgreSQL 17 export is present, does not
+  replay or export again, and starts the writers. Any other difference from the baseline
+  still stops the script with the writers stopped.
 * `--discard-post-cutover-writes` restores PostgreSQL 14 as it was at the cutover. The
   rows written since then remain only in the export and in the PostgreSQL 17 volume.
 
@@ -364,7 +371,7 @@ a fake `docker`; refuses an existing PostgreSQL 14 install and an initialised Po
 cluster without the marker, allows a fresh and a migrated one),
 `tests/test_upgrade_timescale_pg17_script.py` (order of the calls with a fake `docker`:
 writers stopped before baseline and export, comparison before the writers start, marker
-only after the comparison, a failing or malformed checksum query never approves, a failed
+only after the comparison, a failing or malformed checksum query never approves, a rollback resumes after a committed replay only from the recorded state, a failed
 restore of PostgreSQL 14 keeps the writers stopped, export before PostgreSQL 14 starts, a rollback retry keeps the
 PostgreSQL 17 export byte for byte, replay verified before the writers start) and a rehearsal on
 throwaway databases: after a replay the PostgreSQL 14 copy had the same counts and

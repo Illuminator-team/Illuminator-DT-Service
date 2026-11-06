@@ -32,6 +32,9 @@
 #                                      verify that every one is present.
 #     --discard-post-cutover-writes    restore PG14 as it was at the cutover; the rows written since
 #                                      then stay only in the PG17 export and the PG17 volume.
+#   A retry after a replay that committed and was verified (only the start of the writers failed)
+#   resumes: PostgreSQL 14 may then differ from the baseline only by the state recorded after that
+#   replay (REPLAY_VERIFIED); the replay is checked again against the retained export, not repeated.
 #   Either way the PG17 volume is kept and the PG17 tables are exported to BACKUP_DIR/pg17-at-rollback
 #   before PG14 is started, and the writers stay stopped until the chosen step is done.
 #   The completion marker is removed from the PG17 volume at rollback.
@@ -190,29 +193,54 @@ dc "$OLDC" up -d --no-deps --force-recreate timescale || die "could not start Po
 ready || die "PostgreSQL 14 did not become ready; the writers stay stopped"
 [ "$(active_major)" = 14 ] || die "the database that answers is not PostgreSQL 14 (is the PostgreSQL 17 container still running?); the writers stay stopped"
 sums > "$RB/pg14-after-restore.txt" || die "cannot checksum PostgreSQL 14; the writers stay stopped"
-diff -q "$BK/cutover-baseline.txt" "$RB/pg14-after-restore.txt" >/dev/null || die "PostgreSQL 14 does not match the cutover baseline; writers stay stopped"
-echo "PostgreSQL 14 matches the cutover baseline"
-if [ "$MODE" = replay ]; then
-  echo "=== 4. replay the rows written to PostgreSQL 17 since the cutover"
+resumed=0
+if diff -q "$BK/cutover-baseline.txt" "$RB/pg14-after-restore.txt" >/dev/null; then
+  echo "PostgreSQL 14 matches the cutover baseline"
+elif [ "$MODE" = replay ] && [ -f "$RB/REPLAY_VERIFIED" ] && cmp -s "$RB/pg14-after-restore.txt" "$RB/pg14-after-replay.txt"; then
+  # A retry after a replay that committed and was verified, when only the start of the writers failed.
+  # PostgreSQL 14 may differ from the baseline in exactly one way: the state recorded after that replay.
+  echo "PostgreSQL 14 differs from the cutover baseline exactly as recorded after a completed replay; verifying that replay against the retained export"
+  resumed=1
+else
+  die "PostgreSQL 14 does not match the cutover baseline (and is not the recorded state after a completed replay); writers stay stopped"
+fi
+stage_export() { # staging copy of the retained PG17 export inside PG14
   pq "drop schema if exists replay cascade; create schema replay;
       create table replay.data_points (like public.data_points including defaults);
       create table replay.raw_bitemporal_double (like public.raw_bitemporal_double);
       create table replay.raw_unitemporal_double (like public.raw_unitemporal_double)" >/dev/null || die "cannot create the staging schema"
+  local t
   for t in $TABLES; do
     $DOCKER exec -i "$(cid)" psql -U "$ADMIN" -d "$DB" -v ON_ERROR_STOP=1 -qc "COPY replay.$t FROM STDIN (FORMAT binary)" < "$RB/$t.bin" || die "staging load of $t failed; the writers stay stopped"
   done
+}
+missing_rows() {
+  pq "select (select count(*) from replay.data_points r where not exists (select 1 from data_points t where t.id=r.id))
+       + (select count(*) from replay.raw_bitemporal_double r where not exists (select 1 from raw_bitemporal_double t where t.dp_id=r.dp_id and t.valid_time=r.valid_time and t.transaction_time=r.transaction_time))
+       + (select count(*) from replay.raw_unitemporal_double r where not exists (select 1 from raw_unitemporal_double t where t.dp_id=r.dp_id and t.valid_time=r.valid_time))"
+}
+if [ "$MODE" = replay ] && [ "$resumed" = 1 ]; then
+  echo "=== 4. the replay was completed earlier: verify it against the retained export, do not replay again"
+  stage_export
+  missing=$(missing_rows)
+  [ "$missing" = 0 ] || die "$missing rows of the retained PostgreSQL 17 export are missing from PostgreSQL 14; the writers stay stopped"
+  pq "drop schema replay cascade" >/dev/null
+  echo "the earlier replay is verified: every PostgreSQL 17 row is present"
+elif [ "$MODE" = replay ]; then
+  echo "=== 4. replay the rows written to PostgreSQL 17 since the cutover"
+  rm -f "$RB/REPLAY_VERIFIED"
+  stage_export
   pq "begin;
       insert into data_points select * from replay.data_points on conflict (id) do nothing;
       insert into raw_bitemporal_double select * from replay.raw_bitemporal_double on conflict do nothing;
       insert into raw_unitemporal_double select * from replay.raw_unitemporal_double on conflict do nothing;
       select setval('data_points_id_seq', greatest((select last_value from data_points_id_seq), (select coalesce(max(id),1) from data_points)), true);
       commit" >/dev/null || die "replay failed; the writers stay stopped"
-  missing=$(pq "select (select count(*) from replay.data_points r where not exists (select 1 from data_points t where t.id=r.id))
-       + (select count(*) from replay.raw_bitemporal_double r where not exists (select 1 from raw_bitemporal_double t where t.dp_id=r.dp_id and t.valid_time=r.valid_time and t.transaction_time=r.transaction_time))
-       + (select count(*) from replay.raw_unitemporal_double r where not exists (select 1 from raw_unitemporal_double t where t.dp_id=r.dp_id and t.valid_time=r.valid_time))")
+  missing=$(missing_rows)
   [ "$missing" = 0 ] || die "$missing replayed rows are missing from PostgreSQL 14; the writers stay stopped"
   pq "drop schema replay cascade" >/dev/null
   sums > "$RB/pg14-after-replay.txt" || die "cannot checksum PostgreSQL 14 after the replay; the writers stay stopped"
+  cp "$RB/pg14-after-replay.txt" "$RB/REPLAY_VERIFIED"   # a retry may resume from here
   echo "replayed; every PostgreSQL 17 row is present. PostgreSQL 14 now: $(tr '\n' ';' < "$RB/pg14-after-replay.txt")"
 else
   echo "=== 4. --discard-post-cutover-writes: the rows written since the cutover are kept only in $RB and the PostgreSQL 17 volume"
