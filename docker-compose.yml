@@ -782,7 +782,7 @@ services:
   ## Accessible at: http://localhost/geoserver and https://localhost/geoserver
   ## --------------------------------------------------
   geo:
-    image: kartoza/geoserver:2.28.5@sha256:a500f30ec973014be203851290e89996cfccfe4335b1b4345047f64eda05521d
+    image: kartoza/geoserver:3.0.2@sha256:129b8fab341c997de4e905a62d18246d86425ce257b165b31d11c46274b0130c
     environment:
       - STABLE_EXTENSIONS=postgis-plugin
       - GEOSERVER_ADMIN_USER=${GEOSERVER_ADMIN_USER:?set GEOSERVER_ADMIN_USER in .env}
