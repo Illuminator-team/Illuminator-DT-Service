@@ -17,8 +17,8 @@ from heat import (  # noqa: E402
 )
 from pc6 import get_layer_config, load_manifest  # noqa: E402
 
-RELEASE_COMMIT = "28d8f7a1ac4da78e91a49465417d464eb66e371a"
-IMAGE_DIGEST = "sha256:4982fd84e6ec70fb92c2811b0ff3cdb3e2c16d254e9b6b748a57cd644663e3d1"
+RELEASE_COMMIT = "ac539d15d142aa0f6c997c0ae8fdd35a2b96dcb1"
+IMAGE_DIGEST = "sha256:a69ee37e4858f4cf4b80b47aa832effcc1ab3b2c25d310e05a3eefa0ae64fe64"
 DEPLOYMENT_IMAGE = f"ghcr.io/jortgroen/heat-net-map-api@{IMAGE_DIGEST}"
 MODEL_ID = "https://reformers01.ewi.tudelft.nl/id/model/heat-net-map"
 MODEL_VERSION = "0.2.0"

@@ -14,7 +14,7 @@ x-wind-image: &wind-image
   image: ghcr.io/jortgroen/wind-turbine-map-api@sha256:c578d2b922397c15783771ff52a72f35b5a47b78b0f585c08984e70bfafd7d7b
 
 x-heat-image: &heat-image
-  image: ghcr.io/jortgroen/heat-net-map-api@sha256:4982fd84e6ec70fb92c2811b0ff3cdb3e2c16d254e9b6b748a57cd644663e3d1
+  image: ghcr.io/jortgroen/heat-net-map-api@sha256:a69ee37e4858f4cf4b80b47aa832effcc1ab3b2c25d310e05a3eefa0ae64fe64
 
 x-ev-image: &ev-image
   image: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
@@ -832,8 +832,8 @@ services:
       WIND_EXPECTED_CONTAINER_DIGEST: sha256:c578d2b922397c15783771ff52a72f35b5a47b78b0f585c08984e70bfafd7d7b
       WIND_EXPECTED_DATA_MODE: real_source
       HEAT_API_URL: http://heat-api:8080
-      HEAT_EXPECTED_RELEASE_COMMIT: 28d8f7a1ac4da78e91a49465417d464eb66e371a
-      HEAT_EXPECTED_CONTAINER_DIGEST: sha256:4982fd84e6ec70fb92c2811b0ff3cdb3e2c16d254e9b6b748a57cd644663e3d1
+      HEAT_EXPECTED_RELEASE_COMMIT: ac539d15d142aa0f6c997c0ae8fdd35a2b96dcb1
+      HEAT_EXPECTED_CONTAINER_DIGEST: sha256:a69ee37e4858f4cf4b80b47aa832effcc1ab3b2c25d310e05a3eefa0ae64fe64
       HEAT_EXPECTED_DATA_MODE: real_source
       EV_API_URL: http://ev-api:8000
       EV_EXPECTED_RELEASE_COMMIT: 2bf386e8a0b9e43c22e8353d2fa82fbb073695e8
