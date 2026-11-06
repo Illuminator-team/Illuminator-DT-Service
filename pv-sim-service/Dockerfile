@@ -10,15 +10,20 @@ RUN pip install --no-cache-dir "poetry~=2.3.4"
 COPY src/poetry.lock src/pyproject.toml ./
 RUN touch README.md \
     && poetry install --no-root --no-interaction \
+    && /opt/app/.venv/bin/python -m pip check \
     && /opt/app/.venv/bin/python -m pip uninstall -y pip setuptools wheel \
     && rm -rf /root/.cache
 
 FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
-RUN python -m pip uninstall -y pip setuptools wheel; rm -rf /root/.cache \
+RUN python -m pip uninstall -y pip setuptools wheel \
+    && rm -rf /root/.cache \
     && apt-get update \
     && apt-get -y --no-install-recommends upgrade \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /opt/app/.venv /opt/app/.venv
+# Fail the build if a package manager is still importable in either interpreter.
+RUN python -c "import importlib.util as u; assert all(u.find_spec(m) is None for m in ('pip','setuptools','wheel'))" \
+    && /opt/app/.venv/bin/python -c "import importlib.util as u; assert all(u.find_spec(m) is None for m in ('pip','setuptools','wheel'))"
 ENV PATH=/opt/app/.venv/bin:$PATH
 WORKDIR /app
 COPY src/pv_sim ./pv_sim
