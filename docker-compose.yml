@@ -590,11 +590,14 @@ services:
     # PostgreSQL 17 with TimescaleDB 2.31 and PostGIS 3.6 (digest-pinned; the pg14-latest tag has not
     # been rebuilt since April 2023). Data lives in the timescale-pg17-data volume; the old
     # timescale-data volume is kept untouched for rollback.
-    image: timescale/timescaledb-ha@sha256:3f0b3f6bdf4912878444a36e6113a18346309583c4d1a61d81a0c511342a1afd
+    image: &timescale-image timescale/timescaledb-ha@sha256:3f0b3f6bdf4912878444a36e6113a18346309583c4d1a61d81a0c511342a1afd
     environment:
       POSTGRES_USER: ${POSTGRES_ADMIN_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
       TIMESCALEDB_TELEMETRY: "off"
+    depends_on:
+      timescale-guard:
+        condition: service_completed_successfully
     volumes:
       # The timescaledb-ha image keeps PGDATA under /home/postgres/pgdata (not
       # /var/lib/postgresql/data), so the volume must be mounted there or the
@@ -604,6 +607,22 @@ services:
     restart: always
     ports:
       - "127.0.0.1:5432:5432"  # local diagnostics or an SSH tunnel only
+
+  ## ------------------------------------------------------------------------------
+  ## Fails closed: refuses to start the PostgreSQL 17 database on an empty volume when
+  ## a PostgreSQL 14 database exists (see docs/rdp-deployment-runbook.md).
+  ## ------------------------------------------------------------------------------
+  timescale-guard:
+    image: *timescale-image
+    user: root
+    entrypoint: ["sh", "/guard.sh"]
+    environment:
+      TIMESCALE_ALLOW_EMPTY_PG17: ${TIMESCALE_ALLOW_EMPTY_PG17:-}
+    volumes:
+      - ./scripts/timescale-upgrade-guard.sh:/guard.sh:ro
+      - timescale-data:/old:ro
+      - timescale-pg17-data:/new:ro
+    restart: "no"
 
   ## ------------------------------------------------------------------------
   ## This micro-service defines the database schema used by the timescale DB.

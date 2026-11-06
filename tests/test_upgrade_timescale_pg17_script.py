@@ -1,0 +1,210 @@
+"""Order and safety tests for scripts/upgrade-timescale-pg17.sh with a fake `docker`.
+
+The fake keeps a "phase" (which database answers: pg14 or pg17) that flips when Compose is
+told to start `timescale` with the old or the new Compose file, logs every call with its
+stdin size, and returns canned psql answers. The tests assert the order of the calls.
+"""
+import os
+import pathlib
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "upgrade-timescale-pg17.sh"
+BASH = shutil.which("bash")
+PYTHON = shutil.which("python3") or shutil.which("python")
+
+FAKE = r'''#!__PYTHON__
+import os, sys
+a = sys.argv[1:]
+state = os.environ["FAKE_STATE"]
+def phase():
+    return open(state + "/phase").read().strip()
+def setphase(p):
+    open(state + "/phase", "w").write(p)
+def log(line):
+    open(state + "/calls.log", "a").write(line + "\n")
+def out(s=""):
+    sys.stdout.write(s + ("\n" if s and not s.endswith("\n") else ""))
+if a[0] == "compose":
+    fs = [a[i + 1] for i, x in enumerate(a) if x == "-f"]
+    f = os.path.basename(fs[0])
+    rest = a[a.index(fs[-1]) + 1:]
+    log("compose[%s] %s ALLOW=%s" % (f, " ".join(rest), os.environ.get("TIMESCALE_ALLOW_EMPTY_PG17", "")))
+    if rest[:2] == ["ps", "-q"] or rest[:2] == ["ps", "-aq"]:
+        out("cid-" + rest[-1])
+    if "up" in rest and "timescale" in rest:
+        setphase("pg17" if f == "new.yml" else "pg14")
+    sys.exit(0)
+if a[0] == "inspect":
+    out("0"); sys.exit(0)
+if a[0] == "exec":
+    if "printenv" in a:
+        out("postgres"); sys.exit(0)
+    if "pg_isready" in a:
+        sys.exit(0)
+    if "pg_dumpall" in a:
+        log("pg_dumpall"); out("-- dump"); sys.exit(0)
+    sql = a[a.index("-c") + 1] if "-c" in a else (a[a.index("-qc") + 1] if "-qc" in a else "")
+    stdin = ""
+    if "-i" in a:
+        stdin = str(len(sys.stdin.buffer.read()))
+    short = " ".join(sql.split())[:90]
+    log("psql[%s] %s%s" % (phase(), short, (" stdin=" + stdin) if stdin else ""))
+    if "show server_version_num" in sql:
+        out(os.environ.get("FAKE_VERSION", "140007")); sys.exit(0)
+    if "TO STDOUT" in sql:
+        sys.stdout.write("BINARY-" + phase()); sys.exit(0)
+    if "md5(string_agg" in sql:
+        t = sql.split(" from ")[1].split()[0]
+        n = {"data_points": 31, "raw_bitemporal_double": 1000, "raw_unitemporal_double": 50}[t]
+        h = "aaaa"
+        if phase() == "pg17" and os.environ.get("FAKE_PG17_EXTRA") == "1":
+            n += 7; h = "bbbb"
+        if phase() == "pg17" and os.environ.get("FAKE_MISMATCH") == "1":
+            h = "cccc"
+        if phase() == "pg14" and os.environ.get("FAKE_PG14_DIFF") == "1":
+            h = "dddd"
+        out("%d %s" % (n, h)); sys.exit(0)
+    if "last_value from data_points_id_seq" in sql:
+        out("31"); sys.exit(0)
+    if "not exists" in sql:
+        out(os.environ.get("FAKE_MISSING", "0")); sys.exit(0)
+    sys.exit(0)
+sys.stderr.write("unexpected docker call: %s\n" % " ".join(a)); sys.exit(99)
+'''
+
+
+def sums_file(n=(31, 1000, 50), h="aaaa"):
+    return "".join("%s %d %s\n" % (t, c, h) for t, c in zip(("data_points", "raw_bitemporal_double", "raw_unitemporal_double"), n))
+
+
+@unittest.skipIf(sys.platform == "win32" or not BASH, "needs bash")
+class UpgradeScriptTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.state = self.tmp / "state"; self.state.mkdir()
+        (self.state / "calls.log").write_text("")
+        bindir = self.tmp / "bin"; bindir.mkdir()
+        fake = bindir / "docker"
+        fake.write_text(FAKE.replace("__PYTHON__", PYTHON)); fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        self.bk = self.tmp / "backup"
+        self.env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}", FAKE_STATE=str(self.state),
+                        DOCKER="docker", WRITERS="data-sync-service layer-publisher grafana")
+
+    def phase(self, p): (self.state / "phase").write_text(p)
+
+    def run_script(self, cmd, *extra, **env):
+        e = dict(self.env, **env)
+        return subprocess.run([BASH, str(SCRIPT), cmd, "-p", "proj", "-o", "old.yml", "-n", "new.yml", "-b", str(self.bk), *extra],
+                              env=e, capture_output=True, text=True)
+
+    def calls(self): return (self.state / "calls.log").read_text().splitlines()
+
+    def idx(self, needle, start=0, last=False):
+        hits = [i for i, c in enumerate(self.calls()) if needle in c and i >= start]
+        self.assertTrue(hits, f"no call containing {needle!r}:\n" + "\n".join(self.calls()))
+        return hits[-1] if last else hits[0]
+
+    # ---------------------------------------------------------------- cutover
+    def test_cutover_takes_baseline_and_export_only_after_the_writers_are_stopped(self):
+        self.phase("pg14")
+        r = self.run_script("cutover")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        stop = self.idx("stop data-sync-service layer-publisher grafana")
+        self.assertLess(self.idx("pg_dumpall"), stop)                      # the backup may run while they write
+        self.assertGreater(self.idx("md5(string_agg"), stop)               # baseline: after the stop
+        self.assertGreater(self.idx("TO STDOUT"), stop)                    # export: after the stop
+        self.assertGreater(self.idx("md5(string_agg"), stop)
+        self.assertGreater(self.idx("up -d --no-deps timescale"), self.idx("TO STDOUT", last=True))
+        up = self.idx("up -d --no-deps timescale")
+        self.assertIn("ALLOW=yes", self.calls()[up])                       # guard override only for this call
+        self.assertGreater(self.idx("FROM STDIN", start=up), up)
+
+    def test_cutover_starts_the_writers_only_after_the_comparison_and_on_the_new_database(self):
+        self.phase("pg14")
+        r = self.run_script("cutover")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        start = self.idx("compose[new.yml] up -d --no-deps data-sync-service")
+        self.assertGreater(start, self.idx("FROM STDIN", last=True))
+        self.assertGreater(start, self.idx("md5(string_agg", start=self.idx("FROM STDIN", last=True)))
+        self.assertTrue((self.bk / "cutover-baseline.txt").exists())
+        self.assertEqual(oct(self.bk.stat().st_mode & 0o777), "0o700")
+
+    def test_cutover_with_different_checksums_restores_postgres_14_and_never_starts_writers_on_pg17(self):
+        self.phase("pg14")
+        r = self.run_script("cutover", FAKE_MISMATCH="1")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse([c for c in self.calls() if "compose[new.yml] up -d --no-deps data-sync-service" in c])
+        restore = self.idx("compose[old.yml] up -d --no-deps --force-recreate timescale")
+        self.assertGreater(self.idx("compose[old.yml] up -d --no-deps data-sync-service"), restore)
+
+    def test_cutover_refuses_when_the_running_database_is_not_postgres_14(self):
+        self.phase("pg17")
+        r = self.run_script("cutover", FAKE_VERSION="170011")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse([c for c in self.calls() if c.startswith("pg_dumpall") or "stop" in c])
+
+    # ---------------------------------------------------------------- rollback
+    def prepare_rollback(self):
+        self.phase("pg17")
+        self.bk.mkdir(); (self.bk / "cutover-baseline.txt").write_text(sums_file())
+
+    def test_rollback_without_a_choice_changes_nothing(self):
+        self.prepare_rollback()
+        r = self.run_script("rollback")
+        self.assertEqual(r.returncode, 64)
+        self.assertEqual(self.calls(), [])
+
+    def test_discard_exports_the_pg17_state_before_starting_postgres_14(self):
+        self.prepare_rollback()
+        r = self.run_script("rollback", "--discard-post-cutover-writes", FAKE_PG17_EXTRA="1")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        stop = self.idx("stop data-sync-service")
+        export = self.idx("TO STDOUT")
+        restore = self.idx("compose[old.yml] up -d --no-deps --force-recreate timescale")
+        self.assertLess(stop, export); self.assertLess(export, restore)
+        self.assertIn("BINARY-pg17", (self.bk / "pg17-at-rollback" / "raw_bitemporal_double.bin").read_text())
+        self.assertFalse([c for c in self.calls() if "FROM STDIN" in c])
+        self.assertGreater(self.idx("compose[old.yml] up -d --no-deps data-sync-service"), restore)
+        self.assertIn("1000 -> 1007", r.stdout)                            # the recovery point is shown
+
+    def test_replay_inserts_the_pg17_rows_into_pg14_and_verifies_them_before_the_writers_start(self):
+        self.prepare_rollback()
+        r = self.run_script("rollback", "--replay", FAKE_PG17_EXTRA="1")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        restore = self.idx("compose[old.yml] up -d --no-deps --force-recreate timescale")
+        staging = self.idx("COPY replay.", start=restore)
+        insert = self.idx("insert into data_points", start=staging)
+        check = self.idx("not exists", start=insert)
+        start = self.idx("compose[old.yml] up -d --no-deps data-sync-service")
+        self.assertLess(restore, staging); self.assertLess(staging, insert); self.assertLess(insert, check); self.assertLess(check, start)
+        self.assertEqual(len([c for c in self.calls() if "COPY replay." in c]), 3)
+
+    def test_replay_with_rows_missing_afterwards_keeps_the_writers_stopped(self):
+        self.prepare_rollback()
+        r = self.run_script("rollback", "--replay", FAKE_PG17_EXTRA="1", FAKE_MISSING="3")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("3 replayed rows are missing", r.stderr)
+        self.assertFalse([c for c in self.calls() if "compose[old.yml] up -d --no-deps data-sync-service" in c])
+
+    def test_rollback_stops_when_postgres_14_does_not_match_the_cutover_baseline(self):
+        self.prepare_rollback()
+        r = self.run_script("rollback", "--replay", FAKE_PG14_DIFF="1")
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse([c for c in self.calls() if "COPY replay." in c or "data-sync-service" in c and "up" in c])
+
+    def test_rollback_requires_the_backup_directory_of_a_cutover(self):
+        self.phase("pg17"); self.bk.mkdir()
+        r = self.run_script("rollback", "--replay")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse([c for c in self.calls() if "stop" in c])
+
+
+if __name__ == "__main__":
+    unittest.main()

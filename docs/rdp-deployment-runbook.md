@@ -144,10 +144,17 @@ git fetch origin
 git switch main
 git pull --ff-only origin main
 git rev-parse HEAD
+scripts/preflight-timescale.sh -p <project> -f docker-compose.yml
 docker compose pull --ignore-buildable
 docker compose build --pull
 docker compose up -d --build
 ```
+
+The preflight refuses (exit 1, nothing changed) when an existing PostgreSQL 14
+database has not been migrated to PostgreSQL 17 yet; see "Upgrading The Database To
+PostgreSQL 17". Even without it, `docker compose up` cannot start an empty PostgreSQL 17
+database next to PostgreSQL 14 data: the `timescale-guard` service fails first and
+`timescale` is never started.
 
 Record the deployed commit. Do not add the local or CI override files. PV can
 take more than ten minutes on a cold cache, and a clean Grid initialization can
@@ -215,6 +222,10 @@ dashboard loses an existing workflow, or either acceptance script fails.
 2. Check out the previously recorded release commit without rewriting Git
    history.
 3. Re-render its Compose configuration and run `docker compose up -d --build`.
+   If the release you are leaving is the PostgreSQL 17 database move, do **not** do this
+   with plain Compose: use `scripts/upgrade-timescale-pg17.sh rollback` so that the rows
+   written to PostgreSQL 17 since the cutover are kept (see "Upgrading The Database To
+   PostgreSQL 17").
 4. Keep named volumes; never add `--volumes` to rollback commands.
 5. Restore `rdp_db` and the GeoServer configuration only when the release made
    an incompatible data change and the previous services cannot use the current
@@ -232,29 +243,89 @@ carries well over a thousand scanner findings. Compose now pins
 and keeps the data in a new `timescale-pg17-data` volume. A TimescaleDB 2.10 dump
 cannot be restored into 2.31 and the images contain only one PostgreSQL major, so
 the move is a logical copy into a fresh cluster. The old `timescale-data` volume is
-never modified; it is the rollback.
+never modified.
 
 The measurement data is small (three tables: `data_points`, `raw_bitemporal_double`,
-`raw_unitemporal_double`). Everything else is rebuilt: the schema comes from
-`db-scheme` (same Alembic head), and the layer publisher re-creates the PostGIS
-layers.
+`raw_unitemporal_double`). The schema comes from `db-scheme` (same Alembic head) and the
+layer publisher re-creates the PostGIS layers.
 
-1. Backup: `pg_dumpall` from the running database, kept outside the checkout (mode 700).
-2. Record `count(*)` and `md5(string_agg(x::text, '|' ORDER BY x::text))` of the three tables.
-3. Stop `data-sync-service`, `layer-publisher` and `grafana`.
-4. Export the three tables with `COPY ... TO STDOUT (FORMAT binary)`. For the two
-   hypertables use `COPY (SELECT * FROM t ORDER BY 1,2,3) ...`; a plain `COPY t` of a
-   hypertable silently copies nothing.
-5. Switch to the new Compose file, `docker compose up -d --no-deps timescale`, then
-   `docker compose up --no-deps db-scheme`, then `CREATE EXTENSION IF NOT EXISTS postgis`.
-6. `COPY ... FROM STDIN (FORMAT binary)` each table, `setval('data_points_id_seq', <old last_value>, true)`,
-   and compare counts and checksums with step 2. Also compare `count(*)` of `forecasts_latest`
-   and of `forecasts` as `vis_user` and `data_source_user`.
-7. Start `data-sync-service`, `grafana`, recreate `layer-publisher`, restart `geo`.
-   Check the routes, that nothing is unhealthy and that the publisher log is clean.
+### Guards against an accidental empty database
 
-Rollback: restore the previous Compose file and
-`docker compose up -d --no-deps --force-recreate timescale`, then start the other
-services. The old volume still holds everything up to the moment of the cutover.
-After a few days without problems the old volume can be removed
-(`docker volume rm <project>_timescale-data`) once a fresh backup exists.
+* `timescale-guard` (Compose) runs before `timescale` and fails when the PostgreSQL 14
+  volume holds data and the PostgreSQL 17 volume holds no cluster. A new volume is not
+  literally empty (Docker copies the image's empty `backup/` and `data/` directories
+  into it), so "empty" means "no regular files".
+* `scripts/preflight-timescale.sh` (run before every deploy) also catches installs from
+  before the mount fix, where the database lives in the container's writable layer.
+* `TIMESCALE_ALLOW_EMPTY_PG17=yes` overrides both on purpose (an empty database). The
+  cutover script sets it only for its own `up timescale` call.
+
+### Cutover
+
+```bash
+scripts/upgrade-timescale-pg17.sh cutover -p <project> -o <old-compose.yml> -n <new-compose.yml> \
+    -b ../rdp-pg17-cutover-$(date -u +%Y%m%dT%H%M%SZ) [-x docker-compose.ports.yml]
+```
+
+No password is read or printed; the admin user name comes from the running container.
+The script:
+
+1. takes a `pg_dumpall` of the running PostgreSQL 14 database;
+2. **stops the writers** (`data-sync-service`, `layer-publisher`, `grafana`; override with `WRITERS`);
+3. **then** records `count(*)` and an md5 checksum of the three tables, exports them, and
+   records the checksums again after the export. The baseline and the export therefore
+   come from the same snapshot, and a change during the export aborts the cutover;
+4. starts PostgreSQL 17 on the new volume, runs `db-scheme`, creates `postgis`;
+5. loads the tables (`COPY ... FROM STDIN (FORMAT binary)`; for the hypertables the export
+   uses `COPY (SELECT * FROM t ORDER BY 1,2,3)`, because a plain `COPY t` of a hypertable
+   silently copies nothing) and sets `data_points_id_seq`;
+6. requires identical counts and checksums **before the writers are started again**.
+   Otherwise it restores the PostgreSQL 14 deployment (nothing was written to PostgreSQL 17
+   yet, so nothing is lost) and exits 2.
+
+Afterwards check the routes, that nothing is unhealthy, that the layer-publisher log is
+clean and that `data-sync-service` inserts rows. `<backup-dir>/cutover-baseline.txt` is the
+recovery point used by a rollback.
+
+### Rollback after the cutover
+
+Once the writers run against PostgreSQL 17, the rows they write exist only there, so
+switching back to the PostgreSQL 14 volume with plain Compose loses them. Use:
+
+```bash
+scripts/upgrade-timescale-pg17.sh rollback -p <project> -o <old-compose.yml> -n <new-compose.yml> \
+    -b <the cutover backup dir> (--replay | --discard-post-cutover-writes)
+```
+
+The choice is mandatory (the script exits 64 without it) and is the approval of the
+recovery point. In both modes the script first stops the writers, **exports the
+PostgreSQL 17 tables to `<backup-dir>/pg17-at-rollback`** and prints the row counts at the
+cutover and now, then starts PostgreSQL 14 from the old volume and requires it to equal
+`cutover-baseline.txt`. The PostgreSQL 17 volume is kept.
+
+* `--replay` inserts the PostgreSQL 17 rows into PostgreSQL 14 through a staging schema
+  (`INSERT ... ON CONFLICT DO NOTHING` on the primary keys; `data_points` first, then
+  the sequence), verifies that every staged row is present (a count of staged rows with
+  no match must be 0) and only then starts the writers. It is safe to repeat.
+  Limits: PostgreSQL 14 / TimescaleDB 2.10 cannot insert into a *compressed* chunk, so a
+  replayed row that falls into an already compressed chunk makes the replay fail and the
+  writers stay stopped (decompress that chunk and run the rollback again); and rows that
+  were *updated in place* in PostgreSQL 17 are not overwritten (the bitemporal table
+  stores changes as new rows, so this does not occur for forecasts).
+* `--discard-post-cutover-writes` restores PostgreSQL 14 as it was at the cutover. The
+  rows written since then remain only in the export and in the PostgreSQL 17 volume.
+
+After a few days without problems, and once a fresh backup exists, the old volume can be
+removed (`docker volume rm <project>_timescale-data`). Do that only after the rollback
+option is no longer wanted.
+
+### Tested
+
+`tests/test_timescale_upgrade_guards.py` (guard against real directories, preflight against
+a fake `docker`; refuses an existing PostgreSQL 14 install, allows a fresh and a migrated one),
+`tests/test_upgrade_timescale_pg17_script.py` (order of the calls with a fake `docker`:
+writers stopped before baseline and export, comparison before the writers start, export
+before PostgreSQL 14 starts, replay verified before the writers start) and a rehearsal on
+throwaway databases: after a replay the PostgreSQL 14 copy had the same counts and
+checksums as the PostgreSQL 17 state, including a new `data_points` row, and replaying twice
+changed nothing.
