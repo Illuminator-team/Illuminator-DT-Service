@@ -12,12 +12,12 @@ sys.path.insert(0, str(ROOT / "layer-publisher"))
 from pc6 import get_layer_config, load_manifest  # noqa: E402
 from wind import fetch_wind_artifact, load_wind_records  # noqa: E402
 
-RELEASE_COMMIT = "ad47d56cc6abe814ba7259f04e551ffe77c37764"
+RELEASE_COMMIT = "6eb44dcee450e9690daa6f49bacb118c6514dfa6"
 IMAGE_TAG = (
     "ghcr.io/jortgroen/wind-turbine-map-api:"
-    "sha-ad47d56cc6abe814ba7259f04e551ffe77c37764"
+    "sha-6eb44dcee450e9690daa6f49bacb118c6514dfa6"
 )
-IMAGE_DIGEST = "sha256:c578d2b922397c15783771ff52a72f35b5a47b78b0f585c08984e70bfafd7d7b"
+IMAGE_DIGEST = "sha256:af4a1d2bc85c30fb5cdd70b636e3287307076d22b5ac5918a091d8185faf36c1"
 DEPLOYMENT_IMAGE = f"ghcr.io/jortgroen/wind-turbine-map-api@{IMAGE_DIGEST}"
 MODEL_ID = "https://reformers01.ewi.tudelft.nl/id/model/wind-turbine-map"
 MODEL_VERSION = "0.3.0"
