@@ -2,11 +2,14 @@ version: 1
 
 data sources:
   geosphere.forecasts.nwp.WIEN-HOHE_WARTE:
-    type: "data_crawler.sources.zamg.NumericalWeatherPredictionData"
+    # GeoSphere nwp-v2-1h-1km (see geosphere_nwp_v2.py); nwp-v1-1h-2500m stopped on 2026-11-04.
+    type: "data_crawler.sources.geosphere_nwp_v2.NumericalWeatherPredictionV2Data"
     source parameter:
       latitude: 48.24861145
       longitude: 16.35638809
-      endpoint: NWP
+      altitude: 198 # Wien Hohe Warte [m], to reduce msl to air_pressure
+      endpoint: nwp-v2
+      data points: ["2t", "2r", "msl", "ssrd", "10u", "10v", "10fg", "tcc"]
       drop missing observations: True
     polling: # Be gentle with the Geosphere API or it will respond with timeout errors
       frequency: 5min

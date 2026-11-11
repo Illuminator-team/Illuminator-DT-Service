@@ -49,7 +49,8 @@ FAKE_API = (
 
 SERVICES = {
     "weather-data-service": {"stream": "geosphere.forecasts.nwp.WIEN-HOHE_WARTE", "fake_api": False,
-                             "fields": ("observation_time", "air_temperature_2m")},
+                             "fields": ("observation_time", "air_temperature_2m", "air_pressure",
+                                        "wind_speed_10m", "global_horizontal_irradiation")},
     "frequency-data-service": {"stream": "energy-charts.frequency", "fake_api": True,
                                "fields": ("measurement_time", "frequency")},
 }
