@@ -12,8 +12,8 @@ sys.path.insert(0, str(ROOT / "layer-publisher"))
 from consumption import fetch_consumption_artifact, load_consumption_records  # noqa: E402
 from pc6 import get_layer_config, load_manifest  # noqa: E402
 
-RELEASE_COMMIT = "c1baad4e87e189e495c2ec40654b79c67ed4acab"
-IMAGE_IDENTITY = "ghcr.io/jortgroen/consumption-map-api@sha256:67da0c9b1a44bfc5d72ec32133dc0080a478990cf9ef3b542953cb69080b567e"
+RELEASE_COMMIT = "8b148ea7562dbd3681e51dbb7bfd5b87e5730f8c"
+IMAGE_IDENTITY = "ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0"
 SOURCE_CACHE_IMAGE = "ghcr.io/jortgroen/consumption-map-source-cache@sha256:b26a1cb702407cb7e9b2f4c66954e844ea587636e31ab569ddee97965169ba3f"
 MODEL_VERSION = "0.5.0"
 CONTRACT_VERSION = "reformers-consumption-v1"
