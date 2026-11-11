@@ -95,6 +95,8 @@ services:
       traefik.http.routers.geoserver.tls: "false"
 
   reverse-proxy:
+    ports:
+      - "127.0.0.1:8080:8080"  # Traefik dashboard, local development only
     command:
       - "--log.level=INFO"
       - "--entryPoints.web.address=:80"

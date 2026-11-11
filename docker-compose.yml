@@ -749,7 +749,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "127.0.0.1:8080:8080"  # local diagnostics or an SSH tunnel only
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./certs/config.yml:/etc/traefik/dynamic_conf.yml:ro
@@ -766,8 +765,7 @@ services:
       - "--providers.docker.watch=true"
       - "--providers.file.filename=/etc/traefik/dynamic_conf.yml"
       - "--providers.docker=true"
-      - "--api.insecure=true"  # enable Traefik dashboard
-      - "--api.dashboard=true" # explicitly enable dashboard (safe to add)
+      # The Traefik API/dashboard is only enabled in docker-compose.local.yml.
 
   # ## -------------------------------------------------- 
   # ## Expose the WFS API through the reverse proxy. This container is for static publishing a static WFS file.
