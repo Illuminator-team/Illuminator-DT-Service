@@ -73,8 +73,8 @@ HEAT_VIEWS = {
     "potential_heat_sources": False,
     "documented_large_heat_consumers": True,
 }
-EV_RELEASE_COMMIT = "2bf386e8a0b9e43c22e8353d2fa82fbb073695e8"
-EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9"
+EV_RELEASE_COMMIT = "8a904634308bf59d0271cd0a8a2e8310fab00239"
+EV_CONTAINER_IMAGE = "ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c"
 EV_FIXTURE = "NL-ALL-NLLOC018787"
 CONSUMPTION_RELEASE_COMMIT = "8b148ea7562dbd3681e51dbb7bfd5b87e5730f8c"
 CONSUMPTION_CONTAINER_IMAGE = "ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0"

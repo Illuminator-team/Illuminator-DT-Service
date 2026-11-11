@@ -12,8 +12,8 @@ sys.path.insert(0, str(ROOT / "layer-publisher"))
 from ev import fetch_ev_artifact, load_ev_records  # noqa: E402
 from pc6 import get_layer_config, load_manifest  # noqa: E402
 
-RELEASE_COMMIT = "2bf386e8a0b9e43c22e8353d2fa82fbb073695e8"
-IMAGE_IDENTITY = "ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9"
+RELEASE_COMMIT = "8a904634308bf59d0271cd0a8a2e8310fab00239"
+IMAGE_IDENTITY = "ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c"
 MODEL_VERSION = "0.3.0"
 CONTRACT_VERSION = "1.0.0"
 QUALITY_METHOD = "EV-DATA-COMPLETE-001"

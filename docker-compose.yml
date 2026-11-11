@@ -17,7 +17,7 @@ x-heat-image: &heat-image
   image: ghcr.io/jortgroen/heat-net-map-api@sha256:a69ee37e4858f4cf4b80b47aa832effcc1ab3b2c25d310e05a3eefa0ae64fe64
 
 x-ev-image: &ev-image
-  image: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
+  image: ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c
 
 x-consumption-image: &consumption-image
   image: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
@@ -404,8 +404,8 @@ services:
     <<: *ev-image
     init: true
     environment:
-      EV_RELEASE_COMMIT: 2bf386e8a0b9e43c22e8353d2fa82fbb073695e8
-      EV_IMAGE_IDENTITY: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
+      EV_RELEASE_COMMIT: 8a904634308bf59d0271cd0a8a2e8310fab00239
+      EV_IMAGE_IDENTITY: ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c
       EV_OUTPUT_DIR: /var/lib/ev-map/outputs
     volumes:
       - ev-generated-outputs:/var/lib/ev-map/outputs
@@ -843,8 +843,8 @@ services:
       HEAT_EXPECTED_CONTAINER_DIGEST: sha256:a69ee37e4858f4cf4b80b47aa832effcc1ab3b2c25d310e05a3eefa0ae64fe64
       HEAT_EXPECTED_DATA_MODE: real_source
       EV_API_URL: http://ev-api:8000
-      EV_EXPECTED_RELEASE_COMMIT: 2bf386e8a0b9e43c22e8353d2fa82fbb073695e8
-      EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
+      EV_EXPECTED_RELEASE_COMMIT: 8a904634308bf59d0271cd0a8a2e8310fab00239
+      EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c
       CONSUMPTION_API_URL: http://consumption-api:8080
       CONSUMPTION_EXPECTED_RELEASE_COMMIT: 8b148ea7562dbd3681e51dbb7bfd5b87e5730f8c
       CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
