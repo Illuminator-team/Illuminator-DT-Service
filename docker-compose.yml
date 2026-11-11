@@ -20,7 +20,7 @@ x-ev-image: &ev-image
   image: ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c
 
 x-consumption-image: &consumption-image
-  image: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
+  image: ghcr.io/jortgroen/consumption-map-api@sha256:67da0c9b1a44bfc5d72ec32133dc0080a478990cf9ef3b542953cb69080b567e
 
 x-consumption-cache-image: &consumption-cache-image
   image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:b26a1cb702407cb7e9b2f4c66954e844ea587636e31ab569ddee97965169ba3f
@@ -481,7 +481,7 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
+      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:67da0c9b1a44bfc5d72ec32133dc0080a478990cf9ef3b542953cb69080b567e
     depends_on:
       consumption-runtime-init:
         condition: service_completed_successfully
@@ -846,8 +846,8 @@ services:
       EV_EXPECTED_RELEASE_COMMIT: 8a904634308bf59d0271cd0a8a2e8310fab00239
       EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c
       CONSUMPTION_API_URL: http://consumption-api:8080
-      CONSUMPTION_EXPECTED_RELEASE_COMMIT: 8b148ea7562dbd3681e51dbb7bfd5b87e5730f8c
-      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
+      CONSUMPTION_EXPECTED_RELEASE_COMMIT: c1baad4e87e189e495c2ec40654b79c67ed4acab
+      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:67da0c9b1a44bfc5d72ec32133dc0080a478990cf9ef3b542953cb69080b567e
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
