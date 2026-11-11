@@ -672,7 +672,10 @@ services:
   grafana:
     image: grafana/grafana-oss@sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2 # 13.0.2
     environment:
-      GF_SERVER_ROOT_URL: "https://%(domain)s:443/grafana"
+      # Not published through Traefik (the dashboard does not use Grafana).
+      # Use it through an SSH tunnel: ssh -L 3300:127.0.0.1:3300 <server>, then
+      # http://localhost:3300/grafana/
+      GF_SERVER_ROOT_URL: "http://localhost:3300/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
@@ -685,8 +688,11 @@ services:
       db-scheme:
         condition: service_completed_successfully
     restart: always
+    ports:
+      - "127.0.0.1:3300:3000"  # local access or an SSH tunnel only
     labels:
-      - "traefik.enable=true"
+      # The route stays defined so the local override can switch it on (traefik.enable).
+      - "traefik.enable=false"
       - "traefik.http.routers.grafana.rule=HostRegexp(`reformers01.ewi.tudelft.nl`) && (Path(`/grafana`) || PathPrefix(`/grafana/`))"
       - "traefik.http.routers.grafana.service=service-grafana"
       - "traefik.http.services.service-grafana.loadbalancer.server.port=3000"
