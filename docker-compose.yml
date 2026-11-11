@@ -667,7 +667,7 @@ services:
   ## Use grafana for visualization of data in the timescale DB.
   ## ----------------------------------------------------------
   grafana:
-    image: grafana/grafana-oss@sha256:2e986801428cd689c2358605289c90ab37d2b39e24808874971f54c99bcdc412 # 12.4.3
+    image: grafana/grafana-oss@sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2 # 13.0.2
     environment:
       GF_SERVER_ROOT_URL: "https://%(domain)s:443/grafana"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
@@ -735,7 +735,7 @@ services:
   ## Use a reverse proxy to secure this RDP deployment.
   ## --------------------------------------------------
   reverse-proxy:
-    image: traefik@sha256:68ae5fe5b64ca166704b746a9e8afcd385e36b3f569a5691401bf652d57b3748 # traefik v3.7.17
+    image: traefik@sha256:c1ea95f3b3eab04ba8868d201b8494e12284e424f7cec2127e3194bca1c6641c # traefik v3.7.18
     user: root
     ports:
       - "80:80"
