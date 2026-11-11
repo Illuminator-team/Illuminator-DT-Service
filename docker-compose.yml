@@ -541,7 +541,7 @@ services:
   ## Use Redis streams for data access of micro-services in real-time.
   ## -----------------------------------------------------------------
   redis:
-    image: "redis:7.2.17-alpine"
+    image: redis@sha256:82403a0812a51faf6779f8d0dbe25ea85279ec7d49d24a3c78a65e9d8a87fa5f # redis:7.2.17-alpine, build of 2026-11-09
     # The password is written to a config file at start instead of being passed
     # as a command-line argument, which any user on the host can read with `ps`.
     environment:
