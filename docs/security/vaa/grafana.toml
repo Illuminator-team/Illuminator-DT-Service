@@ -1,0 +1,273 @@
+# Vulnerability Applicability Assessment: Grafana OSS 13.0.2
+# Evidence gathered 2026-11-11 on reformers01 with read-only commands (docker inspect/exec/logs,
+# unauthenticated HTTP probes, and symbol-name searches in a copy of the grafana binary taken with
+# `docker cp` and searched with `strings`). Symbol searches rely on the Go function-name table
+# (pclntab), which lists every function linked into a Go binary; a package or function missing from
+# it is not compiled in.
+
+[context]
+image = "Grafana OSS 13.0.2"
+scan = "grafana.json.gz"
+exposure = """
+Published at https://reformers01.ewi.tudelft.nl/grafana via Traefik only. Traefik terminates TLS and \
+redirects port 80 to 443. The container publishes no ports itself and listens on plain HTTP/1.1 port 3000 \
+on the internal Docker network. Login is required: anonymous access and sign-up are disabled (defaults, \
+not overridden), and unauthenticated API calls return 401. Only /api/health, the login page and the \
+static frontend files under /grafana/public are reachable without login."""
+runtime = """
+One process: `grafana server` (PID 1, uid 472), a static Go binary (CGO_ENABLED=0, no ELF interpreter, \
+no shared libraries mapped). No healthcheck and no other processes, so curl, OpenSSL and the other Alpine \
+libraries are not executed at runtime. One provisioned datasource (PostgreSQL/TimescaleDB, internal, no \
+TLS) and 3 provisioned dashboards. The bundled Elasticsearch plugin backend is registered but its process \
+is not running."""
+notes = """
+Grafana OSS 13.0.2 is the newest release, so the fixed versions listed by Trivy are not yet available in \
+a vendor image. We do not rebuild vendor images (policy), so every remaining action is to adopt the next \
+Grafana release that ships the fixes. On every start Grafana's background installer tries to update the \
+bundled Elasticsearch plugin (12.6.2 to 12.9.6) and fails with "permission denied" on the read-only image \
+path; this is harmless but means the bundled 12.6.2 binary stays in place. Four frontend-only app plugins \
+(exploretraces, lokiexplore, metricsdrilldown, pyroscope) live in the grafana-data volume; they contain no \
+backend binaries and are not part of the image scan."""
+
+# --- Critical findings -----------------------------------------------------------------------
+
+[[rule]]
+id = "GRAF-01"
+title = "kin-openapi ValidationHandler authentication bypass"
+match = { ids = ["GHSA-r277-6w6q-xmqw"], target = "bin/grafana$" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_present"
+rationale = """
+The flaw is in ValidationHandler.Load() in kin-openapi's openapi3filter package, which substitutes \
+NoopAuthenticationFunc when no authentication function is set. Grafana links only the openapi3 (spec \
+model) and routers/gorillamux packages of kin-openapi; openapi3filter, ValidationHandler and \
+NoopAuthenticationFunc are not compiled into the binary, so no Grafana route can use them. Grafana's \
+authentication is its own middleware, which returned 401 on every protected API we probed."""
+evidence = [
+  "Function-name search in the grafana binary: 0 matches for 'openapi3filter' and 'NoopAuthenticationFunc'; the only 'ValidationHandler' symbols are Grafana's unrelated Kubernetes 'AdmissionValidationHandler'.",
+  "kin-openapi packages present: github.com/getkin/kin-openapi/openapi3 and github.com/getkin/kin-openapi/routers/gorillamux only.",
+  "Unauthenticated curl to /grafana/api/datasources, /api/search, /api/user, /api/frontend/settings, /api/snapshots: HTTP 401 (internal and via Traefik).",
+]
+
+[[rule]]
+id = "GRAF-02"
+title = "Brotli decoder out-of-bounds write (OS package)"
+match = { ids = ["CVE-2026-111497"], class = "os-pkgs" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+brotli-libs is installed only as a dependency of libcurl, which is used only by the curl command-line \
+tool. Nothing in the running container executes curl (no healthcheck, run.sh does not call curl, the only \
+process is grafana), and grafana is a static pure-Go binary that loads no shared libraries; its Go HTTP \
+client does not use the C Brotli library. The vulnerable decoder is installed but never loaded."""
+evidence = [
+  "apk info -r brotli-libs: required by libcurl only; apk info -r libcurl: required by curl only.",
+  "docker inspect: Healthcheck null; compose service defines no healthcheck.",
+  "/proc/*/cmdline in the container: only PID 1 'grafana server ...' (plus the exec'd shell).",
+  "/proc/1/maps lists no shared object, only /usr/share/grafana/bin/grafana; ldd grafana: 'Not a valid dynamic program'; readelf: no .interp/.dynamic section; build info: CGO_ENABLED=0.",
+  "grep curl /run.sh: no match.",
+]
+
+# --- Bundled Elasticsearch plugin binary -----------------------------------------------------
+
+[[rule]]
+id = "GRAF-03"
+title = "Bundled Elasticsearch plugin backend (not in use)"
+match = { target = "plugins-bundled/elasticsearch/" }
+verdict = "not_affected"
+justification = "vulnerable_code_cannot_be_controlled_by_adversary"
+rationale = """
+These Go library and stdlib findings are in the bundled Elasticsearch datasource plugin, a separate \
+binary that Grafana starts as a child process and talks to over gRPC on loopback. It receives input only \
+from the Grafana server (queries of an Elasticsearch datasource) and from the Elasticsearch servers such a \
+datasource points to. No Elasticsearch datasource is provisioned and the plugin process is not running; it \
+exited at startup and was not restarted in the hours since, so no Elasticsearch query has been made."""
+evidence = [
+  "grafana/provisioning/datasources/datasource.yml: one datasource, type postgres (TimescaleDB).",
+  "/proc/*/cmdline in the container: no gpx_grafana_elasticsearch_datasource process; only PID 1 grafana.",
+  "docker logs: 'plugin process exited plugin=.../gpx_grafana_elasticsearch_datasource_linux_amd64' at 09:31:36, followed by a failed plugin update (permission denied); no later Elasticsearch plugin activity.",
+  "Not verifiable without admin credentials: whether an Elasticsearch datasource was added through the UI (only the admin can add datasources).",
+]
+
+# --- Grafana server binary: specific findings -------------------------------------------------
+
+[[rule]]
+id = "GRAF-04"
+title = "net/http Range header CPU exhaustion on static files"
+match = { ids = ["CVE-2026-78667"], target = "bin/grafana$" }
+verdict = "affected"
+rationale = """
+Grafana serves its frontend files with net/http's ServeContent, and these files are reachable without login \
+through Traefik. A request with many small byte ranges can make the server spend excessive CPU, so an \
+anonymous internet client could degrade Grafana's availability. Traefik does not filter Range headers in \
+the current configuration. Impact is availability only."""
+evidence = [
+  "curl -H 'Range: bytes=0-1,3-4' https://reformers01.ewi.tudelft.nl/grafana/public/build/<file>.js without credentials: HTTP 206 (same directly on port 3000), so multi-range requests are processed.",
+  "Function names in the grafana binary include net/http.ServeContent and net/http.serveFile.",
+]
+action = """
+Adopt the first Grafana release built with Go 1.26.9 or later. Until then, optionally strip or limit the \
+Range header for /grafana/public in Traefik (headers middleware) and rely on restart: always for recovery."""
+
+[[rule]]
+id = "GRAF-05"
+title = "kin-openapi request-validation DoS (openapi3filter not linked)"
+match = { ids = ["CVE-2026-100349", "CVE-2026-100352", "CVE-2026-76905", "CVE-2026-77354"], target = "bin/grafana$" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_present"
+rationale = """
+All four flaws are in kin-openapi's openapi3filter package (ValidateRequest/ValidateResponse, \
+convertParseError, sliceMapToSlice) or in its OpenAPI 3.1 path through santhosh-tekuri/jsonschema. \
+Neither openapi3filter nor jsonschema is compiled into the grafana binary."""
+evidence = [
+  "Function-name search in the grafana binary: 0 matches for 'openapi3filter' and for 'santhosh-tekuri'.",
+]
+
+[[rule]]
+id = "GRAF-06"
+title = "kin-openapi schema recursion DoS (Schema.visitJSON)"
+match = { ids = ["CVE-2026-100354"], target = "bin/grafana$" }
+verdict = "under_investigation"
+rationale = """
+Part of this flaw is in openapi3.Schema.visitJSON, which is compiled into Grafana. It needs a schema with a \
+circular allOf/anyOf/oneOf chain and input validated against it. The schemas are Grafana's own, not \
+attacker-supplied, but we could not establish whether Grafana validates request data with VisitJSON \
+against such a schema, or whether that path is reachable without login."""
+evidence = [
+  "Function names in the grafana binary include kin-openapi/openapi3.(*Schema).VisitJSON and visitJSON; openapi3filter.decodeValue is not present.",
+]
+action = "Ask Grafana / follow their advisories for the reachability of this path, and adopt the Grafana release that bundles kin-openapi 0.149.0 or later."
+
+[[rule]]
+id = "GRAF-07"
+title = "TLS and h2c server flaws: Grafana serves plain HTTP/1.1 only"
+match = { ids = ["CVE-2026-56862", "CVE-2026-97031", "CVE-2026-56853"], target = "bin/grafana$" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+CVE-2026-56862 (KeyUpdate) and CVE-2026-97031 (ECH) affect a Go TLS server; CVE-2026-56853 affects a Go \
+server with unencrypted HTTP/2 (h2c) enabled. Grafana runs with protocol = http on port 3000, so it does \
+not terminate TLS (Traefik does) and it refuses h2c connections."""
+evidence = [
+  "grafana.ini has no active [server] settings; defaults.ini: protocol = http, http_port = 3000.",
+  "curl -k https://<grafana-ip>:3000/grafana/api/health: TLS handshake fails (curl exit 35).",
+  "curl --http2-prior-knowledge http://<grafana-ip>:3000/grafana/api/health: no response (h2c refused); plain HTTP/1.1 returns 200.",
+  "Container listening sockets (/proc/net/tcp*): :3000 and one 127.0.0.1-only port; docker inspect: no published ports.",
+]
+
+[[rule]]
+id = "GRAF-08"
+title = "Vulnerable packages or functions not compiled in"
+match = { ids = ["CVE-2026-56854", "CVE-2026-63209", "CVE-2026-78661", "CVE-2026-39822", "CVE-2026-84445"], target = "bin/grafana$" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_present"
+rationale = """
+Trivy reports these by module version, but the vulnerable code is not linked into the grafana binary: \
+golang.org/x/crypto/ssh (CVE-2026-56854), klauspost/compress s2.NewDict / Dict.Encode (CVE-2026-63209), \
+the x/net/html tree parser (addText/fosterParent, CVE-2026-78661; only the tokenizer is linked), os.Root \
+(CVE-2026-39822) and grpc xds.NewGRPCServer (CVE-2026-84445)."""
+evidence = [
+  "Function-name search in the grafana binary: 0 matches for `golang.org/x/crypto/ssh.`, `s2.NewDict`, `s2.(*Dict)`, `x/net/html.(*parser)`, `os.(*Root)`, `os.OpenInRoot`, `grpc/xds.NewGRPCServer`.",
+]
+
+[[rule]]
+id = "GRAF-09"
+title = "Tempo and Prometheus server endpoints not part of Grafana"
+match = { ids = ["CVE-2026-21728", "CVE-2026-28377", "CVE-2026-42151"], target = "bin/grafana$" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_present"
+rationale = """
+These are flaws in the Tempo server (query limits, /status/config) and the Prometheus server (/-/config \
+exposing the Azure AD client secret). Grafana imports only Tempo's protobuf types and Prometheus' Azure AD \
+config types; the Tempo and Prometheus HTTP servers and their config endpoints are not in the binary, and \
+no Tempo or Prometheus datasource is configured."""
+evidence = [
+  "Tempo packages in the grafana binary: grafana/tempo/pkg/pool and pkg/tempopb/* only; 0 matches for tempo/cmd or tempo/modules.",
+  "Prometheus azuread symbols: AzureADConfig, OAuthConfig, UnmarshalYAML, Validate only; 0 matches for NewAzureADRoundTripper, and Grafana does not serve a Prometheus /-/config endpoint.",
+]
+
+[[rule]]
+id = "GRAF-10"
+title = "gRPC-Go server flaws: no reachable gRPC server"
+match = { pkgs = ["google.golang.org/grpc"], target = "bin/grafana$" }
+verdict = "not_affected"
+justification = "vulnerable_code_cannot_be_controlled_by_adversary"
+rationale = """
+CVE-2026-84304 and GHSA-hrxh-6v49-42gf need a peer that can speak HTTP/2 gRPC to Grafana, or an xDS RBAC \
+policy. Grafana exposes only HTTP/1.1 on port 3000; its only other listener is bound to 127.0.0.1 inside the \
+container, and its gRPC peers are local plugin processes from the image. No xDS configuration exists."""
+evidence = [
+  "/proc/net/tcp and tcp6 in the container: listening on :::3000 and 127.0.0.1 only.",
+  "curl --http2-prior-knowledge to port 3000: refused, so gRPC cannot be sent over the published path.",
+  "Compose environment and grafana.ini contain no gRPC server or xDS settings.",
+]
+
+[[rule]]
+id = "GRAF-11"
+title = "Outbound-client flaws (x509, DNS, HTTP/2 client)"
+match = { ids = ["CVE-2026-111943", "CVE-2026-27145", "CVE-2026-46600", "CVE-2026-78669"], target = "bin/grafana$" }
+verdict = "mitigated"
+rationale = """
+These flaws are triggered by a malicious TLS server certificate, DNS answer or HTTP/2 server that Grafana \
+connects to as a client (the HTTP/2 server side is not offered, see GRAF-07). Grafana's outbound \
+connections are to grafana.com (update checks and the plugin installer, over TLS) and to the internal \
+PostgreSQL service, with DNS from Docker's resolver. An attacker would need to control one of these peers \
+or the upstream DNS."""
+evidence = [
+  "defaults.ini: check_for_updates = true, check_for_plugin_updates = true, preinstall_auto_update = true; docker logs show the plugin installer contacting grafana.com at startup.",
+  "datasource.yml: the only datasource is timescale:5432 on the internal network, sslmode disable.",
+]
+action = "Adopt the Grafana release built with Go 1.26.10 or later and golang.org/x/net 0.60.0 or later. Optionally disable the update checks (environment variables GF_ANALYTICS_CHECK_FOR_UPDATES and GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES set to false) to reduce outbound connections."
+
+[[rule]]
+id = "GRAF-12"
+title = "Server-side parsing flaws behind login"
+match = { target = "bin/grafana$" }
+verdict = "mitigated"
+rationale = """
+The remaining findings are DoS (and one XSS, CVE-2026-56858) flaws in Go stdlib and library code that \
+parses input (ASN.1, IDNA, MIME headers, XML, URL paths, Unicode normalisation, Thrift, JWKs). They are \
+compiled into the internet-reachable Grafana server, but the data they parse reaches them through \
+authenticated API calls, configured datasources or admin settings. Mitigations: login required, sign-up \
+and anonymous access disabled, admin account from the environment, JWT and OAuth login disabled, no \
+tracing or Jaeger configured, TLS at Traefik, restart: always."""
+evidence = [
+  "defaults.ini: [auth.anonymous] enabled = false, [users] allow_sign_up = false, [auth.jwt] enabled = false, no OAuth provider enabled, [tracing.jaeger] address empty; grafana.ini overrides none of these; the container environment sets no GF_AUTH_* variables (names checked only).",
+  "Unauthenticated API calls return 401 (see GRAF-01).",
+  "Not verifiable without credentials: the number of Grafana user accounts (the admin can create more).",
+]
+action = "Adopt the next Grafana release built with Go 1.26.10 or later and updated golang.org/x modules, go-jose 4.1.6 and thrift 0.24.0."
+
+# --- Alpine OS packages ----------------------------------------------------------------------
+
+[[rule]]
+id = "GRAF-13"
+title = "curl, OpenSSL, c-ares, zlib: installed but not executed"
+match = { pkgs = ["curl", "libcurl", "c-ares", "libcrypto3", "libssl3", "zlib"], class = "os-pkgs" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+These libraries are used only by Alpine tools (curl, apk, busybox ssl_client), none of which runs in the \
+container. The Grafana process is a static pure-Go binary that maps no shared libraries and uses Go's own \
+TLS, DNS and compression code. The curl findings are client-side flaws and need curl to be run."""
+evidence = [
+  "apk info -r: libcurl and c-ares required by curl/libcurl only; libssl3 by libapk, libcurl, ssl_client; zlib by curl, libcurl, libapk, apk-tools.",
+  "/proc/1/maps: no shared objects; ldd grafana: not a dynamic program; build info CGO_ENABLED=0.",
+  "Process list: only grafana; no healthcheck (docker inspect) and no curl in /run.sh.",
+]
+
+[[rule]]
+id = "GRAF-14"
+title = "musl regcomp integer overflow"
+match = { pkgs = ["musl", "musl-utils"], class = "os-pkgs" }
+verdict = "not_affected"
+justification = "vulnerable_code_cannot_be_controlled_by_adversary"
+rationale = """
+The flaw needs an untrusted regular expression passed to musl's regcomp. Grafana does not use musl at all \
+(static Go binary, CGO disabled, Go's own regexp engine). musl is used by the startup script run.sh, whose \
+grep and sed calls use fixed patterns from the image, and by musl-utils tools (ldd, getent, iconv) that are \
+not run."""
+evidence = [
+  "/proc/1/maps: no ld-musl or libc mapped into the grafana process; build info CGO_ENABLED=0.",
+  "/run.sh line 53: `grep '^GF_[^=]\\+__FILE=.\\+'` and sed with a fixed expression; no user-supplied regex.",
+]

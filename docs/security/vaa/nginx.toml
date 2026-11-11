@@ -1,0 +1,20 @@
+[context]
+image = "nginx 1.31.8 (alpine)"
+scan = "nginx.json.gz"
+exposure = """Public through Traefik at https://reformers01.ewi.tudelft.nl/dashboard (TLS terminated at Traefik). It serves the static dashboard (HTML/JS/CSS) and generated CSV files read-only; no port is published directly."""
+runtime = "nginx master and worker processes with the image's default configuration plus the dashboard files; no dynamic modules are loaded."
+notes = "Vendor image used unmodified, newest nginx:alpine build at the time of the scan."
+
+[[rule]]
+id = "NGINX-01"
+title = "libxslt (only used by the optional XSLT filter module)"
+match = { pkgs = ["libxslt"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """libxslt is installed only as a dependency of the optional dynamic module ngx_http_xslt_filter_module. That module is loaded only with a `load_module` directive, and the running configuration has none, so libxslt is never mapped into the nginx processes. \
+Note: Trivy labels both CVEs with Chromium titles; the Alpine fix is libxslt 1.1.43-r4, which a future nginx:alpine build will include."""
+evidence = [
+  "`nginx -T` in the container: no load_module and no xslt directive.",
+  "`apk info -r libxslt`: required only by nginx-module-xslt.",
+  "No nginx process has libxslt in /proc/<pid>/maps.",
+]

@@ -1,0 +1,132 @@
+# Vulnerability Applicability Assessment: TimescaleDB (compose service `timescale`)
+# Evidence gathered 2026-11-11 on the running container illuminator-dev-timescale-1 with
+# read-only commands (docker inspect, docker exec ls/cat/grep//proc, --version).
+
+[context]
+image = "TimescaleDB HA (PostgreSQL 17, TimescaleDB 2.31)"
+scan = "timescaledb.json.gz"
+exposure = """
+No Traefik route. Port 5432 is published on the host loopback only: 127.0.0.1:5432 (docker-compose.yml) \
+and 127.0.0.1:5433 (docker-compose.ports.yml), confirmed with `docker port`. Otherwise reachable only on the \
+internal Docker network `illuminator-dev_default` by the stack's services, which authenticate with database roles.
+"""
+runtime = """
+Entrypoint /docker-entrypoint.sh, command `postgres`, running as uid 1000 (postgres). PID 1 is the postgres \
+server; the only other processes are postgres backends and background workers (checkpointer, walwriter, \
+autovacuum, TimescaleDB schedulers). Patroni, pgBackRest, PgBouncer, the exporters, cron and systemd are not running.
+"""
+notes = """
+The image is the vendor's "HA" variant, which ships Patroni/pgBackRest/exporter tooling for Kubernetes deployments; \
+this stack uses it as a single plain PostgreSQL server. None of the CRITICAL/HIGH findings are in PostgreSQL, \
+TimescaleDB or PostGIS. All findings are in three Go binaries and in apt. Per policy we do not rebuild vendor \
+images; fixes come from a newer timescale/timescaledb-ha build.
+"""
+
+[[rule]]
+id = "TSDB-01"
+title = "Go crypto/tls session resumption (critical) in pgbackrest_exporter"
+match = { ids = ["CVE-2025-68121"], target = "pgbackrest_exporter" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+The flaw lets a resumed TLS session skip certificate validation in a Go TLS client or server. It can only be \
+exploited in a running process that makes or accepts TLS connections; pgbackrest_exporter is a Prometheus \
+exporter that is never started in this deployment, and nothing in the container's startup path invokes it.
+"""
+evidence = [
+  "Process list from /proc in the container: only postgres (PID 1), its backends and background workers; no pgbackrest_exporter.",
+  "docker inspect: Entrypoint /docker-entrypoint.sh, Cmd [postgres], User postgres; RestartCount 0.",
+  "grep of /docker-entrypoint.sh, /docker-entrypoint-initdb.d/*, /usr/local/bin and /etc: the only reference is /etc/systemd/system/pgbackrest_exporter.service, and systemd is not running (PID 1 is postgres).",
+  "pgBackRest is not used by this stack: the image ships a default /etc/pgbackrest.conf, but archive_mode/archive_command are not set in postgresql.conf or postgresql.auto.conf and no pgbackrest process runs.",
+]
+action = "No local action. Picked up automatically when a newer timescale/timescaledb-ha build ships a rebuilt exporter (fixed in Go 1.24.13/1.25.7)."
+
+[[rule]]
+id = "TSDB-02"
+title = "Go crypto/tls session resumption (critical) in pgbouncer_exporter"
+match = { ids = ["CVE-2025-68121"], target = "pgbouncer_exporter" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+Same Go standard library flaw, here in pgbouncer_exporter 0.9.0 (built with Go 1.22.5, August 2024). The stack \
+does not run PgBouncer or its exporter; the binary is present in the image but is never executed, so no TLS \
+session is ever established by this code.
+"""
+evidence = [
+  "Process list from /proc in the container: no pgbouncer or pgbouncer_exporter process.",
+  "`pgbouncer_exporter --version`: 0.9.0, build date 2024-08-02 (stale vendor-bundled binary).",
+  "grep of /docker-entrypoint.sh, /docker-entrypoint-initdb.d/*, /usr/local/bin and /etc: no reference to pgbouncer_exporter.",
+]
+action = "Report upstream (timescale/timescaledb-docker-ha) that the bundled pgbouncer_exporter is from 2024 and built with an unsupported Go release; adopt a fixed vendor build when available."
+
+[[rule]]
+id = "TSDB-03"
+title = "yq: Go stdlib and x/net issues"
+match = { target = "usr/local/bin/yq$" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+yq (v4.54.1) is a command-line YAML processor. The findings are in HTTP/2, HTML parsing, TLS and X.509 code, which \
+yq would only reach when acting as a network client or server; it is never invoked in this container, neither by \
+the entrypoint nor by the init scripts, and it is not a long-running process.
+"""
+evidence = [
+  "`yq --version`: v4.54.1.",
+  "Process list from /proc: no yq process.",
+  "grep of /docker-entrypoint.sh and /docker-entrypoint-initdb.d/*: no reference to yq.",
+]
+action = "No local action; resolved by a later vendor build with Go >= 1.27.3 and golang.org/x/net >= 0.62.0."
+
+[[rule]]
+id = "TSDB-04"
+title = "pgbackrest_exporter: other Go stdlib and golang.org/x issues"
+match = { target = "usr/bin/pgbackrest_exporter$" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+The remaining 50 findings (Go 1.21.13 stdlib, x/crypto/ssh, x/net, x/oauth2, x/text) are mostly network-facing \
+denial-of-service and parsing flaws plus SSH library flaws. All require the exporter process to run and receive \
+input; it is never started here (see TSDB-01), and the os.Root issue (CVE-2026-39822) would also need the \
+binary to run.
+"""
+evidence = [
+  "Process list from /proc: no pgbackrest_exporter process.",
+  "Only reference is a systemd unit file; systemd is not PID 1 in this container.",
+  "Binary is dated 2024-08-13 and built with Go 1.21.13 (Trivy), i.e. a stale vendor-bundled tool.",
+]
+action = "Report upstream with TSDB-02; adopt a vendor build with a rebuilt exporter when available."
+
+[[rule]]
+id = "TSDB-05"
+title = "pgbouncer_exporter: other Go stdlib and golang.org/x issues"
+match = { target = "usr/local/bin/pgbouncer_exporter$" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+The remaining 50 findings (Go 1.22.5 stdlib, x/crypto/ssh, x/net, x/oauth2, x/text) need the exporter to run and \
+process network or file input. PgBouncer and its exporter are not part of this deployment and the binary is \
+never executed (see TSDB-02).
+"""
+evidence = [
+  "Process list from /proc: no pgbouncer_exporter process.",
+  "No reference in the entrypoint, init scripts, /etc or /usr/local/bin.",
+]
+action = "Report upstream with TSDB-02; adopt a vendor build with a rebuilt exporter when available."
+
+[[rule]]
+id = "TSDB-06"
+title = "apt: code execution via hard-link reuse on download retries"
+match = { class = "os-pkgs", pkgs = ["apt", "libapt-pkg6.0"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+The flaw is triggered only while apt downloads packages. apt is never run in the container: it would need root, \
+the container runs as uid 1000 without sudo, there is no cron daemon to run the daily apt job, and by policy \
+packages are never installed or updated inside running vendor containers.
+"""
+evidence = [
+  "`id` in the container: uid=1000(postgres); no sudo binary; gosu present but not setuid (find -perm -4000).",
+  "Process list from /proc: no apt, apt-get or cron process; /usr/sbin/cron does not exist.",
+  "No apt invocation in /docker-entrypoint.sh or /docker-entrypoint-initdb.d/*.",
+]
+action = "No local action; picked up with the next vendor image rebuilt on apt 2.4.15ubuntu0.1 or later."

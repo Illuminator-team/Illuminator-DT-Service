@@ -1,0 +1,7 @@
+[context]
+image = "Traefik 3.7.18"
+scan = "traefik.json.gz"
+exposure = """The only service with public ports: 80 and 443, and the same two entrypoints again on 8180 and 8443 (IPv4 and IPv6). Terminates TLS and routes by host and path to the internal services. \
+The Traefik API and dashboard run with `--api.insecure=true` on port 8080, which is published on 127.0.0.1:8080 and 127.0.0.1:8280 only, so it is reachable by local users of the server but not from the network."""
+runtime = "One traefik process with the Docker provider."
+notes = "Vendor image used unmodified, newest release at the time of the scan. No critical or high findings."

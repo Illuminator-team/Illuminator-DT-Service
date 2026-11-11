@@ -1,0 +1,48 @@
+[context]
+image = "GeoServer 3.0.2 (kartoza/geoserver)"
+scan = "geoserver.json.gz"
+exposure = """Public through Traefik at https://reformers01.ewi.tudelft.nl/geoserver (TLS terminated at Traefik; GeoServer itself listens on plain HTTP on the internal Docker network only). \
+Anonymous users can read all layers through WMS/WFS. WFS is configured at service level COMPLETE (transactions enabled), but the data security rules grant write access on all layers to ADMIN/GROUP_ADMIN only (`*.*.r=*`, `*.*.w=ADMIN,GROUP_ADMIN`). The admin UI and REST API require the admin login, which only the layer-publisher service uses. Container ports 8080/8443 are not published on the host."""
+runtime = """One Tomcat/JVM process (OpenJDK 21.0.13). The data directory holds a single PostGIS datastore (workspace `rdp`) on the internal TimescaleDB; no cascaded remote WMS/WFS/WMTS stores."""
+notes = "Vendor image used unmodified (policy: no self-built images of third-party software). Newest release at the time of the scan."
+
+[[rule]]
+id = "GEO-01"
+title = "OpenTelemetry Java agent RMI deserialization (critical)"
+match = { ids = ["CVE-2026-33701"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """The vulnerable code is the RMI instrumentation of the OpenTelemetry Java agent. The jar is shipped in /otel but the agent is only added to the JVM when TELEMETRY_TRACING_ENABLED is true, which it is not here, so it is never loaded. \
+Exploitation additionally requires JDK 16 or earlier and a reachable JMX/RMI port; the JVM is OpenJDK 21 and no JMX/RMI port is configured or published."""
+evidence = [
+  "/scripts/lib/tomcat.sh: `-javaagent:${OTEL_DIR}/opentelemetry-javaagent.jar` is only appended when TELEMETRY_TRACING_ENABLED matches true; the variable is not set in the compose file.",
+  "JVM command line (/proc/<pid>/cmdline of the Tomcat process): no -javaagent option, no -Dcom.sun.management.jmxremote options.",
+  "`java -version` in the container: openjdk version 21.0.13.",
+  "`docker inspect`: no host port bindings for the GeoServer container; Traefik reaches it on 8080 over the internal network.",
+]
+
+[[rule]]
+id = "GEO-02"
+title = "Apache HttpComponents Core 5 HTTP/2 HPACK memory exhaustion"
+match = { ids = ["CVE-2026-54428"], pkgs = ["org.apache.httpcomponents.core5:httpcore5-h2"] }
+verdict = "mitigated"
+rationale = """httpcore5-h2 is the HTTP/2 transport of the Apache HTTP client library; incoming requests are served by Tomcat, not by this library, so the public endpoint is not the attack surface. \
+It would only be reached if GeoServer makes an outbound HTTP/2 connection to a server an attacker controls. This deployment has no remote (cascaded) stores; whether a user-supplied remote resource (for example an SLD URL in a WMS request) is fetched with this library was not verified. Impact is limited to denial of service."""
+evidence = [
+  "geo/workspaces: one datastore (rdp_postgis, type PostGIS); no wmsstore.xml or wmtsstore.xml.",
+  "CVSS vector A:H only (no confidentiality or integrity impact).",
+]
+action = "Adopt the next kartoza/geoserver release that ships httpcore5-h2 >= 5.4.3. Consider disabling remote SLD/style URLs in WMS if they are not needed."
+
+[[rule]]
+id = "GEO-03"
+title = "Google Guava deserialization memory exhaustion"
+match = { ids = ["CVE-2026-102554"], pkgs = ["com.google.guava:guava"] }
+verdict = "mitigated"
+rationale = """The flaw is triggered only while deserializing a crafted Java serialization stream into specific Guava collections. GeoServer's public OGC services and its REST API exchange XML/JSON/form data, not Java serialized objects, and the REST API requires the admin login. \
+No endpoint that accepts Java serialization from clients was identified; impact is limited to denial of service."""
+evidence = [
+  "CVSS vector AV:N/AC:H/A:H only (high attack complexity, availability impact only).",
+  "Exposure is limited to the OGC services and the authenticated admin/REST interface via Traefik.",
+]
+action = "Adopt the next kartoza/geoserver release that ships Guava >= 33.7.2."

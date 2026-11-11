@@ -1,0 +1,459 @@
+# Vulnerability Applicability Assessment: RedisInsight (compose service `redis-insight`)
+# Evidence gathered 2026-11-11 with read-only `docker inspect` / `docker exec` (ls, cat, grep, ldd, /proc/*/cmdline)
+# against container illuminator-dev-redis-insight-1. Paths below are inside the container unless noted.
+
+[context]
+image = "RedisInsight 3.8.0"
+scan = "redisinsight.json.gz"
+exposure = """
+No Traefik route (the container has no traefik.* labels). The web UI/API (port 5540) is published on the host loopback only, \
+twice: 127.0.0.1:5540 (docker-compose.yml) and 127.0.0.1:5541 (docker-compose.ports.yml); both are listening. \
+Using it requires a shell on the server or an SSH port forward. It is also reachable unauthenticated as redis-insight:5540 \
+from the 20 other containers on the internal network illuminator-dev_default (including reverse-proxy, geo, grafana). \
+RedisInsight has no login of its own and is preconfigured with the stack's Redis connection, so anyone who can reach the port \
+can read and write that Redis. The API enables CORS for any origin (RI_CORS_ORIGIN unset, default '*'), so a web page open in \
+a developer's browser while a port forward is active can also send requests to it.
+"""
+runtime = """
+Single process: `node redisinsight/api/dist/src/main` as PID 1 (docker-entry.sh only execs its arguments), user node (uid 1000), \
+Node.js v22.22.0 with its own statically linked OpenSSL 3.5.4 and zlib (ldd shows only musl, libstdc++, libgcc_s). \
+The npm CLI under /usr/local/lib/node_modules/npm is installed but not run; the only child process the app can spawn is \
+`netstat -anpt` (database autodiscovery). Custom tutorials are disabled (RI_CUSTOM_TUTORIALS_ENABLED unset). \
+Statics auto-update is on (default): tutorial and content ZIPs are downloaded from fixed github.com/RedisInsight release URLs.
+"""
+notes = """
+Vendor image, used as published (pinned by digest); 3.8.0 is the newest release. Policy is not to rebuild vendor images, so \
+fixes come from a new RedisInsight release. Compensating controls: loopback-only publishing, and the service can be stopped \
+when nobody needs it. Findings in Node's bundled OpenSSL/zlib are not visible to Trivy and are not covered by this assessment.
+"""
+
+# ---------------------------------------------------------------- critical findings, one rule each
+
+[[rule]]
+id = "RI-01"
+title = "proxy-addr IP spoofing via mis-parsed trust subnet (critical)"
+match = { ids = ["CVE-2026-90711"], pkgs = ["proxy-addr"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+The flaw is in how proxy-addr compiles a configured trust subnet written in IPv4-mapped IPv6 notation. RedisInsight never \
+configures Express `trust proxy`, so Express uses its default (trust nothing) and proxy-addr never compiles any subnet. \
+The app also makes no access decisions based on the client IP.
+"""
+evidence = [
+  "grep -rn -E 'trust ?proxy|trustProxy' over /usr/src/app/redisinsight/api/dist/src: no matches.",
+  "proxy-addr 2.0.7 at usr/src/app/redisinsight/api/node_modules/proxy-addr, only used through Express.",
+]
+
+[[rule]]
+id = "RI-02"
+title = "node-tar gzip bomb in npm's own tar (critical)"
+match = { ids = ["CVE-2026-59873"], pkgs = ["tar"], target = 'usr/local/lib/node_modules/npm/node_modules/tar/package\.json' }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+This tar 6.2.1 copy belongs to the npm CLI, which uses it to pack and unpack npm packages. The container only runs \
+`node .../dist/src/main`; npm is never invoked, and the application does not load modules from the npm CLI's directory.
+"""
+evidence = [
+  "/proc/*/cmdline in the container: PID 1 is `node redisinsight/api/dist/src/main`, no other processes.",
+  "docker inspect: Entrypoint [./docker-entry.sh node redisinsight/api/dist/src/main]; docker-entry.sh only does `exec \"$@\"`.",
+  "The only child_process use in dist/src is spawn('netstat', ['-anpt']) in database-discovery/utils/autodiscovery.util.js.",
+]
+
+[[rule]]
+id = "RI-03"
+title = "node-tar gzip bomb in npm's cacache (critical)"
+match = { ids = ["CVE-2026-59873"], pkgs = ["tar"], target = 'npm/node_modules/cacache/node_modules/tar/' }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+This tar 7.4.3 copy is a dependency of cacache, the npm CLI's package cache. It only runs when npm installs packages, which \
+never happens in this container: the running process is the RedisInsight API started directly with `node`.
+"""
+evidence = [
+  "/proc/*/cmdline: only `node redisinsight/api/dist/src/main` runs.",
+  "RedisInsight API dependencies live in /usr/src/app/redisinsight/api/node_modules; cacache is only under /usr/local/lib/node_modules/npm.",
+]
+
+[[rule]]
+id = "RI-04"
+title = "node-tar gzip bomb in npm's node-gyp (critical)"
+match = { ids = ["CVE-2026-59873"], pkgs = ["tar"], target = 'npm/node_modules/node-gyp/node_modules/tar/' }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+This tar 7.4.3 copy belongs to node-gyp inside the npm CLI, used to download Node headers when compiling native addons \
+during `npm install`. No build or install runs in the container; the native addons it uses are already compiled.
+"""
+evidence = [
+  "/proc/*/cmdline: only `node redisinsight/api/dist/src/main` runs.",
+  "Native addons ship prebuilt: node_modules/better-sqlite3/build/Release/better_sqlite3.node, node_modules/keytar/build/Release/keytar.node.",
+]
+
+# ---------------------------------------------------------------- npm CLI internals
+
+[[rule]]
+id = "RI-05"
+title = "Other packages inside the npm CLI (tar, pacote, sigstore, glob, ip-address, picomatch, brace-expansion, minimatch)"
+match = { target = '^usr/local/lib/node_modules/npm/' }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+These copies are private dependencies of the npm CLI bundled with the Node base image (package extraction, signature \
+verification, glob matching, git spec parsing). npm is never executed in this container and the RedisInsight API does not \
+load anything from /usr/local/lib/node_modules/npm, so none of this code runs.
+"""
+evidence = [
+  "/proc/*/cmdline: only `node redisinsight/api/dist/src/main` runs; entrypoint does not call npm.",
+  "The only child_process use in the app is spawn('netstat', ['-anpt']).",
+  "The app's own copies of brace-expansion and minimatch are separate findings (RI-16).",
+]
+
+# ---------------------------------------------------------------- archive extraction (adm-zip)
+
+[[rule]]
+id = "RI-06"
+title = "adm-zip setuid bits kept on extraction"
+match = { ids = ["CVE-2026-102282"], pkgs = ["adm-zip"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+The flaw only applies when extraction is called with keepOriginalPermission=true. Every adm-zip extraction call in \
+RedisInsight leaves that option false or unset. The process also runs as the unprivileged user node, so a setuid file \
+would not grant extra privileges.
+"""
+evidence = [
+  "custom-tutorial.fs.provider.js: extractAll(zip, targetPath, overwrite = true, keepOriginalPermission = false); its only caller passes (zip, path, true).",
+  "utils/file-helper.js: zip.extractAllTo(path, true); statics-management/providers/auto-updated-statics.provider.js: zip.extractAllTo(destinationPath, true).",
+  "docker exec id: uid=1000(node).",
+]
+
+[[rule]]
+id = "RI-07"
+title = "adm-zip decompression DoS (crafted ZIP)"
+match = { pkgs = ["adm-zip"], target = 'usr/src/app/redisinsight/api/node_modules/adm-zip/' }
+verdict = "not_affected"
+justification = "vulnerable_code_cannot_be_controlled_by_adversary"
+rationale = """
+The DoS needs an attacker-supplied ZIP. The only route for user-uploaded ZIPs (custom tutorials) is switched off in this \
+deployment, so its module is not loaded. The remaining extraction is the statics auto-update, which downloads ZIPs over HTTPS \
+from fixed RedisInsight GitHub release URLs that an attacker cannot change without compromising the vendor.
+"""
+evidence = [
+  "app.module.js registers CustomTutorialModule only if SERVER_CONFIG.customTutorials, i.e. RI_CUSTOM_TUTORIALS_ENABLED === 'true'; that variable is not set (docker inspect env names).",
+  "config/default.js: tutorials.updateUrl https://github.com/RedisInsight/Tutorials/releases/download/2.42, content.updateUrl https://github.com/RedisInsight/Statics/releases/download/2.54 (RI_TUTORIALS_UPDATE_URL / RI_CONTENT_UPDATE_URL unset).",
+]
+
+# ---------------------------------------------------------------- server-side request handling
+
+[[rule]]
+id = "RI-08"
+title = "multer crash with asynchronous fileFilter"
+match = { ids = ["CVE-2026-113872"], pkgs = ["multer"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+The crash only occurs when multer is configured with an asynchronous fileFilter. RedisInsight's only multer upload \
+(database import) uses FileInterceptor('file') without options, and no fileFilter or MulterModule configuration exists.
+"""
+evidence = [
+  "database-import.controller.js: UseInterceptors(FileInterceptor('file')).",
+  "grep -rn 'fileFilter' and 'MulterModule' over dist/src: no matches.",
+]
+
+[[rule]]
+id = "RI-09"
+title = "multer DoS via malformed multipart uploads"
+match = { pkgs = ["multer"] }
+verdict = "mitigated"
+rationale = """
+The database-import endpoint (POST .../databases/import) parses multipart uploads with multer, so a client of the \
+RedisInsight API can crash or stall the process. Only someone with a shell on the server, a container on the internal \
+network, or a browser tunnelled to the port can send such a request, and the impact is limited to RedisInsight, a dev tool.
+"""
+evidence = [
+  "database-import.controller.js: Post('import') with FileInterceptor('file').",
+  "Published only on 127.0.0.1:5540 and 127.0.0.1:5541; no Traefik labels.",
+]
+action = "Adopt a RedisInsight release that bundles multer >= 2.5.0 when available (check each release; report upstream to redis/RedisInsight if 3.8.x stays on 2.0.2). Keep loopback-only publishing and stop the service when not in use."
+
+[[rule]]
+id = "RI-10"
+title = "body-parser crash via compressed request with trailing bytes"
+match = { pkgs = ["body-parser"] }
+verdict = "mitigated"
+rationale = """
+RedisInsight's main.js installs body-parser JSON and urlencoded parsers on all routes, and Express/Nest carry their own copies, \
+so one crafted gzip request can crash the API. The request has to come from someone who can reach the port (server shell, \
+internal network, or a page in a tunnelled developer browser, since CORS allows any origin). A crash only takes down RedisInsight.
+"""
+evidence = [
+  "dist/src/main.js: const bodyParser = require('body-parser'); app.use(bodyParser.json({limit: serverConfig.maxPayloadSize})); app.use(bodyParser.urlencoded(...)).",
+  "Versions: node_modules/body-parser 1.20.3, express/node_modules/body-parser 2.2.1, @nestjs/platform-express/node_modules/body-parser 2.2.1.",
+]
+action = "Adopt a RedisInsight release with body-parser >= 1.20.9 / 2.4.0 when available; report upstream if not fixed. Keep loopback-only publishing, stop the service when not in use, and close SSH forwards after use."
+
+[[rule]]
+id = "RI-11"
+title = "engine.io WebTransport session-ID DoS"
+match = { ids = ["CVE-2026-59724"], pkgs = ["engine.io"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+Only Engine.IO servers with WebTransport enabled are affected. Engine.IO defaults to polling and websocket transports, \
+and RedisInsight's socket gateways do not set transports, so the WebTransport upgrade handler never runs.
+"""
+evidence = [
+  "node_modules/engine.io/build/server.js: transports: [\"polling\", \"websocket\"], // WebTransport is disabled by default.",
+  "grep -rni 'webtransport' over dist/src: no matches; the only 'transports' setting in dist/src is the outbound AI-query client (['websocket']).",
+]
+
+[[rule]]
+id = "RI-12"
+title = "Socket.IO / Engine.IO / ws memory and connection exhaustion"
+match = { pkgs = ["engine.io", "socket.io-parser", "ws"] }
+verdict = "mitigated"
+rationale = """
+RedisInsight runs Socket.IO gateways (bulk actions, pub/sub, profiler, notifications, etc.) on its API port, so a client can \
+exhaust memory or sockets and stop the process. Only clients who can already reach the loopback port or the internal network \
+can do this, and the impact is limited to this dev tool.
+"""
+evidence = [
+  "WebSocketGateway in dist/src/modules/{bulk-actions,pub-sub,profiler,notification,feature,cloud/job,database-recommendation}/*.gateway.js.",
+  "Versions: engine.io 6.6.2, socket.io-parser 4.2.6, ws 8.17.1 in api/node_modules.",
+]
+action = "Adopt a RedisInsight release with engine.io >= 6.6.10, socket.io-parser >= 4.2.7 and ws >= 8.21.0 when available; report upstream if not fixed. Keep loopback-only publishing and stop the service when not in use."
+
+[[rule]]
+id = "RI-13"
+title = "path-to-regexp ReDoS from crafted route patterns"
+match = { ids = ["CVE-2026-4926"], pkgs = ["path-to-regexp"] }
+verdict = "not_affected"
+justification = "vulnerable_code_cannot_be_controlled_by_adversary"
+rationale = """
+The slow regex is generated from the route pattern, not from the request path. The flagged 8.2.0 copy is used by \
+@nestjs/core to build routes from patterns fixed in RedisInsight's code; Express's router uses its own fixed copy (8.4.2). \
+No user input becomes a route pattern.
+"""
+evidence = [
+  "node_modules/router/node_modules/path-to-regexp version 8.4.2; top-level node_modules/path-to-regexp 8.2.0 is depended on by @nestjs/core.",
+  "Route patterns come from controller decorators in dist/src (e.g. Post('import')).",
+]
+
+[[rule]]
+id = "RI-14"
+title = "js-yaml parser DoS"
+match = { pkgs = ["js-yaml"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+All three issues are in YAML parsing (load). On the server side js-yaml is only used by @nestjs/swagger to serialize the API \
+description (dump); RedisInsight's own server code does not import it. No YAML is ever parsed from user input.
+"""
+evidence = [
+  "Only dependent package.json within api/node_modules (depth 4): @nestjs/swagger.",
+  "@nestjs/swagger/dist/swagger-module.js: only call is jsyaml.dump(documentToSerialize, ...).",
+  "grep 'js-yaml' over dist/src: no server-side match (only the browser plugin bundle dist/static/plugins/common/index2.js).",
+]
+
+[[rule]]
+id = "RI-15"
+title = "lodash _.template code injection (copy inside @nestjs/swagger)"
+match = { ids = ["CVE-2026-4800"], pkgs = ["lodash"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+The flaw is in _.template with untrusted options.imports. The flagged lodash copy is private to @nestjs/swagger, which uses \
+lodash only for utility functions and never calls _.template.
+"""
+evidence = [
+  "Flagged path: api/node_modules/@nestjs/swagger/node_modules/lodash.",
+  "grep -rn '.template(' over node_modules/@nestjs/swagger/dist: no matches; lodash is required only in utils and type-helpers.",
+]
+
+[[rule]]
+id = "RI-16"
+title = "brace-expansion / minimatch DoS from crafted glob patterns (app copies)"
+match = { pkgs = ["brace-expansion", "minimatch"], target = '^usr/src/app/redisinsight/api/node_modules/' }
+verdict = "not_affected"
+justification = "vulnerable_code_cannot_be_controlled_by_adversary"
+rationale = """
+These copies are only reached through TypeORM's glob loader (typeorm -> glob -> minimatch -> brace-expansion), which is used \
+only when entities or migrations are given as path patterns. RedisInsight passes entity and migration classes, \
+and its own code never imports minimatch or brace-expansion, so no attacker-supplied pattern reaches them.
+"""
+evidence = [
+  "Dependents: brace-expansion <- typeorm/node_modules/minimatch <- typeorm/node_modules/glob <- typeorm/util/DirectoryExportedClassesLoader.js.",
+  "dist/config/ormconfig.js: entities is a list of imported classes, migrations = migration_1.default; no glob strings.",
+  "grep 'minimatch|brace-expansion' over dist/src: no matches.",
+]
+
+# ---------------------------------------------------------------- outbound HTTP client
+
+[[rule]]
+id = "RI-17"
+title = "axios HTTP/2 and proxy-related issues"
+match = { ids = ["CVE-2026-101898", "CVE-2026-101901", "CVE-2026-101906"], pkgs = ["axios"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+CVE-2026-101898 and -101901 only affect requests made with httpVersion: 2, which RedisInsight never sets. CVE-2026-101906 needs \
+HTTP_PROXY/HTTPS_PROXY and NO_PROXY set, and none of these is in the container's environment.
+"""
+evidence = [
+  "grep -rn 'httpVersion' over dist/src: no matches.",
+  "docker inspect env variable names: no HTTP_PROXY, HTTPS_PROXY or NO_PROXY.",
+]
+
+[[rule]]
+id = "RI-18"
+title = "axios issues that need a separate prototype-pollution bug"
+match = { ids = ["CVE-2026-101905", "CVE-2026-101909", "CVE-2026-67320"], pkgs = ["axios"] }
+verdict = "mitigated"
+rationale = """
+axios is used for outbound calls (analytics, Redis Cloud/Azure/Enterprise APIs, statics updates). These three can only be \
+exploited if another flaw in the same process first pollutes Object.prototype. No such flaw is known in RedisInsight 3.8.0, \
+and anyone attempting it would first need access to the loopback port or internal network.
+"""
+evidence = [
+  "axios 1.16.0 at api/node_modules/axios, imported by e.g. analytics.service.js, cloud.api.provider.js, utils/file-helper.js.",
+]
+action = "Adopt a RedisInsight release with axios >= 1.20.0 when available; report upstream if not fixed. Keep loopback-only publishing."
+
+[[rule]]
+id = "RI-19"
+title = "follow-redirects custom sensitiveHeaders not stripped"
+match = { ids = ["CVE-2026-111755", "CVE-2026-116689"], pkgs = ["follow-redirects"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+Both issues concern the caller-declared sensitiveHeaders option. Neither axios (the only user of follow-redirects here) nor \
+RedisInsight sets that option, so the faulty code path is never used.
+"""
+evidence = [
+  "grep -rn 'sensitiveHeaders' over node_modules/axios/lib, node_modules/axios/dist/node and dist/src: no matches.",
+]
+
+[[rule]]
+id = "RI-20"
+title = "follow-redirects credential headers on cross-origin redirect"
+match = { ids = ["CVE-2026-111756"], pkgs = ["follow-redirects"] }
+verdict = "mitigated"
+rationale = """
+Standard credential headers may be forwarded after a cross-origin redirect. RedisInsight only makes outbound requests to \
+vendor endpoints (GitHub releases, Redis Cloud, analytics) or to services a user configures, so the redirect would have to come \
+from one of those. Static-file downloads send no credentials, and cloud/Azure features are not used in this deployment.
+"""
+evidence = [
+  "follow-redirects 1.16.0 at api/node_modules/follow-redirects (used by axios).",
+  "config/default.js: statics update URLs fixed to github.com/RedisInsight; no RI_*_UPDATE_URL overrides in env.",
+]
+action = "Adopt a RedisInsight release with follow-redirects >= 1.16.2 when available; report upstream if not fixed. Do not sign in to Redis Cloud or Azure from this instance."
+
+[[rule]]
+id = "RI-21"
+title = "form-data CRLF injection in outbound multipart"
+match = { ids = ["CVE-2026-12143"], pkgs = ["form-data"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+The flaw affects programs that build outbound multipart requests with attacker-controlled field names or filenames. \
+RedisInsight receives multipart uploads but never builds outbound multipart requests, so form-data (an axios dependency) \
+never serializes user-controlled fields.
+"""
+evidence = [
+  "grep -rn -i 'new FormData|require(\"form-data\")|postForm|toFormData' over dist/src: no matches; 'multipart/form-data' appears only in inbound ApiConsumes decorators.",
+]
+
+[[rule]]
+id = "RI-22"
+title = "MSAL Node authorization-code parameter disclosure"
+match = { ids = ["CVE-2026-109461"], pkgs = ["@azure/msal-node"] }
+verdict = "mitigated"
+rationale = """
+MSAL Node backs RedisInsight's optional Azure sign-in (azure-auth.service.js), so the code is loaded. It only runs when a user \
+starts an Azure sign-in from the UI. This deployment only connects to the stack's local Redis and does not use Azure.
+"""
+evidence = [
+  "dist/src/modules/azure/auth/azure-auth.service.js imports @azure/msal-node 5.0.2.",
+  "Only preconfigured database: RI_REDIS_HOST0=redis, RI_REDIS_PORT0=6379 (docker-compose.yml).",
+]
+action = "Do not use Azure sign-in from this instance. Adopt a RedisInsight release with @azure/msal-node >= 7.1.0 when available."
+
+# ---------------------------------------------------------------- Alpine OS packages
+
+[[rule]]
+id = "RI-23"
+title = "OpenSSL QUIC server memory growth (Alpine libssl3/libcrypto3)"
+match = { ids = ["CVE-2026-14456"], class = "os-pkgs" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+Only OpenSSL QUIC server listeners are affected. Nothing in the container runs a QUIC server, and Node does not use Alpine's \
+libssl/libcrypto at all: it is statically linked against its own OpenSSL 3.5.4.
+"""
+evidence = [
+  "ldd /usr/local/bin/node: only ld-musl, libstdc++.so.6, libgcc_s.so.1.",
+  "node -p process.versions.openssl: 3.5.4.",
+  "/proc/*/cmdline: only the node process runs.",
+]
+
+[[rule]]
+id = "RI-24"
+title = "musl regcomp integer overflow with untrusted regex"
+match = { ids = ["CVE-2026-107891"], pkgs = ["musl"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+Exploitation requires compiling an untrusted regular expression with libc regcomp. Node evaluates JavaScript RegExp with V8, \
+and neither the node binary nor the app's native addons reference regcomp. The only external program the app runs, \
+`netstat -anpt`, takes no user input.
+"""
+evidence = [
+  "grep -c regcomp: /usr/local/bin/node 0, better_sqlite3.node 0, keytar.node 0.",
+  "Only child_process use in dist/src: spawn('netstat', ['-anpt']).",
+]
+
+[[rule]]
+id = "RI-25"
+title = "musl-utils (regcomp overflow, qsort corruption)"
+match = { pkgs = ["musl-utils"], class = "os-pkgs" }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+musl-utils is a stale build of musl's command-line tools (getconf, getent, iconv, ldd); the libc itself is the separate musl \
+package. These tools are never run by the app. CVE-2026-40200 also needs qsort on about seven million elements on 32-bit, or \
+far more on 64-bit, which the advisory itself calls impractical.
+"""
+evidence = [
+  "/proc/*/cmdline: only `node redisinsight/api/dist/src/main` runs; the only spawned program is netstat.",
+]
+
+[[rule]]
+id = "RI-26"
+title = "zlib untgz buffer overflow"
+match = { ids = ["CVE-2026-22184"], pkgs = ["zlib"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_present"
+rationale = """
+The flaw is in the contrib/untgz demonstration utility, not in the zlib library. That utility is not installed in the image.
+"""
+evidence = [
+  "ls /usr/bin/untgz /usr/local/bin/untgz: No such file or directory.",
+]
+
+[[rule]]
+id = "RI-27"
+title = "zlib gz_vacate heap overflow in non-blocking gzwrite"
+match = { ids = ["CVE-2026-85091"], pkgs = ["zlib"] }
+verdict = "not_affected"
+justification = "vulnerable_code_not_in_execute_path"
+rationale = """
+Exploitation needs a program that uses gzprintf after a non-blocking gzwrite stall on Alpine's libz. Node does not link \
+Alpine's libz (it has its own zlib), and no other process runs in the container.
+"""
+evidence = [
+  "ldd /usr/local/bin/node: no libz; node -p process.versions.zlib: 1.3.1-470d3a2 (bundled).",
+  "/proc/*/cmdline: only the node process runs.",
+]

@@ -1,0 +1,6 @@
+[context]
+image = "Redis 7.2.17 (alpine)"
+scan = "redis.json.gz"
+exposure = "Internal Docker network only; no published port and no Traefik route. Password required (written to a config file at start, not passed on the command line)."
+runtime = "One redis-server process; data in the redis-data volume."
+notes = "Vendor image used unmodified, pinned by digest (build of 2026-11-09). No critical or high findings."
