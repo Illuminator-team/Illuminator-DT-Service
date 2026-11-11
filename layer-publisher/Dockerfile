@@ -8,6 +8,6 @@ RUN pip install --no-cache-dir --upgrade pip setuptools \
     && pip uninstall -y pip setuptools wheel \
     && rm -rf /root/.cache
 
-COPY main.py publication_scope.py pc6.py pv.py grid.py grid_postgis.py wind.py wind_postgis.py heat.py heat_postgis.py ev.py ev_postgis.py consumption.py model_postgis.py postgis_sql.py layer-manifest.json ./
+COPY main.py publication_scope.py pc6.py pv.py grid.py grid_postgis.py wind.py wind_postgis.py heat.py heat_postgis.py ev.py ev_postgis.py consumption.py model_postgis.py postgis_sql.py reader_role.py layer-manifest.json ./
 
 CMD ["python", "main.py"]

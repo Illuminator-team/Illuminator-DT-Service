@@ -71,6 +71,7 @@ jobs:
           sed -i "s|REDIS_PASSWORD=change-me|REDIS_PASSWORD=ci-redis-password|" .env
           sed -i "s|GRAFANA_ADMIN_PASSWORD=change-me|GRAFANA_ADMIN_PASSWORD=ci-grafana-password|" .env
           sed -i "s|GEOSERVER_ADMIN_PASSWORD=change-me|GEOSERVER_ADMIN_PASSWORD=ci-geoserver-password|" .env
+          sed -i "s|GEOSERVER_DB_READER_PASSWORD=change-me|GEOSERVER_DB_READER_PASSWORD=ci-geoserver-reader-password|" .env
           sed -i "s|POSTGRES_DATA_SOURCE_PASSWORD=change-me|POSTGRES_DATA_SOURCE_PASSWORD=ci-source-password|" .env
           sed -i "s|POSTGRES_DATA_VIS_PASSWORD=change-me|POSTGRES_DATA_VIS_PASSWORD=ci-vis-password|" .env
           sed -i "s|POSTGRES_DATA_PUB_VIS_PASSWORD=change-me|POSTGRES_DATA_PUB_VIS_PASSWORD=ci-pub-vis-password|" .env
