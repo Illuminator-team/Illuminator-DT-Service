@@ -1,5 +1,5 @@
 x-pv-image: &pv-image
-  image: ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
+  image: ghcr.io/jortgroen/pv-map-api@sha256:cf8d8f554e4db89a0c96430d39e5959e6e1d1db9f2e08b5ec1f0830fddefdb50
 
 x-grid-image: &grid-image
   image: ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
@@ -17,10 +17,10 @@ x-heat-image: &heat-image
   image: ghcr.io/jortgroen/heat-net-map-api@sha256:a69ee37e4858f4cf4b80b47aa832effcc1ab3b2c25d310e05a3eefa0ae64fe64
 
 x-ev-image: &ev-image
-  image: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
+  image: ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c
 
 x-consumption-image: &consumption-image
-  image: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
+  image: ghcr.io/jortgroen/consumption-map-api@sha256:67da0c9b1a44bfc5d72ec32133dc0080a478990cf9ef3b542953cb69080b567e
 
 x-consumption-cache-image: &consumption-cache-image
   image: ghcr.io/jortgroen/consumption-map-source-cache@sha256:b26a1cb702407cb7e9b2f4c66954e844ea587636e31ab569ddee97965169ba3f
@@ -62,8 +62,8 @@ services:
         - CONGESTION_REQUEST_TIMEOUT_SECONDS=120
         - CONSUMPTION_API_URL=http://consumption-api:8080
         - PV_API_URL=http://pv-api:8000
-        - PV_EXPECTED_RELEASE_COMMIT=357d7a9ede79a9da775649bed1069c196a945d39
-        - PV_EXPECTED_CONTAINER_IMAGE=ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
+        - PV_EXPECTED_RELEASE_COMMIT=3eb574a63e30f8bd05db898531e3b7fe7bb94a97
+        - PV_EXPECTED_CONTAINER_IMAGE=ghcr.io/jortgroen/pv-map-api@sha256:cf8d8f554e4db89a0c96430d39e5959e6e1d1db9f2e08b5ec1f0830fddefdb50
         - PV_EXPECTED_MODEL_VERSION=0.3.0
         - PV_REQUEST_TIMEOUT_SECONDS=120
         - TRANSFORMER_PROFILE_CACHE_PATH=/app/data/transformer-profiles/baseline-2023.json.gz
@@ -115,7 +115,7 @@ services:
       PV_RAW_CACHE_DIR: /app/data/raw
       PV_MODEL_CONFIG_PATH: /app/config/pv_model.yaml
       PV_OUTPUT_DIR: /app/data/processed/pv_capacity
-      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
+      PV_IMAGE_IDENTITY: ghcr.io/jortgroen/pv-map-api@sha256:cf8d8f554e4db89a0c96430d39e5959e6e1d1db9f2e08b5ec1f0830fddefdb50
     volumes:
       - pv-raw-cache:/app/data/raw:ro
       - pv-generated-outputs:/app/data/processed/pv_capacity
@@ -374,8 +374,8 @@ services:
       CONSUMPTION_API_BASE_URL: http://consumption-api:8080
       PV_API_BASE_URL: http://pv-api:8000
       PV_API_TIMEOUT_SECONDS: "120"
-      PV_EXPECTED_RELEASE_COMMIT: 357d7a9ede79a9da775649bed1069c196a945d39
-      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
+      PV_EXPECTED_RELEASE_COMMIT: 3eb574a63e30f8bd05db898531e3b7fe7bb94a97
+      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:cf8d8f554e4db89a0c96430d39e5959e6e1d1db9f2e08b5ec1f0830fddefdb50
       PV_EXPECTED_MODEL_VERSION: 0.3.0
     healthcheck:
       test:
@@ -404,8 +404,8 @@ services:
     <<: *ev-image
     init: true
     environment:
-      EV_RELEASE_COMMIT: 2bf386e8a0b9e43c22e8353d2fa82fbb073695e8
-      EV_IMAGE_IDENTITY: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
+      EV_RELEASE_COMMIT: 8a904634308bf59d0271cd0a8a2e8310fab00239
+      EV_IMAGE_IDENTITY: ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c
       EV_OUTPUT_DIR: /var/lib/ev-map/outputs
     volumes:
       - ev-generated-outputs:/var/lib/ev-map/outputs
@@ -481,7 +481,7 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
+      CONSUMPTION_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:67da0c9b1a44bfc5d72ec32133dc0080a478990cf9ef3b542953cb69080b567e
     depends_on:
       consumption-runtime-init:
         condition: service_completed_successfully
@@ -826,8 +826,8 @@ services:
       PUBLISHER_MANIFEST_PATH: /app/layer-manifest.json
       PC6_SOURCE_PATH: /data/alkmaar_energy_map.geojson
       PV_API_URL: http://pv-api:8000
-      PV_EXPECTED_RELEASE_COMMIT: 357d7a9ede79a9da775649bed1069c196a945d39
-      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72
+      PV_EXPECTED_RELEASE_COMMIT: 3eb574a63e30f8bd05db898531e3b7fe7bb94a97
+      PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:cf8d8f554e4db89a0c96430d39e5959e6e1d1db9f2e08b5ec1f0830fddefdb50
       GRID_API_URL: http://grid-api:8080
       GRID_EXPECTED_RELEASE_COMMIT: 3fe554a05b6609bb33b2f99bd26ba4701a55d971
       GRID_EXPECTED_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
@@ -843,11 +843,11 @@ services:
       HEAT_EXPECTED_CONTAINER_DIGEST: sha256:a69ee37e4858f4cf4b80b47aa832effcc1ab3b2c25d310e05a3eefa0ae64fe64
       HEAT_EXPECTED_DATA_MODE: real_source
       EV_API_URL: http://ev-api:8000
-      EV_EXPECTED_RELEASE_COMMIT: 2bf386e8a0b9e43c22e8353d2fa82fbb073695e8
-      EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:0b2633d5e463e8f716243c4405ed3a081e562994bd021176183749fac6b5a2a9
+      EV_EXPECTED_RELEASE_COMMIT: 8a904634308bf59d0271cd0a8a2e8310fab00239
+      EV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/ev-map-api@sha256:ef9731817df61324e0613fa3b03957bdb0cc93f9d07b6f86e30f0a0cfc6a839c
       CONSUMPTION_API_URL: http://consumption-api:8080
-      CONSUMPTION_EXPECTED_RELEASE_COMMIT: 8b148ea7562dbd3681e51dbb7bfd5b87e5730f8c
-      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:ebff2b9bcdcf8563bd8dc5d1c7e92b5b917f06319dd9dbebbb0816c736385af0
+      CONSUMPTION_EXPECTED_RELEASE_COMMIT: c1baad4e87e189e495c2ec40654b79c67ed4acab
+      CONSUMPTION_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/consumption-map-api@sha256:67da0c9b1a44bfc5d72ec32133dc0080a478990cf9ef3b542953cb69080b567e
       GEOSERVER_WORKSPACE: rdp
       GEOSERVER_DATASTORE: rdp_postgis
       PUBLISH_INTERVAL_SECONDS: 10
