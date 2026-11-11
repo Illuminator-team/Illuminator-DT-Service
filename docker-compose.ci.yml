@@ -13,7 +13,6 @@ services:
     ports: !override
       - "18080:80"
       - "18443:443"
-      - "18081:8080"
 
   timescale:
     ports: !override
