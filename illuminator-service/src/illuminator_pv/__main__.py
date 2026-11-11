@@ -12,6 +12,7 @@ from .pv_system_sim import PVSystemSim
 from timezonefinder import TimezoneFinder
 import pandas as pd
 from .util import convert_to_datetimeindex, convert_to_series
+from .weather_input import incomplete_forecast_reason
 
 from illuminator.engine import Simulation
 
@@ -126,6 +127,10 @@ def main(config):
 
             # Retrieve weather data.
             weather_data = weather_data_raw[0][1][-1][1]
+            reason = incomplete_forecast_reason(weather_data)
+            if reason is not None:
+                Logger.warning(f"Skipping weather forecast {weather_data.get('forecast_time')}: {reason}")
+                continue
             station = weather_data['station']
             forecast_time = weather_data['forecast_time']
             observation_time = convert_to_datetimeindex(weather_data['observation_time'])

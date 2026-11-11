@@ -3,6 +3,9 @@ FROM ait1/rdp-data-crawler@sha256:4f564e68c85937ef1513a15326ba02b5024b24e1cc734c
 # Update domain to fix SSL issues and 404s
 RUN sed -i 's/dataset.api.hub.zamg.ac.at/dataset.api.hub.geosphere.at/g' /data_crawler/sources/zamg.py
 
+# nwp-v1-1h-2500m stopped publishing on 2026-11-04; this source reads nwp-v2-1h-1km instead (issue #48).
+COPY nwp_v2_transform.py geosphere_nwp_v2.py /data_crawler/sources/
+
 # Security updates on top of the base image: OS packages, the crawler's vulnerable
 # Python dependencies (installed into its virtualenv by the base image), and the
 # system pip, which is not needed at runtime and whose bundled SBOM lists old copies.
