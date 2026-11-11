@@ -819,6 +819,10 @@ services:
       POSTGRES_DB: rdp_db
       POSTGRES_USER: ${POSTGRES_ADMIN_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      # GeoServer reads the layer tables with this read-only role (the publisher creates
+      # it and grants SELECT on the layer tables only); it must not be the admin user.
+      GEOSERVER_DB_USER: ${GEOSERVER_DB_READER_USER:?set GEOSERVER_DB_READER_USER in .env}
+      GEOSERVER_DB_PASSWORD: ${GEOSERVER_DB_READER_PASSWORD:?set GEOSERVER_DB_READER_PASSWORD in .env}
       PUBLISHER_MANIFEST_PATH: /app/layer-manifest.json
       PC6_SOURCE_PATH: /data/alkmaar_energy_map.geojson
       PV_API_URL: http://pv-api:8000

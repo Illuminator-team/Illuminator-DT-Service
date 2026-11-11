@@ -21,6 +21,7 @@ from model_postgis import sync_model_layer
 from pc6 import Pc6Record, get_layer_config, load_manifest, load_pc6_records
 from postgis_sql import values_template
 from publication_scope import parse_publish_models
+from reader_role import ensure_reader_role, grant_reader_select
 from psycopg2.extras import execute_values
 from pv import (
     PV_PROPERTY_FIELDS,
@@ -186,6 +187,12 @@ DB_CONN = {
     "password": required_env("POSTGRES_PASSWORD"),
 }
 
+# GeoServer reads the layer tables with this read-only role, never with DB_CONN's user.
+GEOSERVER_DB_USER = required_env("GEOSERVER_DB_USER")
+GEOSERVER_DB_PASSWORD = required_env("GEOSERVER_DB_PASSWORD")
+if GEOSERVER_DB_USER == DB_CONN["user"]:
+    raise SystemExit("GEOSERVER_DB_USER must be a separate read-only role, not the publisher's user")
+
 PC6_TABLE = PC6_CONFIG["table"]
 PC6_LAYER = PC6_CONFIG["geoserver_layer"]
 PV_TABLE = PV_CONFIG["table"]
@@ -321,8 +328,8 @@ def datastore_xml() -> str:
         "host": DB_CONN["host"],
         "port": str(DB_CONN["port"]),
         "database": DB_CONN["dbname"],
-        "user": DB_CONN["user"],
-        "passwd": DB_CONN["password"],
+        "user": GEOSERVER_DB_USER,
+        "passwd": GEOSERVER_DB_PASSWORD,
         "dbtype": "postgis",
         "Expose primary keys": "true",
         "schema": "public",
@@ -364,6 +371,44 @@ def ensure_datastore() -> None:
     reset_response.raise_for_status()
     LOGGER.info("Reset GeoServer datastore connections after configuration update")
     LOGGER.info("Refreshed credentials for GeoServer datastore %s", DATASTORE)
+
+
+def reader_tables() -> list[str]:
+    tables = {layer["table"] for layer in MANIFEST["layers"] if layer.get("table")}
+    tables.add(SOLAR_TABLE)
+    return sorted(tables)
+
+
+def ensure_geoserver_reader() -> None:
+    with psycopg2.connect(**DB_CONN) as connection, connection.cursor() as cursor:
+        ensure_reader_role(cursor, GEOSERVER_DB_USER, GEOSERVER_DB_PASSWORD, DB_CONN["dbname"])
+    LOGGER.info("GeoServer reader role %s is read-only and up to date", GEOSERVER_DB_USER)
+
+
+def grant_reader_tables() -> None:
+    with psycopg2.connect(**DB_CONN) as connection, connection.cursor() as cursor:
+        missing = grant_reader_select(cursor, GEOSERVER_DB_USER, reader_tables())
+    if missing:
+        LOGGER.info("Layer tables not created yet (no grant needed): %s", ",".join(missing))
+
+
+def ensure_wfs_read_only() -> None:
+    """WFS transactions are never used; keep the service at BASIC (read-only)."""
+    current = geoserver_request("GET", "services/wfs/settings.json")
+    current.raise_for_status()
+    settings = current.json()
+    if settings.get("wfs", {}).get("serviceLevel") == "BASIC":
+        return
+    # Send the complete settings back with only serviceLevel changed: a partial body
+    # replaces nested blocks such as metadata instead of merging them.
+    settings["wfs"]["serviceLevel"] = "BASIC"
+    response = geoserver_request("PUT", "services/wfs/settings", json=settings)
+    response.raise_for_status()
+    check = geoserver_request("GET", "services/wfs/settings.json")
+    check.raise_for_status()
+    if check.json().get("wfs", {}).get("serviceLevel") != "BASIC":
+        raise RuntimeError("GeoServer did not accept WFS serviceLevel BASIC")
+    LOGGER.info("Set the GeoServer WFS service level to BASIC (read-only)")
 
 
 def ensure_feature_type(layer_name: str, title: str, srs: str) -> None:
@@ -907,8 +952,11 @@ def run() -> None:
 
     wait_for_postgres()
     wait_for_geoserver()
+    ensure_geoserver_reader()
+    grant_reader_tables()
     ensure_workspace()
     ensure_datastore()
+    ensure_wfs_read_only()
 
     if "pc6" in publish_models:
         publish_pc6()
@@ -927,6 +975,7 @@ def run() -> None:
 
     # This tutorial layer is internal platform state, not an independent model.
     create_solar_table()
+    grant_reader_tables()
     ensure_feature_type(SOLAR_LAYER, "Tutorial Solar Panel", "EPSG:4326")
     try:
         update_solar_layer()
@@ -1028,6 +1077,10 @@ def run() -> None:
             update_solar_layer()
         except psycopg2.Error:
             LOGGER.warning("Could not refresh tutorial solar point", exc_info=True)
+        try:
+            grant_reader_tables()  # a publication may have (re)created a table
+        except psycopg2.Error:
+            LOGGER.warning("Could not refresh the GeoServer reader grants", exc_info=True)
 
 
 if __name__ == "__main__":
