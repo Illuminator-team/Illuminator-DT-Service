@@ -81,11 +81,13 @@ GRID_LV_MV_REACH_CONFIG = get_layer_config(
 GRID_MV_HV_REACH_CONFIG = get_layer_config(
     MANIFEST, "layer:grid-model:mv-hv-transformer-reach"
 )
+GRID_CAPACITY_CONFIG = get_layer_config(MANIFEST, "layer:grid-model:capacity-limits")
 GRID_CONFIGS = {
     "grid_lines": GRID_LINES_CONFIG,
     "grid_transformers": GRID_TRANSFORMERS_CONFIG,
     "grid_lv_mv_transformer_reach": GRID_LV_MV_REACH_CONFIG,
     "grid_mv_hv_transformer_reach": GRID_MV_HV_REACH_CONFIG,
+    "grid_capacity_limits": GRID_CAPACITY_CONFIG,
 }
 WIND_CONFIG = get_layer_config(MANIFEST, "layer:wind-turbine-map:public-turbines")
 HEAT_CONFIGS = {
@@ -115,6 +117,7 @@ GRID_EXPECTED_CONTAINER_DIGEST = os.getenv(
     GRID_LINES_CONFIG["source"]["container_digest"],
 )
 GRID_EXPECTED_DATA_MODE = os.getenv("GRID_EXPECTED_DATA_MODE", "real_source")
+GRID_REQUIRE_CAPACITY = os.getenv("GRID_REQUIRE_CAPACITY", "true").strip().lower() not in {"0", "false", "no"}
 GRID_EXPORT_BBOX = bbox_env(
     "GRID_EXPORT_BBOX",
     GRID_LINES_CONFIG["source"]["production_selection"]["bbox"],
@@ -724,8 +727,12 @@ def publish_grid() -> GridArtifact:
         expected_model_version=GRID_LINES_CONFIG["model_version"],
         expected_contract_version=GRID_LINES_CONFIG["metadata_contract_version"],
         expected_data_mode=GRID_EXPECTED_DATA_MODE,
+        require_capacity=GRID_REQUIRE_CAPACITY,
     )
     for layer_id, config in GRID_CONFIGS.items():
+        if layer_id not in artifact.records_by_layer:
+            LOGGER.info("%s is not offered by this grid cache; not published", layer_id)
+            continue
         stats = sync_grid_layer(
             DB_CONN,
             table=GRID_TABLES[layer_id],

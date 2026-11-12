@@ -170,7 +170,8 @@ test('dashboard exposes fixed-year transformer controls and map highlighting', (
     );
     assert.match(script, /function loadTransformerProfiles\(\)/);
     assert.match(script, /function renderTransformerProfileChart\(target\)/);
-    assert.match(script, /function highlightTransformerProfileTarget\(target\)/);
+    assert.match(script, /async function highlightTransformerProfileTarget\(target\)/);
+    assert.match(script, /loadGridTransformersFeatureCollection/);
     assert.match(script, /transformerProfileHighlightLayer/);
     assert.match(script, /type: 'pc6'/);
     assert.match(script, /type: 'cbs_buurt'/);

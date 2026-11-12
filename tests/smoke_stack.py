@@ -22,8 +22,9 @@ CONSUMPTION_LAYER = "consumption_electricity_areas"
 PV_FIXTURE = "BU03610302"
 PV_RELEASE_COMMIT = "0d40dbfa6d30b96b01f1d4e633c13b42c654c1d0"
 PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:d35b73fc88dcdb959f8084ede6348e148039ab530282ac1e779a58f6129cf428"
-GRID_RELEASE_COMMIT = "3fe554a05b6609bb33b2f99bd26ba4701a55d971"
-GRID_CONTAINER_DIGEST = "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c"
+GRID_RELEASE_COMMIT = "9148f09372f843f0ee876121968be84aebfeae06"
+GRID_CONTAINER_DIGEST = "sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729"
+CONGESTION_GRID_REFERENCE_COMMIT = "3fe554a05b6609bb33b2f99bd26ba4701a55d971"
 GRID_BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
 WIND_FIXTURE = "wind-turbine-2811"
@@ -818,7 +819,7 @@ def check_ev_layer(client: SmokeClient) -> None:
 def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     root = client.get_json("/models/grid/")
     require(root.get("status") == "alive", "Grid model liveness failed")
-    require(root.get("api_version") == "2.4.0", "Grid API version drift")
+    require(root.get("api_version") == "2.9.0", "Grid API version drift")
 
     readiness = client.get_json("/models/grid/ready", timeout=120)
     require(readiness.get("status") == "ready", "Grid model is not ready")
@@ -833,13 +834,13 @@ def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     )
 
     metadata = client.get_json("/models/grid/metadata")
-    require(metadata.get("contract_version") == "2.4.0", "Grid contract drift")
+    require(metadata.get("contract_version") == "2.9.0", "Grid contract drift")
     require(
-        metadata.get("model", {}).get("version") == "2.1.0",
+        metadata.get("model", {}).get("version") == "2.7.0",
         "Grid model version drift",
     )
     require(
-        metadata.get("method", {}).get("version") == "2.1.0",
+        metadata.get("method", {}).get("version") == "2.7.0",
         "Grid method version drift",
     )
     release = metadata.get("release", {})
@@ -859,8 +860,9 @@ def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
 
     layers = client.get_json("/models/grid/layers")
     by_layer = {item["id"]: item for item in layers.get("layers", [])}
+    # Real-source caches also list grid_capacity_limits and grid_mv_attachment_points.
     require(
-        set(by_layer) == {
+        set(by_layer) >= {
             GRID_LINES_LAYER,
             GRID_TRANSFORMERS_LAYER,
             GRID_LV_MV_REACH_LAYER,
@@ -871,6 +873,12 @@ def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
     runtime_counts = {
         layer_id: layer["runtime"]["feature_count"]
         for layer_id, layer in by_layer.items()
+        if layer_id in {
+            GRID_LINES_LAYER,
+            GRID_TRANSFORMERS_LAYER,
+            GRID_LV_MV_REACH_LAYER,
+            GRID_MV_HV_REACH_LAYER,
+        }
     }
     for layer_id, feature_count in runtime_counts.items():
         require(feature_count > 0, f"{layer_id} runtime is empty")
@@ -1351,8 +1359,9 @@ def check_congestion_model_api(client: SmokeClient) -> None:
         provisional.get("api_contract_version") == "2.4.0"
         and provisional.get("hierarchy_contract_version")
         == "grid-feature-hierarchy-v2"
+        # The deployed congestion image still names the grid release it was built against.
         and provisional.get("reference_commit")
-        == GRID_RELEASE_COMMIT
+        == CONGESTION_GRID_REFERENCE_COMMIT
         and provisional.get("authority_status") == "provisional_estimated",
         "Congestion provisional Grid contract drift",
     )
@@ -1774,7 +1783,7 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
         ("layer:grid-model:lv-mv-transformer-reach", "rdp:grid_lv_mv_transformer_reach"),
     ):
         record = records[local_id]
-        require(record["model_version"] == "2.1.0", f"{local_id} version drift")
+        require(record["model_version"] == "2.7.0", f"{local_id} version drift")
         require(record["services"]["qualified_layer"] == qualified_layer, f"{local_id} layer drift")
     pv_record = records["layer:pv-map:capacity"]
     require(pv_record["model_version"] == "0.3.0", "PV registry version drift")

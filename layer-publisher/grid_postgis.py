@@ -4,6 +4,12 @@ from typing import Any
 
 import psycopg2
 from grid import (
+    GRID_CAPACITY_COUNT_FIELDS,
+    GRID_CAPACITY_FIELDS,
+    GRID_CAPACITY_LAYER_ID,
+    GRID_CAPACITY_MW_FIELDS,
+    GRID_CAPACITY_STATUS_FIELDS,
+    GRID_CAPACITY_TEXT_FIELDS,
     GRID_LAYER_FIELDS,
     GRID_LINE_FIELDS,
     GRID_REACH_FIELDS,
@@ -117,6 +123,21 @@ GRID_REACH_SQL_TYPES = {
     "evidence_status": "TEXT NOT NULL",
 }
 
+GRID_CAPACITY_SQL_TYPES = {
+    **GRID_COMMON_SQL_TYPES,
+    "pc6_id": "TEXT UNIQUE NOT NULL",
+    "provider_id": "TEXT NOT NULL",
+    "source_id": "TEXT NOT NULL",
+    "grid_operator_type": "TEXT NOT NULL",
+    "assignment_status": "TEXT NOT NULL CHECK (assignment_status IN ('available', 'unavailable'))",
+    **{field: "TEXT" for field in GRID_CAPACITY_TEXT_FIELDS},
+    **{
+        field: f"DOUBLE PRECISION CHECK ({field} >= 0)"
+        for field in (*GRID_CAPACITY_MW_FIELDS, *GRID_CAPACITY_STATUS_FIELDS)
+    },
+    **{field: f"INTEGER CHECK ({field} >= 0)" for field in GRID_CAPACITY_COUNT_FIELDS},
+}
+
 GRID_LAYER_SQL = {
     "grid_lines": {
         "fields": GRID_LINE_FIELDS,
@@ -139,6 +160,12 @@ GRID_LAYER_SQL = {
     "grid_mv_hv_transformer_reach": {
         "fields": GRID_REACH_FIELDS,
         "types": GRID_REACH_SQL_TYPES,
+        "geometry_type": "MultiPolygon",
+        "template": values_template,
+    },
+    GRID_CAPACITY_LAYER_ID: {
+        "fields": GRID_CAPACITY_FIELDS,
+        "types": GRID_CAPACITY_SQL_TYPES,
         "geometry_type": "MultiPolygon",
         "template": values_template,
     },

@@ -129,37 +129,31 @@ test('keeps congestion controls outside layer-specific details', () => {
     assert.match(script, /function updateConsumptionSidePanel\(prop\)/);
 });
 
-test('loads grid lines, transformers, and both PC6 reach maps as independent GeoServer layers', async () => {
+test('loads the voedingsgebied map and the MV lines as independent GeoServer layers', async () => {
     const calls = [];
     const payload = collection({
-        component_id: 'grid-line-test',
-        datacompleetheid: 2
+        component_id: 'grid-capacity-limits-pc6-1811AL',
+        datacompleetheid: 3
     });
     const fetchImpl = async (url) => {
         calls.push(url);
         return response(true, 200, payload);
     };
 
-    const lines = await mapData.loadGridLinesFeatureCollection(fetchImpl);
-    const transformers = await mapData.loadGridTransformersFeatureCollection(fetchImpl);
-    const lvMvReach = await mapData.loadGridLvMvReachFeatureCollection(fetchImpl);
-    const reach = await mapData.loadGridMvHvReachFeatureCollection(fetchImpl);
+    const capacity = await mapData.loadGridCapacityFeatureCollection(fetchImpl);
+    const mvLines = await mapData.loadGridMvLinesFeatureCollection(fetchImpl);
 
-    assert.equal(lines.source, 'geoserver_wfs');
-    assert.equal(transformers.source, 'geoserver_wfs');
-    assert.equal(reach.source, 'geoserver_wfs');
-    assert.equal(lvMvReach.source, 'geoserver_wfs');
-    assert.deepEqual(calls, [
-        mapData.GRID_LINES_WFS_URL,
-        mapData.GRID_TRANSFORMERS_WFS_URL,
-        mapData.GRID_LV_MV_REACH_WFS_URL,
-        mapData.GRID_MV_HV_REACH_WFS_URL
-    ]);
+    assert.equal(capacity.source, 'geoserver_wfs');
+    assert.equal(mvLines.source, 'geoserver_wfs');
+    assert.deepEqual(calls, [mapData.GRID_CAPACITY_WFS_URL, mapData.GRID_MV_LINES_WFS_URL]);
+    assert.match(mapData.GRID_CAPACITY_WFS_URL, /typeNames=grid_capacity_limits&/);
+    // Only MV lines are downloaded; GeoServer filters them.
+    assert.match(mapData.GRID_MV_LINES_WFS_URL, /typeNames=grid_lines&.*CQL_FILTER=voltage_level%3D%27mv%27$/);
 });
 
 test('does not substitute another layer when a grid WFS request fails', async () => {
     await assert.rejects(
-        () => mapData.loadGridLinesFeatureCollection(
+        () => mapData.loadGridCapacityFeatureCollection(
             async () => response(false, 503, {})
         ),
         /HTTP 503/
@@ -457,20 +451,16 @@ test('grid details leave the persistent congestion controls in place', () => {
     const script = fs.readFileSync(path.join(frontendDirectory, 'script.js'), 'utf8');
 
     assert.match(html, /id="r-grid-network"/);
-    assert.match(html, /id="grid-lv-lines"/);
+    assert.match(html, /id="grid-capacity-areas"/);
     assert.match(html, /id="grid-mv-lines"/);
-    assert.match(html, /id="grid-hv-lines"/);
-    assert.match(html, /id="grid-lv-mv-transformers"/);
-    assert.match(html, /id="grid-mv-hv-transformers"/);
-    assert.match(html, /id="grid-lv-mv-reach"/);
-    assert.match(html, /id="grid-mv-hv-reach"/);
+    for (const removed of ['grid-lv-lines', 'grid-hv-lines', 'grid-lv-mv-transformers', 'grid-mv-hv-transformers', 'grid-lv-mv-reach', 'grid-mv-hv-reach']) {
+        assert.doesNotMatch(html, new RegExp(`id="${removed}"`));
+    }
     assert.match(script, /function updateGridLineSidePanel\(prop\)/);
-    assert.match(script, /function updateGridTransformerSidePanel\(prop\)/);
-    assert.match(script, /function updateGridReachSidePanel\(prop, level\)/);
-    assert.match(script, /ranked_shares_json/);
-    assert.doesNotMatch(script, /COARSE MODEL-ESTIMATED REACH/);
+    assert.match(script, /function updateGridCapacitySidePanel\(prop\)/);
     assert.match(script, /function selectScenarioTargetByPc6\(pc6Id\)/);
-    assert.match(script, /updateGridReachSidePanel[\s\S]{0,250}selectScenarioTargetByPc6/);
+    // Clicking a voedingsgebied still selects the PC6 for the transformer-profile tool.
+    assert.match(script, /updateGridCapacitySidePanel\(prop\) \{\s*selectScenarioTargetByPc6/);
     assert.match(script, /function applyGridVisibility\(fit = false\)/);
     assert.match(html, /id="r-wind-turbines"/);
     assert.match(html, /id="r-ev-chargers"/);
@@ -478,7 +468,6 @@ test('grid details leave the persistent congestion controls in place', () => {
     assert.match(html, /id="heat-visibility"/);
     mapData.HEAT_LAYER_IDS.forEach((layerId) => assert.match(html, new RegExp(layerId)));
     assert.match(script, /function updateGridLineSidePanel\(prop\)/);
-    assert.match(script, /function updateGridTransformerSidePanel\(prop\)/);
     assert.match(script, /function updateWindTurbineSidePanel\(prop\)/);
     assert.match(script, /function updateEvSidePanel\(prop\)/);
     assert.match(script, /function updateHeatSidePanel\(layerId, prop\)/);

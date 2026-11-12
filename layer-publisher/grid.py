@@ -123,12 +123,58 @@ GRID_REACH_FIELDS = (
     "evidence_status",
 )
 
+# EDSN capaciteitskaart per PC6 (voedingsgebied and transport capacity), passed
+# through by the grid model. Exported in its own run: a run takes at most four layers.
+GRID_CAPACITY_LAYER_ID = "grid_capacity_limits"
+GRID_CAPACITY_QUALITY_RULE = "datacompleetheid-grid-capacity-v1"
+GRID_CAPACITY_DIRECTIONS = ("withdrawal", "injection")
+GRID_CAPACITY_MW_FIELDS = tuple(
+    f"{prefix}_{direction}_mw"
+    for prefix in (
+        "existing_transport_capacity",
+        "required_transport_capacity",
+        "queue",
+    )
+    for direction in GRID_CAPACITY_DIRECTIONS
+)
+GRID_CAPACITY_COUNT_FIELDS = tuple(
+    f"unique_requests_{direction}" for direction in GRID_CAPACITY_DIRECTIONS
+)
+GRID_CAPACITY_STATUS_FIELDS = tuple(
+    f"tennet_{direction}_status_max" for direction in GRID_CAPACITY_DIRECTIONS
+)
+GRID_CAPACITY_TEXT_FIELDS = (
+    "rnb",
+    "congestion_url",
+    *(
+        f"{direction}_service_area_{part}"
+        for direction in GRID_CAPACITY_DIRECTIONS
+        for part in ("id", "name")
+    ),
+    *(f"year_solved_{direction}" for direction in GRID_CAPACITY_DIRECTIONS),
+    *(f"tennet_year_solved_{direction}" for direction in GRID_CAPACITY_DIRECTIONS),
+)
+GRID_CAPACITY_FIELDS = (
+    *GRID_COMMON_FIELDS,
+    "pc6_id",
+    "provider_id",
+    "source_id",
+    "grid_operator_type",
+    "assignment_status",
+    *GRID_CAPACITY_TEXT_FIELDS,
+    *GRID_CAPACITY_MW_FIELDS,
+    *GRID_CAPACITY_COUNT_FIELDS,
+    *GRID_CAPACITY_STATUS_FIELDS,
+)
+
 GRID_LAYER_FIELDS = {
     "grid_lines": GRID_LINE_FIELDS,
     "grid_transformers": GRID_TRANSFORMER_FIELDS,
     "grid_lv_mv_transformer_reach": GRID_REACH_FIELDS,
     "grid_mv_hv_transformer_reach": GRID_REACH_FIELDS,
+    GRID_CAPACITY_LAYER_ID: GRID_CAPACITY_FIELDS,
 }
+GRID_PUBLISHED_LAYER_IDS = (*GRID_LAYER_IDS, GRID_CAPACITY_LAYER_ID)
 
 GRID_RUN_PROVENANCE_FIELDS = frozenset(
     {
@@ -281,6 +327,7 @@ def _validate_geometry(
         "grid_transformers": {"Point"},
         "grid_lv_mv_transformer_reach": {"Polygon", "MultiPolygon"},
         "grid_mv_hv_transformer_reach": {"Polygon", "MultiPolygon"},
+        GRID_CAPACITY_LAYER_ID: {"Polygon", "MultiPolygon"},
     }
     allowed = allowed_by_layer[layer_id]
     if document.get("type") not in allowed:
@@ -313,6 +360,7 @@ def _validate_common_properties(
     expected_model_version: str,
     expected_method_version: str,
     expected_grid_data_version: str,
+    quality_rule: str = GRID_QUALITY_RULE,
 ) -> dict[str, Any]:
     normalized = dict(properties)
     if properties.get("feature_id") != feature_id or properties.get("component_id") != feature_id:
@@ -365,7 +413,7 @@ def _validate_common_properties(
     score = properties.get("datacompleetheid")
     if isinstance(score, bool) or not isinstance(score, int) or not 0 <= score <= 3:
         raise ValueError(f"{feature_id}: datacompleetheid must be an integer from 0 to 3")
-    if properties.get("datacompleetheid_rule_version") != GRID_QUALITY_RULE:
+    if properties.get("datacompleetheid_rule_version") != quality_rule:
         raise ValueError(f"{feature_id}: datacompleetheid rule drift")
     reasons = properties.get("datacompleetheid_reason_codes")
     if not isinstance(reasons, list) or not reasons or not all(
@@ -373,6 +421,57 @@ def _validate_common_properties(
     ):
         raise ValueError(f"{feature_id}: invalid datacompleetheid reason codes")
     normalized["datacompleetheid_reason_codes"] = reasons
+    return normalized
+
+
+def _validate_capacity_properties(
+    properties: dict[str, Any], feature_id: str
+) -> dict[str, Any]:
+    if properties.get("component_type") != "capacity_limits":
+        raise ValueError(f"{feature_id}: capacity component type drift")
+    if properties.get("voltage_level") != "mv":
+        raise ValueError(f"{feature_id}: capacity voltage level drift")
+    pc6_id = _string(properties, "pc6_id", feature_id)
+    if not re.fullmatch(r"[1-9][0-9]{3}[A-Z]{2}", pc6_id):
+        raise ValueError(f"{feature_id}: invalid normalized PC6 identifier")
+    if feature_id != f"grid-capacity-limits-pc6-{pc6_id}":
+        raise ValueError(f"{feature_id}: PC6 capacity identity drift")
+    if (
+        properties.get("provider_id") != "edsn"
+        or properties.get("source_id") != "edsn-capaciteitskaart-open-data"
+        or properties.get("grid_operator_type") != "RNB"
+    ):
+        raise ValueError(f"{feature_id}: capaciteitskaart source drift")
+
+    normalized: dict[str, Any] = {"pc6_id": pc6_id}
+    for field in GRID_CAPACITY_TEXT_FIELDS:
+        normalized[field] = _nullable_string(properties.get(field), field, feature_id)
+    for field in (*GRID_CAPACITY_MW_FIELDS, *GRID_CAPACITY_STATUS_FIELDS):
+        normalized[field] = _number(properties.get(field), field, feature_id, nullable=True)
+    for field in GRID_CAPACITY_COUNT_FIELDS:
+        value = properties.get(field)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            raise ValueError(f"{feature_id}: {field} must be null or a non-negative integer")
+        normalized[field] = value
+
+    # A PC6 without a published voedingsgebied (EDSN answers "no service area")
+    # is kept as an explicit unavailable row, so the map can show it as unknown.
+    status = properties.get("assignment_status")
+    areas = [
+        normalized[f"{direction}_service_area_id"]
+        for direction in GRID_CAPACITY_DIRECTIONS
+    ]
+    if status == "available":
+        if all(area is None for area in areas):
+            raise ValueError(f"{feature_id}: available capacity row has no voedingsgebied")
+    elif status == "unavailable":
+        if any(area is not None for area in areas):
+            raise ValueError(f"{feature_id}: unavailable capacity row has a voedingsgebied")
+    else:
+        raise ValueError(f"{feature_id}: capacity assignment status drift")
+    normalized["assignment_status"] = status
     return normalized
 
 
@@ -385,7 +484,7 @@ def load_grid_records(
     expected_grid_data_version: str,
     expected_output_id: str,
 ) -> list[GridRecord]:
-    if layer_id not in GRID_LAYER_IDS:
+    if layer_id not in GRID_PUBLISHED_LAYER_IDS:
         raise ValueError(f"Unsupported grid layer: {layer_id}")
     document = _mapping(collection, f"{layer_id} GeoJSON")
     if document.get("type") != "FeatureCollection":
@@ -417,11 +516,18 @@ def load_grid_records(
             expected_model_version=expected_model_version,
             expected_method_version=expected_method_version,
             expected_grid_data_version=expected_grid_data_version,
+            quality_rule=(
+                GRID_CAPACITY_QUALITY_RULE
+                if layer_id == GRID_CAPACITY_LAYER_ID
+                else GRID_QUALITY_RULE
+            ),
         )
         if normalized["output_id"] != expected_output_id:
             raise ValueError(f"{feature_id}: output identity drift")
 
-        if layer_id == "grid_lines":
+        if layer_id == GRID_CAPACITY_LAYER_ID:
+            normalized.update(_validate_capacity_properties(properties, feature_id))
+        elif layer_id == "grid_lines":
             normalized["model_component_name"] = _nullable_string(
                 properties.get("model_component_name"), "model_component_name", feature_id
             )
@@ -781,6 +887,7 @@ def fetch_grid_artifact(
     expected_model_version: str,
     expected_contract_version: str,
     expected_data_mode: str,
+    require_capacity: bool = True,
     session: Any = requests,
     timeout: int = 1800,
 ) -> GridArtifact:
@@ -823,111 +930,124 @@ def fetch_grid_artifact(
     layers = catalog.get("layers")
     # Newer grid models add layers (grid_mv_attachment_points, grid_capacity_limits);
     # the publisher only needs its own layers to be present, and ignores the rest.
-    if not isinstance(layers, list) or not set(GRID_LAYER_IDS) <= {item.get("id") for item in layers}:
+    if not isinstance(layers, list):
+        raise ValueError("GET /layers: grid layer set drift")
+    offered = {item.get("id") for item in layers}
+    # A grid cache built without the capaciteitskaart (only fixture builds) does
+    # not list grid_capacity_limits; production requires it.
+    wanted = set(GRID_LAYER_IDS)
+    if require_capacity or GRID_CAPACITY_LAYER_ID in offered:
+        wanted.add(GRID_CAPACITY_LAYER_ID)
+    if not wanted <= offered:
         raise ValueError("GET /layers: grid layer set drift")
     for layer in layers:
-        if layer.get("id") not in GRID_LAYER_IDS:
+        if layer.get("id") not in wanted:
             continue
         runtime = _mapping(layer.get("runtime"), f"GET /layers {layer.get('id')} runtime")
         count = runtime.get("feature_count")
         if isinstance(count, bool) or not isinstance(count, int) or count < 1:
             raise ValueError(f"GET /layers: {layer.get('id')} is empty")
 
-    run = _json_response(
-        _request(
-            session,
-            "POST",
-            f"{base_url}/runs",
-            timeout=timeout,
-            json={
-                "operation": "export_layers",
-                "selection": {"type": "bbox", "bbox": bbox},
-                "layer_ids": list(GRID_LAYER_IDS),
-                "voltage_levels": [],
-                "component_ids": [],
-            },
-        ),
-        "POST /runs",
-    )
-    if run.get("status") != "completed":
-        raise RuntimeError("POST /runs did not complete")
-    run_id = _string(run, "run_id", "POST /runs")
-    outputs = run.get("outputs")
-    if not isinstance(outputs, list) or {item.get("layer_id") for item in outputs} != set(GRID_LAYER_IDS):
-        raise ValueError("POST /runs must return all grid layer outputs")
-
-    stored_run = _json_response(
-        _request(session, "GET", f"{base_url}/runs/{run_id}", timeout=30),
-        "GET run",
-    )
-    if stored_run != run:
-        raise ValueError("GET run does not match the completed run record")
-
     records_by_layer: dict[str, list[GridRecord]] = {}
     output_ids: dict[str, str] = {}
-    for summary in outputs:
-        layer_id = summary["layer_id"]
-        output_id = _string(summary, "output_id", f"POST /runs {layer_id}")
-        output = _json_response(
-            _request(session, "GET", f"{base_url}/outputs/{output_id}", timeout=30),
-            f"GET output {layer_id}",
+    # One run per batch: a run accepts at most four layers.
+    batches = [GRID_LAYER_IDS]
+    if GRID_CAPACITY_LAYER_ID in wanted:
+        batches.append((GRID_CAPACITY_LAYER_ID,))
+    for batch in batches:
+        run = _json_response(
+            _request(
+                session,
+                "POST",
+                f"{base_url}/runs",
+                timeout=timeout,
+                json={
+                    "operation": "export_layers",
+                    "selection": {"type": "bbox", "bbox": bbox},
+                    "layer_ids": list(batch),
+                    "voltage_levels": [],
+                    "component_ids": [],
+                },
+            ),
+            "POST /runs",
         )
-        if output.get("layer_id") != layer_id or output.get("media_type") != GRID_MEDIA_TYPE:
-            raise ValueError(f"GET output: {layer_id} identity or media type drift")
-        links = _mapping(output.get("links"), f"GET output {layer_id} links")
-        data_url = _same_origin_url(
-            base_url, _string(links, "data", f"GET output {layer_id} links")
+        if run.get("status") != "completed":
+            raise RuntimeError("POST /runs did not complete")
+        run_id = _string(run, "run_id", "POST /runs")
+        outputs = run.get("outputs")
+        if not isinstance(outputs, list) or {item.get("layer_id") for item in outputs} != set(batch):
+            raise ValueError("POST /runs must return all grid layer outputs")
+
+        stored_run = _json_response(
+            _request(session, "GET", f"{base_url}/runs/{run_id}", timeout=30),
+            "GET run",
         )
-        data_response = _request(session, "GET", data_url, timeout=timeout)
-        content = data_response.content
-        if len(content) != output.get("byte_size"):
-            raise ValueError(f"{layer_id} output byte size does not match its record")
-        if hashlib.sha256(content).hexdigest() != output.get("sha256"):
-            raise ValueError(f"{layer_id} output SHA-256 does not match its record")
-        if data_response.headers.get("content-type", "").split(";", 1)[0] != GRID_MEDIA_TYPE:
-            raise ValueError(f"{layer_id} output response media type drift")
-        try:
-            collection = json.loads(content)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"{layer_id} output is not valid UTF-8 GeoJSON") from exc
-        # Model 2.7 reports a PC6 whose MV/HV station cannot be determined as an
-        # explicit `assignment_status=unavailable` row with no dominant
-        # transformer. The published table has one station per PC6, so such a
-        # PC6 is left out (absent = no answer) rather than stored with an empty
-        # station; the count is logged and checked against the output.
-        skipped_unavailable = 0
-        if layer_id == "grid_mv_hv_transformer_reach" and isinstance(collection, dict):
-            features = collection.get("features")
-            if isinstance(features, list):
-                kept = [
-                    feature for feature in features
-                    if not (
-                        isinstance(feature, dict)
-                        and isinstance(feature.get("properties"), dict)
-                        and feature["properties"].get("assignment_status") == "unavailable"
-                    )
-                ]
-                skipped_unavailable = len(features) - len(kept)
-                if skipped_unavailable:
-                    collection = {**collection, "features": kept}
-                    LOGGER.warning(
-                        "%s: %s of %s PC6 areas have assignment_status=unavailable "
-                        "and are not published",
-                        layer_id, skipped_unavailable, len(features),
-                    )
-        records = load_grid_records(
-            collection,
-            layer_id=layer_id,
-            expected_model_version=expected_model_version,
-            expected_method_version=method_version,
-            expected_grid_data_version=grid_data_version,
-            expected_output_id=output_id,
-        )
-        total = len(records) + skipped_unavailable
-        if total != output.get("feature_count") or total != summary.get("feature_count"):
-            raise ValueError(f"{layer_id} feature count does not match its records")
-        records_by_layer[layer_id] = records
-        output_ids[layer_id] = output_id
+        if stored_run != run:
+            raise ValueError("GET run does not match the completed run record")
+
+        for summary in outputs:
+            layer_id = summary["layer_id"]
+            output_id = _string(summary, "output_id", f"POST /runs {layer_id}")
+            output = _json_response(
+                _request(session, "GET", f"{base_url}/outputs/{output_id}", timeout=30),
+                f"GET output {layer_id}",
+            )
+            if output.get("layer_id") != layer_id or output.get("media_type") != GRID_MEDIA_TYPE:
+                raise ValueError(f"GET output: {layer_id} identity or media type drift")
+            links = _mapping(output.get("links"), f"GET output {layer_id} links")
+            data_url = _same_origin_url(
+                base_url, _string(links, "data", f"GET output {layer_id} links")
+            )
+            data_response = _request(session, "GET", data_url, timeout=timeout)
+            content = data_response.content
+            if len(content) != output.get("byte_size"):
+                raise ValueError(f"{layer_id} output byte size does not match its record")
+            if hashlib.sha256(content).hexdigest() != output.get("sha256"):
+                raise ValueError(f"{layer_id} output SHA-256 does not match its record")
+            if data_response.headers.get("content-type", "").split(";", 1)[0] != GRID_MEDIA_TYPE:
+                raise ValueError(f"{layer_id} output response media type drift")
+            try:
+                collection = json.loads(content)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"{layer_id} output is not valid UTF-8 GeoJSON") from exc
+            # Model 2.7 reports a PC6 whose MV/HV station cannot be determined as an
+            # explicit `assignment_status=unavailable` row with no dominant
+            # transformer. The published table has one station per PC6, so such a
+            # PC6 is left out (absent = no answer) rather than stored with an empty
+            # station; the count is logged and checked against the output.
+            skipped_unavailable = 0
+            if layer_id == "grid_mv_hv_transformer_reach" and isinstance(collection, dict):
+                features = collection.get("features")
+                if isinstance(features, list):
+                    kept = [
+                        feature for feature in features
+                        if not (
+                            isinstance(feature, dict)
+                            and isinstance(feature.get("properties"), dict)
+                            and feature["properties"].get("assignment_status") == "unavailable"
+                        )
+                    ]
+                    skipped_unavailable = len(features) - len(kept)
+                    if skipped_unavailable:
+                        collection = {**collection, "features": kept}
+                        LOGGER.warning(
+                            "%s: %s of %s PC6 areas have assignment_status=unavailable "
+                            "and are not published",
+                            layer_id, skipped_unavailable, len(features),
+                        )
+            records = load_grid_records(
+                collection,
+                layer_id=layer_id,
+                expected_model_version=expected_model_version,
+                expected_method_version=method_version,
+                expected_grid_data_version=grid_data_version,
+                expected_output_id=output_id,
+            )
+            total = len(records) + skipped_unavailable
+            if total != output.get("feature_count") or total != summary.get("feature_count"):
+                raise ValueError(f"{layer_id} feature count does not match its records")
+            records_by_layer[layer_id] = records
+            output_ids[layer_id] = output_id
 
     return GridArtifact(
         records_by_layer=records_by_layer,

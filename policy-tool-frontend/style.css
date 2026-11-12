@@ -383,14 +383,11 @@ input[type="range"].side-slider {
     height: 10px;
 }
 
-.area-swatch-lv-mv {
-    border: 1px solid #7a4c9f;
-    background: rgba(122, 76, 159, 0.2);
-}
-
-.area-swatch-mv-hv {
-    border: 1px solid #16845b;
-    background: rgba(22, 132, 91, 0.2);
+/* One colour per voedingsgebied on the map, so the swatch shows several. */
+.area-swatch-capacity {
+    border: 1px solid #4b5563;
+    background: linear-gradient(90deg, #16845b 0 33%, #9b5d18 33% 66%, #227ca3 66%);
+    opacity: 0.6;
 }
 
 .heat-neighbourhood-swatch {
