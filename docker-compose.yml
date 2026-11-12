@@ -8,7 +8,7 @@ x-grid-crosswalk-image: &grid-crosswalk-image
   image: ghcr.io/jortgroen/liander-grid-crosswalk@sha256:f17e0a27f665a8885aa1f527359c22889ce5d2e3ead14dc4eb5d0e582154774e
 
 x-congestion-image: &congestion-image
-  image: ghcr.io/jortgroen/congestion-backend@sha256:d44df2b778508747fa2133740130fa97692a1198e5d91f0e14e0474f671eceea
+  image: ghcr.io/jortgroen/congestion-backend@sha256:575dac643e2527a6b6e19346b0ea9e4d1f1d00ddbbe0257d7b21dd71945946de
 
 x-wind-image: &wind-image
   image: ghcr.io/jortgroen/wind-turbine-map-api@sha256:66f97333bea9ab3cce5d6704abee4a408086cf75ed55f05e86382decadc51419

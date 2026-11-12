@@ -24,7 +24,7 @@ PV_RELEASE_COMMIT = "0d40dbfa6d30b96b01f1d4e633c13b42c654c1d0"
 PV_CONTAINER_IMAGE = "ghcr.io/jortgroen/pv-map-api@sha256:d35b73fc88dcdb959f8084ede6348e148039ab530282ac1e779a58f6129cf428"
 GRID_RELEASE_COMMIT = "9148f09372f843f0ee876121968be84aebfeae06"
 GRID_CONTAINER_DIGEST = "sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729"
-CONGESTION_GRID_REFERENCE_COMMIT = "3fe554a05b6609bb33b2f99bd26ba4701a55d971"
+CONGESTION_GRID_REFERENCE_COMMIT = "368e823af44423110798171046eeb34e3a571f07"
 GRID_BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 GRID_TRANSFORMER_FIXTURE = "grid-transformer-trafo_MV_LV_1157"
 WIND_FIXTURE = "wind-turbine-2811"
@@ -1356,14 +1356,22 @@ def check_congestion_model_api(client: SmokeClient) -> None:
         "Congestion provisional Grid policy drift",
     )
     require(
-        provisional.get("api_contract_version") == "2.4.0"
+        provisional.get("api_contract_version") == "2.5.0"
         and provisional.get("hierarchy_contract_version")
         == "grid-feature-hierarchy-v2"
-        # The deployed congestion image still names the grid release it was built against.
         and provisional.get("reference_commit")
         == CONGESTION_GRID_REFERENCE_COMMIT
         and provisional.get("authority_status") == "provisional_estimated",
         "Congestion provisional Grid contract drift",
+    )
+    # Congestion must accept the deployed grid release.
+    require(
+        any(
+            release.get("reference_commit") == GRID_RELEASE_COMMIT
+            and release.get("api_contract_version") == "2.9.0"
+            for release in provisional.get("accepted_grid_releases", [])
+        ),
+        "Congestion does not accept the deployed Grid release",
     )
     require(
         "two_stage_authoritative" in metadata.get("aggregation_modes", []),
