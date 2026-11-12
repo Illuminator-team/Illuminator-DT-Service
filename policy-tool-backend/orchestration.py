@@ -419,7 +419,7 @@ class ModelApiClient:
             != PV_METADATA_CONTRACT_VERSION
             or run.get("release_commit") != expected_release_commit
             or run.get("container_image") != expected_container_image
-            or run.get("input") != request
+            or not pv_run_input_matches(run.get("input"), request)
             or run.get("errors") != []
             or not isinstance(run.get("run_id"), str)
             or not re.fullmatch(r"[0-9a-f]{32}", run["run_id"])
@@ -480,7 +480,7 @@ class ModelApiClient:
             raise self._contract_error("PV profile identity is missing")
         profile_version = records[0].get("profile_version")
         if not isinstance(profile_version, str) or not re.fullmatch(
-            r"1\.0\.0\+[0-9a-f]{16}", profile_version
+            r"1\.1\.0\+[0-9a-f]{16}", profile_version
         ):
             raise self._contract_error("PV profile version is invalid")
 
@@ -921,6 +921,18 @@ class TransformerProfileOrchestrator:
             },
             "result": result,
         }
+
+
+def pv_run_input_matches(echo: Any, request: Mapping[str, Any]) -> bool:
+    """PV echoes the request; newer PV versions add empty gemeente fields to the selection."""
+    if not isinstance(echo, dict) or not isinstance(echo.get("spatial_selection"), dict):
+        return False
+    selection = {
+        key: value
+        for key, value in echo["spatial_selection"].items()
+        if not (key in ("gemeente_code", "gemeente_name") and value is None)
+    }
+    return {**echo, "spatial_selection": selection} == request
 
 
 def normalize_pc6(value: str) -> str:

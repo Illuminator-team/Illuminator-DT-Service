@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "policy-tool-backend"))
 
 from orchestration import (  # noqa: E402
+    pv_run_input_matches,
     ModelApiClient,
     OrchestrationError,
     TransformerProfileOrchestrator,
@@ -29,16 +30,16 @@ CONSUMPTION_OUTPUT_ID = "out_66666666666646668666666666666666"
 CONSUMPTION_LAYER_VERSION = "7" * 64
 CONSUMPTION_PROFILE_VERSION = "8" * 64
 CONSUMPTION_RELEASE_COMMIT = "c1baad4e87e189e495c2ec40654b79c67ed4acab"
-PV_RELEASE_COMMIT = "357d7a9ede79a9da775649bed1069c196a945d39"
+PV_RELEASE_COMMIT = "0d40dbfa6d30b96b01f1d4e633c13b42c654c1d0"
 PV_IMAGE = (
     "ghcr.io/jortgroen/pv-map-api@sha256:"
-    "58f6c3a9c17bedf9d5be07f21a38399d19061bb2bb3d1f34a19cbef0660a8c72"
+    "d35b73fc88dcdb959f8084ede6348e148039ab530282ac1e779a58f6129cf428"
 )
 PV_CAPACITY_OUTPUT_ID = "77777777777747778777777777777777"
 PV_RUN_ID = "88888888888848888888888888888888"
 PV_OUTPUT_ID = "99999999999949998999999999999999"
 PV_PROFILE_ID = "pv_production_BU03610302_koersvaste_middenweg_2035"
-PV_PROFILE_VERSION = "1.0.0+0123456789abcdef"
+PV_PROFILE_VERSION = "1.1.0+0123456789abcdef"
 CONGESTION_IMAGE = (
     "ghcr.io/jortgroen/congestion-backend@sha256:"
     "d44df2b778508747fa2133740130fa97692a1198e5d91f0e14e0474f671eceea"
@@ -905,6 +906,31 @@ class TransformerProfileOrchestrationTest(unittest.TestCase):
             pv_expected_container_image=PV_IMAGE,
             pv_expected_model_version="0.3.0",
         )
+
+
+class PvRunInputMatchesTests(unittest.TestCase):
+    REQUEST = {
+        "output_type": "production_profile",
+        "spatial_selection": {"type": "cbs_buurt", "feature_ids": ["BU03610100"]},
+        "parameters": {},
+    }
+
+    def test_accepts_exact_echo(self):
+        self.assertTrue(pv_run_input_matches(copy.deepcopy(self.REQUEST), self.REQUEST))
+
+    def test_accepts_empty_gemeente_fields(self):
+        echo = copy.deepcopy(self.REQUEST)
+        echo["spatial_selection"].update(gemeente_code=None, gemeente_name=None)
+        self.assertTrue(pv_run_input_matches(echo, self.REQUEST))
+
+    def test_rejects_set_gemeente_or_other_drift(self):
+        echo = copy.deepcopy(self.REQUEST)
+        echo["spatial_selection"]["gemeente_code"] = "GM0361"
+        self.assertFalse(pv_run_input_matches(echo, self.REQUEST))
+        echo = copy.deepcopy(self.REQUEST)
+        echo["spatial_selection"]["feature_ids"] = ["BU03610101"]
+        self.assertFalse(pv_run_input_matches(echo, self.REQUEST))
+        self.assertFalse(pv_run_input_matches(None, self.REQUEST))
 
 
 if __name__ == "__main__":
