@@ -5,14 +5,18 @@ import urllib.parse
 import urllib.request
 
 
+# Grid 9148f09 (model 2.7) also lists grid_capacity_limits, grid_pc6_voedingsgebied
+# and grid_mv_attachment_points; these four must be present and filled.
 GRID_LAYERS = {
     "grid_lv_mv_transformer_reach",
     "grid_lines",
     "grid_transformers",
     "grid_mv_hv_transformer_reach",
 }
+# The eight MV/HV roots of the 9148f09 build from the 18 Aug 2026 snapshot.
 EXPECTED_STATIONS = {
     "OS ALKMAAR",
+    "OS DE WEEL",
     "OS HEERHUGOWAARD",
     "OS HEILOO",
     "OS OUDORP",
@@ -153,7 +157,7 @@ def check(base_url: str) -> None:
 
     catalog = client.get_json("/models/grid/layers")
     layers = {item["id"]: item for item in catalog.get("layers", [])}
-    require(set(layers) == GRID_LAYERS, "Grid API layer contract drift")
+    require(set(layers) >= GRID_LAYERS, "Grid API layer contract drift")
     for layer_id in GRID_LAYERS:
         count = layers[layer_id].get("runtime", {}).get("feature_count", 0)
         require(count > 0, f"{layer_id} is empty")
@@ -187,8 +191,8 @@ def check(base_url: str) -> None:
         cql_filter="transformer_type='mv_hv'",
     )
     require(
-        int(transformers.get("numberMatched", 0)) == 7,
-        "Published Grid must contain exactly seven MV/HV transformer roots",
+        int(transformers.get("numberMatched", 0)) == len(EXPECTED_STATIONS),
+        f"Published Grid must contain exactly {len(EXPECTED_STATIONS)} MV/HV transformer roots",
     )
     names = {
         str(feature.get("properties", {}).get("source_station_name", "")).upper()
@@ -205,7 +209,23 @@ def check(base_url: str) -> None:
         lv_mv_count == mv_hv_count,
         "LV/MV and MV/HV reach layers cover different PC6 counts",
     )
-    sample_pc6 = validate_reach_feature(lv_mv["features"][0], "lv_mv")
+    # Sample a PC6 that both levels assign; unavailable MV/HV rows (no station) have no shares.
+    mv_hv_assigned = wfs_collection(
+        client,
+        "grid_mv_hv_transformer_reach",
+        count=1,
+        cql_filter="assignment_status='available'",
+    )
+    require(mv_hv_assigned.get("features"), "MV/HV reach has no assigned PC6")
+    sample_pc6 = mv_hv_assigned["features"][0]["properties"]["pc6_id"]
+    sample_lv_mv = wfs_collection(
+        client,
+        "grid_lv_mv_transformer_reach",
+        count=1,
+        cql_filter=f"pc6_id='{sample_pc6}'",
+    )
+    require(sample_lv_mv.get("features"), "LV/MV reach is missing an assigned MV/HV PC6")
+    validate_reach_feature(sample_lv_mv["features"][0], "lv_mv")
     matching_mv_hv = wfs_collection(
         client,
         "grid_mv_hv_transformer_reach",
@@ -219,7 +239,7 @@ def check(base_url: str) -> None:
     validate_reach_feature(matching_mv_hv["features"][0], "mv_hv")
 
     print(
-        "Full Grid check passed: LV/MV/HV lines through Schagen, seven "
+        f"Full Grid check passed: LV/MV/HV lines through Schagen, {len(EXPECTED_STATIONS)} "
         "MV/HV roots, and matching PC6 share layers at both transformer levels."
     )
 

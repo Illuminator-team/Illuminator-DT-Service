@@ -30,9 +30,11 @@ const gridLayerSources = {
     grid_lines: 'loading',
     grid_transformers: 'loading',
     grid_lv_mv_transformer_reach: 'loading',
-    grid_mv_hv_transformer_reach: 'loading',
-    grid_capacity_limits: 'loading'
+    grid_mv_hv_transformer_reach: 'loading'
 };
+// The capaciteitskaart is optional and loaded on first use; it does not count
+// towards the grid status.
+let gridCapacityLoad = null;
 const gridCanvasRenderer = L.canvas({ padding: 0.5 });
 let windTurbinesLayerSource = 'loading';
 let evChargersLayerSource = 'loading';
@@ -356,6 +358,38 @@ function voedingsgebiedId(properties) {
     const withdrawal = properties.withdrawal_service_area_id;
     const injection = properties.injection_service_area_id;
     return withdrawal && withdrawal === injection ? withdrawal : null;
+}
+
+function ensureGridCapacityLayer() {
+    if (!gridCapacityLoad) {
+        gridCapacityLoad = (async () => {
+            try {
+                const result = await Pc6MapData.loadGridCapacityFeatureCollection(fetch);
+                assignVoedingsgebiedColors(result.data);
+                gridCapacityLayer = L.geoJSON(result.data, {
+                    renderer: gridCanvasRenderer,
+                    style: gridCapacityStyle,
+                    onEachFeature: (feature, layer) => {
+                        layer.on({
+                            mouseover: (event) => event.target.setStyle({ weight: 3, fillOpacity: 0.55 }),
+                            mouseout: (event) => event.target.setStyle(gridCapacityStyle(feature)),
+                            click: (event) => {
+                                updateGridCapacitySidePanel(feature.properties);
+                                map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 16 });
+                            }
+                        });
+                    }
+                });
+            } catch (error) {
+                console.error('Grid capaciteitskaart load failed:', error);
+                const control = document.getElementById('grid-capacity-areas');
+                control.checked = false;
+                control.disabled = true;
+                control.parentElement.title = 'Voedingsgebied layer is unavailable';
+            }
+        })();
+    }
+    return gridCapacityLoad;
 }
 
 // Data Loading
@@ -889,31 +923,6 @@ async function loadMap() {
         control.parentElement.title = 'MV/HV transformer reach layer is unavailable';
     }
 
-    try {
-        const result = await Pc6MapData.loadGridCapacityFeatureCollection(fetch);
-        assignVoedingsgebiedColors(result.data);
-        gridCapacityLayer = L.geoJSON(result.data, {
-            renderer: gridCanvasRenderer,
-            style: gridCapacityStyle,
-            onEachFeature: (feature, layer) => {
-                layer.on({
-                    mouseover: (event) => event.target.setStyle({ weight: 3, fillOpacity: 0.55 }),
-                    mouseout: (event) => event.target.setStyle(gridCapacityStyle(feature)),
-                    click: (event) => {
-                        updateGridCapacitySidePanel(feature.properties);
-                        map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 16 });
-                    }
-                });
-            }
-        });
-        updateLayerStatus('grid_capacity_limits', result.source);
-    } catch (error) {
-        console.error('Grid capaciteitskaart load failed:', error);
-        updateLayerStatus('grid_capacity_limits', 'failed', error.message);
-        const control = document.getElementById('grid-capacity-areas');
-        control.disabled = true;
-        control.parentElement.title = 'Voedingsgebied layer is unavailable';
-    }
 
     try {
         const result = await Pc6MapData.loadWindTurbinesFeatureCollection(fetch);
@@ -2061,7 +2070,10 @@ document.querySelectorAll('input[name="layer"]').forEach(radio => {
 });
 
 document.querySelectorAll('#grid-visibility input[type="checkbox"]').forEach((checkbox) => {
-    checkbox.addEventListener('change', () => {
+    checkbox.addEventListener('change', async () => {
+        if (checkbox.id === 'grid-capacity-areas' && checkbox.checked) {
+            await ensureGridCapacityLayer();
+        }
         applyGridVisibility();
         updateLegend();
     });

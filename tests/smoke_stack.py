@@ -978,7 +978,7 @@ def check_grid_model_api(client: SmokeClient, expected_data_mode: str) -> None:
         )
 
 
-def check_grid_layers(client: SmokeClient) -> None:
+def check_grid_layers(client: SmokeClient, expected_data_mode: str) -> None:
     capabilities_query = urllib.parse.urlencode(
         {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"}
     )
@@ -1064,7 +1064,16 @@ def check_grid_layers(client: SmokeClient) -> None:
             "count": 1,
         }
         if layer_id == GRID_TRANSFORMERS_LAYER:
-            feature_parameters["cql_filter"] = f"component_id='{GRID_TRANSFORMER_FIXTURE}'"
+            # The fixture transformer only exists in the fixture build; a real-source
+            # build is checked on any LV/MV transformer.
+            feature_parameters["cql_filter"] = (
+                f"component_id='{GRID_TRANSFORMER_FIXTURE}'"
+                if expected_data_mode == "fixture"
+                else "component_type='lv_mv_transformer'"
+            )
+        elif layer_id in {GRID_LV_MV_REACH_LAYER, GRID_MV_HV_REACH_LAYER}:
+            # Unavailable rows (no station) carry no shares; sample an assigned PC6.
+            feature_parameters["cql_filter"] = "assignment_status='available'"
         collection = client.get_json(
             f"/geoserver/rdp/ows?{urllib.parse.urlencode(feature_parameters)}"
         )
@@ -1072,7 +1081,7 @@ def check_grid_layers(client: SmokeClient) -> None:
         feature = collection["features"][0]
         properties = feature["properties"]
         require(0 <= properties["datacompleetheid"] <= 3, f"{layer_id} quality drift")
-        if layer_id == GRID_TRANSFORMERS_LAYER:
+        if layer_id == GRID_TRANSFORMERS_LAYER and expected_data_mode == "fixture":
             require(
                 properties["component_id"] == GRID_TRANSFORMER_FIXTURE,
                 "Grid transformer ID drift",
@@ -1927,7 +1936,7 @@ def main() -> int:
     check_consumption_model_api(client)
     check_congestion_model_api(client)
     check_pc6_layer(client)
-    check_grid_layers(client)
+    check_grid_layers(client, args.expected_grid_data_mode)
     check_wind_layer(client)
     check_heat_layers(client, args.expected_heat_data_mode)
     check_ev_layer(client)

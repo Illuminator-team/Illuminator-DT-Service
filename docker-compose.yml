@@ -70,6 +70,8 @@ services:
       depends_on:
         transformer-profile-init:
           condition: service_completed_successfully
+          # Optional: a missing Grid snapshot must not keep the other models down.
+          required: false
       labels:
         - "traefik.enable=true"
         # path to /policy-api is needed to out frontend to make calls to the backend
@@ -268,6 +270,8 @@ services:
     depends_on:
       grid-init:
         condition: service_completed_successfully
+        # Optional: a missing Grid snapshot must not keep the other models down.
+        required: false
     healthcheck:
       test:
         - CMD
@@ -586,6 +590,8 @@ services:
           condition: service_healthy
         grid-api:
           condition: service_healthy
+          # Optional: a missing Grid snapshot must not keep the other models down.
+          required: false
         pv-api:
           condition: service_healthy
       restart: "no"
@@ -922,6 +928,8 @@ services:
         condition: service_healthy
       grid-api:
         condition: service_healthy
+        # Optional: a missing Grid snapshot must not keep the other models down.
+        required: false
       wind-api:
         condition: service_healthy
       heat-api:

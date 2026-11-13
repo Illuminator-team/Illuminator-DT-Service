@@ -156,6 +156,19 @@ docker compose --profile maintenance run --rm grid-capacity-refresh
 docker compose up -d grid-api && docker compose restart layer-publisher
 ```
 
+The snapshot cannot be downloaded again, so keep a copy outside the volume
+(sha256 `e7c9d609ffa4d1ae99e110e7421943ce7bbbf7e191462f64eb6490ca8fdcac7b`).
+A fresh `grid-model-data` volume gets it from that copy before the first start:
+
+```bash
+docker run --rm -v /path/to/snapshot-dir:/b:ro -v illuminator-dev_grid-model-data:/d alpine:3 \
+  sh -c 'mkdir -p /d/sources && cp /b/liander-north-holland-towns.gpkg /d/sources/ && chown -R 10001:10001 /d/sources'
+```
+
+Without the snapshot `grid-init` stops with a `FileNotFoundError`. Grid is an
+optional dependency, so the other models, `layer-publisher` and the policy API
+still start; the publisher retries Grid on every monitor tick.
+
 Grid and congestion are pinned as a pair (congestion accepts Grid contract
 2.9.0 at a named Grid commit); upgrade and roll them back together.
 
@@ -174,8 +187,9 @@ matching PC6 coverage and valid transformer shares:
 python tests/check_full_grid.py --base-url http://127.0.0.1
 ```
 
-The check requires real-source mode, all three voltage levels, seven named
-MV/HV roots, northern grid geometry, and consistent LV/MV and MV/HV PC6 shares.
+The check requires real-source mode, all three voltage levels, the eight named
+MV/HV roots of the 9148f09 build, northern grid geometry, and consistent LV/MV
+and MV/HV PC6 shares for assigned PC6 (unavailable MV/HV rows are coverage gaps).
 
 The independent `rdp:public_wind_turbines` point layer exposes published nameplate
 capacity, provisional generation summaries, and model-owned

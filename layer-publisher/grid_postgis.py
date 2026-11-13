@@ -347,3 +347,18 @@ def sync_grid_layer(
             f"total={total} unique={unique_ids}"
         )
     return {"changed": changed, "deleted": deleted, "total": total}
+
+
+def clear_grid_layer(db_conn: dict[str, Any], *, table: str) -> int:
+    """Empty a published grid table whose layer Grid no longer offers.
+
+    The table and its GeoServer layer stay, so nothing breaks, but no stale rows
+    from an earlier cache remain visible. Returns the number of rows removed.
+    """
+    with psycopg2.connect(**db_conn) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass(%s)", (f"public.{table}",))
+            if cursor.fetchone()[0] is None:
+                return 0
+            cursor.execute(f"DELETE FROM public.{table}")
+            return cursor.rowcount
