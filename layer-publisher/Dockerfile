@@ -1,5 +1,10 @@
 FROM python:3.11-slim
 
+# OS security updates on top of the base image.
+RUN apt-get update \
+    && apt-get -y --no-install-recommends upgrade \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt ./
