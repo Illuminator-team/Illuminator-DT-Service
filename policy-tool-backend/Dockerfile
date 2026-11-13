@@ -1,10 +1,10 @@
 # policy-tool-backend/Dockerfile
 FROM python:3.11-slim
 
-# Install system dependencies for GIS and Postgres communication
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
-    gcc \
+# OS security updates. No compiler or libpq headers: every dependency installs from a
+# wheel (psycopg2-binary bundles libpq), and gcc/libpq-dev pulled in kernel headers and Kerberos.
+RUN apt-get update \
+    && apt-get -y --no-install-recommends upgrade \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

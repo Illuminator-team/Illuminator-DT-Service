@@ -22,3 +22,4 @@
 *.ipynb
 geo/global.xml
 illuminator-output/*
+/geo/security.incomplete-*/
