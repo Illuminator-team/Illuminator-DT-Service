@@ -135,8 +135,29 @@ The Grid view loads `rdp:grid_lines`, `rdp:grid_transformers`,
 `rdp:grid_lv_mv_transformer_reach`, and
 `rdp:grid_mv_hv_transformer_reach` from GeoServer WFS. Its checkboxes
 independently control every voltage tier, both transformer types, and both
-PC6 share maps. Selecting a grid feature changes only the details panel, so
-the congestion scenario controls remain available.
+PC6 share maps. A PC6 for which Grid could not determine a station is shown
+grey and dashed. A separate checkbox adds `rdp:grid_capacity_limits`, the EDSN
+capaciteitskaart: each PC6 is coloured by its voedingsgebied when withdrawal and
+injection share one, and its panel shows the transport capacity, queue and
+expected year solved per direction. Selecting a grid feature changes only the
+details panel, so the congestion scenario controls remain available.
+
+Grid is built from the retained 18 Aug 2026 Liander snapshot
+(`/data/sources/liander-north-holland-towns.gpkg` in `grid-model-data`):
+since 2026-11-08 Liander's public service lacks the station attributes Grid
+needs, so a live region fetch would build a grid without MV/HV roots. The
+capaciteitskaart is read from the stored document
+`/data/sources/capaciteitskaart.json`, so starting the stack never depends on
+EDSN. To pick up a new EDSN publication (Grid keeps every version):
+
+```bash
+docker compose stop grid-api
+docker compose --profile maintenance run --rm grid-capacity-refresh
+docker compose up -d grid-api && docker compose restart layer-publisher
+```
+
+Grid and congestion are pinned as a pair (congestion accepts Grid contract
+2.9.0 at a named Grid commit); upgrade and roll them back together.
 
 Normal local initialization passes the crosswalk bootstrap's
 `alkmaar-cbs-postcode6-2024.geojson` as Grid's authoritative PC6 geometry and

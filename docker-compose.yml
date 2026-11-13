@@ -160,8 +160,63 @@ services:
       - grid-crosswalk-data:/crosswalk
     restart: "no"
 
+  # Grid and congestion move (and roll back) together: congestion 475ca82 accepts
+  # grid contract 2.9.0 only at 9148f09.
+  #
+  # Since 2026-11-08 Liander's public service lacks the station attributes Grid needs
+  # (liander-grid-model#41), so a live --fetch-region would build a rootless grid.
+  # grid-init therefore builds from the retained 18 Aug snapshot, the source of the
+  # previous cache (sha256 e7c9d609...). The capaciteitskaart comes from the document
+  # stored by grid-capacity-refresh, so starting never depends on EDSN; without that
+  # document the grid is built without the capacity layer. An identical request
+  # reuses the ready cache.
   grid-init:
     <<: *grid-image
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        set -- --source-gpkg /data/sources/liander-north-holland-towns.gpkg \
+          --source-retrieved-at 2026-08-18T09:53:06.188727+00:00 \
+          --pc6-geojson /crosswalk/alkmaar-cbs-postcode6-2024.geojson \
+          --buurt-pc6-crosswalk /crosswalk/alkmaar-buurt-pc6-2025.json
+        if [ -f /data/sources/capaciteitskaart.json ]; then
+          set -- "$$@" --capaciteitskaart-source-cache /data/sources/capaciteitskaart.json
+        else
+          echo "grid-init: no stored capaciteitskaart; run grid-capacity-refresh to add it" >&2
+        fi
+        exec python -m grid_api initialize "$$@"
+    environment:
+      GRID_API_DATA_DIR: /data
+      GRID_API_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+    volumes:
+      - grid-model-data:/data
+      - grid-crosswalk-data:/crosswalk:ro
+    depends_on:
+      grid-crosswalk-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # Fetches the current EDSN capaciteitskaart (about 35 minutes for all PC6), stores it
+  # as /data/sources/capaciteitskaart.json and keeps every version; a new version rebuilds
+  # the cache. Run it on demand, with grid-api stopped, then start grid-api and restart
+  # layer-publisher:
+  #   docker compose stop grid-api
+  #   docker compose --profile maintenance run --rm grid-capacity-refresh
+  #   docker compose up -d grid-api && docker compose restart layer-publisher
+  # An EDSN outage fails only this run; the stored version keeps serving.
+  grid-capacity-refresh:
+    <<: *grid-image
+    profiles: ["maintenance"]
     user: "10001:10001"
     read_only: true
     cap_drop:
@@ -175,14 +230,14 @@ services:
       - -m
       - grid_api
       - initialize
-      - --fetch-region
-      - north-holland-towns
+      - --source-gpkg
+      - /data/sources/liander-north-holland-towns.gpkg
+      - --source-retrieved-at
+      - "2026-08-18T09:53:06.188727+00:00"
       - --pc6-geojson
       - /crosswalk/alkmaar-cbs-postcode6-2024.geojson
       - --buurt-pc6-crosswalk
       - /crosswalk/alkmaar-buurt-pc6-2025.json
-      - --reuse-ready-cache
-      # EDSN capaciteitskaart (voedingsgebied per PC6) for the dashboard grid layer.
       - --fetch-capaciteitskaart
       - --capaciteitskaart-reference-period
       - "2026"
@@ -192,9 +247,6 @@ services:
     volumes:
       - grid-model-data:/data
       - grid-crosswalk-data:/crosswalk:ro
-    depends_on:
-      grid-crosswalk-init:
-        condition: service_completed_successfully
     restart: "no"
 
   grid-api:
@@ -836,6 +888,9 @@ services:
       GRID_EXPECTED_RELEASE_COMMIT: 9148f09372f843f0ee876121968be84aebfeae06
       GRID_EXPECTED_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
       GRID_EXPECTED_DATA_MODE: real_source
+      # Publish grid_capacity_limits whenever Grid offers it; without a stored
+      # capaciteitskaart the other grid layers are still published (with a warning).
+      GRID_REQUIRE_CAPACITY: "false"
       GRID_EXPORT_BBOX: 4.60,52.50,4.98,52.88
       WIND_API_URL: http://wind-api:8080
       WIND_EXPECTED_RELEASE_COMMIT: 91d7443094aa0bb4fecdbcac975fa06b6ea617b0

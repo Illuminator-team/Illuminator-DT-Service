@@ -635,6 +635,10 @@
           "type": "string"
         },
         {
+          "name": "assignment_status",
+          "type": "string"
+        },
+        {
           "name": "datacompleetheid",
           "type": "integer"
         },
@@ -674,7 +678,8 @@
       "limitations": [
         "Only PC6 polygons supplied to the grid initializer are represented.",
         "Shares use intersecting LV cable length; PC6 areas without an intersection use an explicitly marked nearest-LV-bus fallback.",
-        "Assignments are model-estimated and are not legal or authoritative service territories."
+        "Assignments are model-estimated and are not legal or authoritative service territories.",
+        "A PC6 whose station Grid cannot determine is published with assignment_status=unavailable and no station, as a coverage gap."
       ],
       "services": {
         "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lv_mv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
@@ -844,6 +849,10 @@
           "type": "string"
         },
         {
+          "name": "assignment_status",
+          "type": "string"
+        },
+        {
           "name": "datacompleetheid",
           "type": "integer"
         },
@@ -883,7 +892,8 @@
       "limitations": [
         "Only PC6 polygons supplied to the grid initializer are represented.",
         "Shares use intersecting LV cable length; PC6 areas without an intersection use an explicitly marked nearest-LV-bus fallback.",
-        "Assignments are model-estimated and are not legal or authoritative service territories."
+        "Assignments are model-estimated and are not legal or authoritative service territories.",
+        "A PC6 whose station Grid cannot determine is published with assignment_status=unavailable and no station, as a coverage gap."
       ],
       "services": {
         "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_mv_hv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
@@ -1148,11 +1158,11 @@
         "method_version": "datacompleetheid-grid-capacity-v1",
         "owner": "edsn-capaciteitskaart",
         "scale": {
-          "0": "fully assumption-based",
-          "1": "limited supporting data or ambiguous topology",
-          "2": "registered evidence with documented topology assumptions",
-          "3": "registered geometry and supported topology"
-        }
+          "0": "neither direction (withdrawal, injection) resolved to a published RNB voedingsgebied",
+          "2": "only one direction resolved to a published RNB voedingsgebied",
+          "3": "both directions resolved to a published RNB voedingsgebied with capaciteitskaart data"
+        },
+        "note": "Grid scores this layer per PC6 by how many directions resolve to a published voedingsgebied (scores 3, 2 or 0); it does not assess grid topology."
       },
       "limitations": [
         "Values are EDSN's published capaciteitskaart for the reference period; the grid model passes them through and does not compute them.",

@@ -121,7 +121,12 @@ GRID_REACH_FIELDS = (
     "pc6_source_id",
     "pc6_source_sha256",
     "evidence_status",
+    "assignment_status",
 )
+
+# Reach fields Grid does not send on every layer (LV/MV reach has no
+# assignment_status); the validator fills in their default.
+GRID_OPTIONAL_FIELDS = frozenset({"assignment_status"})
 
 # EDSN capaciteitskaart per PC6 (voedingsgebied and transport capacity), passed
 # through by the grid model. Exported in its own run: a run takes at most four layers.
@@ -506,7 +511,10 @@ def load_grid_records(
             raise ValueError(f"{feature_id}: top-level feature ID drift")
         if feature_id in component_ids:
             raise ValueError(f"Duplicate grid component_id: {feature_id}")
-        missing = [field for field in expected_fields if field not in properties]
+        missing = [
+            field for field in expected_fields
+            if field not in properties and field not in GRID_OPTIONAL_FIELDS
+        ]
         if missing:
             raise ValueError(f"{feature_id}: missing required fields: {', '.join(missing)}")
 
@@ -669,135 +677,18 @@ def load_grid_records(
             normalized["reach_method"] = reach_contract["method"]
             normalized["share_scope"] = "absolute_pc6_to_target"
 
-            for field in ("dominant_transformer_id", "dominant_transformer_name"):
-                normalized[field] = _string(properties, field, feature_id)
-            for field in (
-                "runner_up_transformer_id",
-                "runner_up_transformer_name",
-                "ambiguity_reason",
-            ):
-                normalized[field] = _nullable_string(
-                    properties.get(field), field, feature_id
-                )
-            for field in (
-                "dominant_root_bus_id",
-                "runner_up_root_bus_id",
-                "fallback_bus_id",
-            ):
-                normalized[field] = _nullable_identifier(
-                    properties.get(field), field, feature_id
-                )
-
-            normalized["dominant_transformer_share"] = _share(
-                properties.get("dominant_transformer_share"),
-                "dominant_transformer_share",
-                feature_id,
-            )
-            normalized["dominant_transformer_share_percent"] = _share(
-                properties.get("dominant_transformer_share_percent"),
-                "dominant_transformer_share_percent",
-                feature_id,
-                percent=True,
-            )
-            normalized["runner_up_transformer_share"] = _share(
-                properties.get("runner_up_transformer_share"),
-                "runner_up_transformer_share",
-                feature_id,
-                nullable=True,
-            )
-            normalized["runner_up_transformer_share_percent"] = _share(
-                properties.get("runner_up_transformer_share_percent"),
-                "runner_up_transformer_share_percent",
-                feature_id,
-                percent=True,
-                nullable=True,
-            )
-            normalized["share_margin"] = _share(
-                properties.get("share_margin"), "share_margin", feature_id
-            )
-            normalized["share_margin_percentage_points"] = _share(
-                properties.get("share_margin_percentage_points"),
-                "share_margin_percentage_points",
-                feature_id,
-                percent=True,
-            )
-            normalized["matched_lv_cable_length_m"] = _number(
-                properties.get("matched_lv_cable_length_m"),
-                "matched_lv_cable_length_m",
-                feature_id,
-                nullable=True,
-            )
-            normalized["fallback_distance_m"] = _number(
-                properties.get("fallback_distance_m"),
-                "fallback_distance_m",
-                feature_id,
-                nullable=True,
-            )
-
-            entity_count = properties.get("entity_count")
-            if (
-                isinstance(entity_count, bool)
-                or not isinstance(entity_count, int)
-                or entity_count < 1
-            ):
-                raise ValueError(f"{feature_id}: invalid transformer share count")
-            normalized["entity_count"] = entity_count
-            for field in ("has_overlap", "is_ambiguous", "fallback_used"):
-                normalized[field] = _boolean(properties.get(field), field, feature_id)
-            if normalized["has_overlap"] != (entity_count > 1):
-                raise ValueError(f"{feature_id}: transformer overlap flag drift")
-            if normalized["is_ambiguous"] and not normalized["has_overlap"]:
-                raise ValueError(f"{feature_id}: ambiguity requires multiple shares")
-
-            ranked_shares = properties.get("ranked_shares")
-            if not isinstance(ranked_shares, list) or len(ranked_shares) != entity_count:
-                raise ValueError(f"{feature_id}: incomplete ranked transformer shares")
-            share_total = 0.0
-            for expected_rank, item in enumerate(ranked_shares, start=1):
-                share = _mapping(item, f"{feature_id}.ranked_shares[{expected_rank}]")
-                if share.get("rank") != expected_rank:
-                    raise ValueError(f"{feature_id}: transformer share rank drift")
-                _string(share, "transformer_id", feature_id)
-                _string(share, "transformer_name", feature_id)
-                expected_target_type = (
-                    "lv_mv_transformer"
-                    if level == "lv_mv"
-                    else "mv_hv_transformer_root"
-                )
-                if share.get("target_type") != expected_target_type:
-                    raise ValueError(f"{feature_id}: ranked transformer target drift")
-                share_total += _share(
-                    share.get("share"), "ranked share", feature_id
-                )
-                _share(
-                    share.get("share_percent"),
-                    "ranked share percent",
-                    feature_id,
-                    percent=True,
-                )
-                for field in (
-                    "lv_mv_transformer_ids",
-                    "mv_hv_transformer_ids",
-                    "root_bus_ids",
-                    "source_station_objectids",
-                ):
-                    identifiers = share.get(field)
-                    if not isinstance(identifiers, list) or not all(
-                        isinstance(item, str) and item for item in identifiers
-                    ):
-                        raise ValueError(
-                            f"{feature_id}: invalid ranked {field} evidence"
-                        )
-                methods = share.get("match_methods")
-                if not isinstance(methods, list) or not methods or not all(
-                    isinstance(item, str) and item for item in methods
-                ):
-                    raise ValueError(f"{feature_id}: invalid ranked match methods")
-            if abs(share_total - 1.0) > 0.0001:
-                raise ValueError(f"{feature_id}: transformer shares do not sum to one")
-            if ranked_shares[0]["transformer_id"] != properties["dominant_transformer_id"]:
-                raise ValueError(f"{feature_id}: dominant transformer rank drift")
-            normalized["ranked_shares"] = ranked_shares
+            # Model 2.7 reports a PC6 whose station cannot be determined as an
+            # explicit unavailable row: no dominant transformer and no shares. It is
+            # published as a coverage gap (datacompleetheid and assignment_status), not
+            # left out. LV/MV reach rows carry no assignment_status: always available.
+            status = properties.get("assignment_status", "available")
+            if status not in {"available", "unavailable"}:
+                raise ValueError(f"{feature_id}: invalid transformer reach assignment_status")
+            normalized["assignment_status"] = status
+            if status == "unavailable":
+                _validate_unavailable_reach(properties, normalized, feature_id)
+            else:
+                _validate_available_reach(properties, normalized, feature_id, level)
 
             normalized["match_method"] = _string(
                 properties, "match_method", feature_id
@@ -878,6 +769,181 @@ def _same_origin_url(base_url: str, path: str) -> str:
     return target
 
 
+def _validate_available_reach(
+    properties: dict[str, Any], normalized: dict[str, Any], feature_id: str, level: str
+) -> None:
+    for field in ("dominant_transformer_id", "dominant_transformer_name"):
+        normalized[field] = _string(properties, field, feature_id)
+    for field in (
+        "runner_up_transformer_id",
+        "runner_up_transformer_name",
+        "ambiguity_reason",
+    ):
+        normalized[field] = _nullable_string(
+            properties.get(field), field, feature_id
+        )
+    for field in (
+        "dominant_root_bus_id",
+        "runner_up_root_bus_id",
+        "fallback_bus_id",
+    ):
+        normalized[field] = _nullable_identifier(
+            properties.get(field), field, feature_id
+        )
+
+    normalized["dominant_transformer_share"] = _share(
+        properties.get("dominant_transformer_share"),
+        "dominant_transformer_share",
+        feature_id,
+    )
+    normalized["dominant_transformer_share_percent"] = _share(
+        properties.get("dominant_transformer_share_percent"),
+        "dominant_transformer_share_percent",
+        feature_id,
+        percent=True,
+    )
+    normalized["runner_up_transformer_share"] = _share(
+        properties.get("runner_up_transformer_share"),
+        "runner_up_transformer_share",
+        feature_id,
+        nullable=True,
+    )
+    normalized["runner_up_transformer_share_percent"] = _share(
+        properties.get("runner_up_transformer_share_percent"),
+        "runner_up_transformer_share_percent",
+        feature_id,
+        percent=True,
+        nullable=True,
+    )
+    normalized["share_margin"] = _share(
+        properties.get("share_margin"), "share_margin", feature_id
+    )
+    normalized["share_margin_percentage_points"] = _share(
+        properties.get("share_margin_percentage_points"),
+        "share_margin_percentage_points",
+        feature_id,
+        percent=True,
+    )
+    normalized["matched_lv_cable_length_m"] = _number(
+        properties.get("matched_lv_cable_length_m"),
+        "matched_lv_cable_length_m",
+        feature_id,
+        nullable=True,
+    )
+    normalized["fallback_distance_m"] = _number(
+        properties.get("fallback_distance_m"),
+        "fallback_distance_m",
+        feature_id,
+        nullable=True,
+    )
+
+    entity_count = properties.get("entity_count")
+    if (
+        isinstance(entity_count, bool)
+        or not isinstance(entity_count, int)
+        or entity_count < 1
+    ):
+        raise ValueError(f"{feature_id}: invalid transformer share count")
+    normalized["entity_count"] = entity_count
+    for field in ("has_overlap", "is_ambiguous", "fallback_used"):
+        normalized[field] = _boolean(properties.get(field), field, feature_id)
+    if normalized["has_overlap"] != (entity_count > 1):
+        raise ValueError(f"{feature_id}: transformer overlap flag drift")
+    if normalized["is_ambiguous"] and not normalized["has_overlap"]:
+        raise ValueError(f"{feature_id}: ambiguity requires multiple shares")
+
+    ranked_shares = properties.get("ranked_shares")
+    if not isinstance(ranked_shares, list) or len(ranked_shares) != entity_count:
+        raise ValueError(f"{feature_id}: incomplete ranked transformer shares")
+    share_total = 0.0
+    for expected_rank, item in enumerate(ranked_shares, start=1):
+        share = _mapping(item, f"{feature_id}.ranked_shares[{expected_rank}]")
+        if share.get("rank") != expected_rank:
+            raise ValueError(f"{feature_id}: transformer share rank drift")
+        _string(share, "transformer_id", feature_id)
+        _string(share, "transformer_name", feature_id)
+        expected_target_type = (
+            "lv_mv_transformer"
+            if level == "lv_mv"
+            else "mv_hv_transformer_root"
+        )
+        if share.get("target_type") != expected_target_type:
+            raise ValueError(f"{feature_id}: ranked transformer target drift")
+        share_total += _share(
+            share.get("share"), "ranked share", feature_id
+        )
+        _share(
+            share.get("share_percent"),
+            "ranked share percent",
+            feature_id,
+            percent=True,
+        )
+        for field in (
+            "lv_mv_transformer_ids",
+            "mv_hv_transformer_ids",
+            "root_bus_ids",
+            "source_station_objectids",
+        ):
+            identifiers = share.get(field)
+            if not isinstance(identifiers, list) or not all(
+                isinstance(item, str) and item for item in identifiers
+            ):
+                raise ValueError(
+                    f"{feature_id}: invalid ranked {field} evidence"
+                )
+        methods = share.get("match_methods")
+        if not isinstance(methods, list) or not methods or not all(
+            isinstance(item, str) and item for item in methods
+        ):
+            raise ValueError(f"{feature_id}: invalid ranked match methods")
+    if abs(share_total - 1.0) > 0.0001:
+        raise ValueError(f"{feature_id}: transformer shares do not sum to one")
+    if ranked_shares[0]["transformer_id"] != properties["dominant_transformer_id"]:
+        raise ValueError(f"{feature_id}: dominant transformer rank drift")
+    normalized["ranked_shares"] = ranked_shares
+
+
+def _validate_unavailable_reach(
+    properties: dict[str, Any], normalized: dict[str, Any], feature_id: str
+) -> None:
+    """An unavailable reach row: no station, no shares, explicit nulls."""
+    for field in (
+        "dominant_transformer_id",
+        "dominant_transformer_name",
+        "dominant_transformer_share",
+        "dominant_transformer_share_percent",
+        "dominant_root_bus_id",
+        "runner_up_transformer_id",
+        "runner_up_transformer_name",
+        "runner_up_transformer_share",
+        "runner_up_transformer_share_percent",
+        "runner_up_root_bus_id",
+        "share_margin",
+        "share_margin_percentage_points",
+    ):
+        if properties.get(field) is not None:
+            raise ValueError(f"{feature_id}: unavailable transformer reach has {field}")
+        normalized[field] = None
+    if properties.get("entity_count") != 0 or properties.get("ranked_shares") != []:
+        raise ValueError(f"{feature_id}: unavailable transformer reach has shares")
+    normalized["entity_count"] = 0
+    normalized["ranked_shares"] = []
+    for field in ("has_overlap", "is_ambiguous", "fallback_used"):
+        normalized[field] = _boolean(properties.get(field), field, feature_id)
+    if normalized["has_overlap"] or normalized["is_ambiguous"]:
+        raise ValueError(f"{feature_id}: unavailable transformer reach overlap drift")
+    normalized["ambiguity_reason"] = _nullable_string(
+        properties.get("ambiguity_reason"), "ambiguity_reason", feature_id
+    )
+    normalized["fallback_bus_id"] = _nullable_identifier(
+        properties.get("fallback_bus_id"), "fallback_bus_id", feature_id
+    )
+    for field in ("matched_lv_cable_length_m", "fallback_distance_m"):
+        normalized[field] = _number(properties.get(field), field, feature_id, nullable=True)
+    if normalized["datacompleetheid"] >= 3:
+        raise ValueError(f"{feature_id}: unavailable transformer reach scored complete")
+
+
 def fetch_grid_artifact(
     base_url: str,
     *,
@@ -933,13 +999,14 @@ def fetch_grid_artifact(
     if not isinstance(layers, list):
         raise ValueError("GET /layers: grid layer set drift")
     offered = {item.get("id") for item in layers}
-    # A grid cache built without the capaciteitskaart (only fixture builds) does
-    # not list grid_capacity_limits; production requires it.
+    # A grid cache built without the capaciteitskaart (a fixture build, or a source
+    # build before the first capaciteitskaart fetch) does not list grid_capacity_limits.
     wanted = set(GRID_LAYER_IDS)
     if require_capacity or GRID_CAPACITY_LAYER_ID in offered:
         wanted.add(GRID_CAPACITY_LAYER_ID)
-    if not wanted <= offered:
-        raise ValueError("GET /layers: grid layer set drift")
+    missing = sorted(wanted - offered)
+    if missing:
+        raise ValueError(f"GET /layers: grid cache does not offer {', '.join(missing)}")
     for layer in layers:
         if layer.get("id") not in wanted:
             continue
@@ -1010,31 +1077,6 @@ def fetch_grid_artifact(
                 collection = json.loads(content)
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ValueError(f"{layer_id} output is not valid UTF-8 GeoJSON") from exc
-            # Model 2.7 reports a PC6 whose MV/HV station cannot be determined as an
-            # explicit `assignment_status=unavailable` row with no dominant
-            # transformer. The published table has one station per PC6, so such a
-            # PC6 is left out (absent = no answer) rather than stored with an empty
-            # station; the count is logged and checked against the output.
-            skipped_unavailable = 0
-            if layer_id == "grid_mv_hv_transformer_reach" and isinstance(collection, dict):
-                features = collection.get("features")
-                if isinstance(features, list):
-                    kept = [
-                        feature for feature in features
-                        if not (
-                            isinstance(feature, dict)
-                            and isinstance(feature.get("properties"), dict)
-                            and feature["properties"].get("assignment_status") == "unavailable"
-                        )
-                    ]
-                    skipped_unavailable = len(features) - len(kept)
-                    if skipped_unavailable:
-                        collection = {**collection, "features": kept}
-                        LOGGER.warning(
-                            "%s: %s of %s PC6 areas have assignment_status=unavailable "
-                            "and are not published",
-                            layer_id, skipped_unavailable, len(features),
-                        )
             records = load_grid_records(
                 collection,
                 layer_id=layer_id,
@@ -1043,9 +1085,18 @@ def fetch_grid_artifact(
                 expected_grid_data_version=grid_data_version,
                 expected_output_id=output_id,
             )
-            total = len(records) + skipped_unavailable
+            total = len(records)
             if total != output.get("feature_count") or total != summary.get("feature_count"):
                 raise ValueError(f"{layer_id} feature count does not match its records")
+            unavailable = sum(
+                record.properties.get("assignment_status") == "unavailable"
+                for record in records
+            )
+            if unavailable:
+                LOGGER.info(
+                    "%s: %s of %s PC6 areas are published as unavailable (coverage gap)",
+                    layer_id, unavailable, total,
+                )
             records_by_layer[layer_id] = records
             output_ids[layer_id] = output_id
 

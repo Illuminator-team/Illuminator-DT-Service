@@ -731,7 +731,7 @@ def publish_grid() -> GridArtifact:
     )
     for layer_id, config in GRID_CONFIGS.items():
         if layer_id not in artifact.records_by_layer:
-            LOGGER.info("%s is not offered by this grid cache; not published", layer_id)
+            LOGGER.warning("%s is not offered by this grid cache; not published", layer_id)
             continue
         stats = sync_grid_layer(
             DB_CONN,
@@ -970,7 +970,15 @@ def run() -> None:
     if "pv" in publish_models:
         publish_pv()
     if "grid" in publish_models:
-        publish_grid()
+        # A Grid failure must not stop the models published after it. The monitor
+        # below retries once Grid's readiness signature changes (a new cache).
+        try:
+            publish_grid()
+        except (requests.RequestException, RuntimeError, ValueError, psycopg2.Error):
+            LOGGER.error(
+                "Grid layers were not published; continuing with the other models",
+                exc_info=True,
+            )
     if "wind" in publish_models:
         publish_wind()
     if "heat" in publish_models:

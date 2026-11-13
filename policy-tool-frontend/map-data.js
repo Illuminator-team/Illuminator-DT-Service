@@ -7,9 +7,10 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     const WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=policy_tool_pc6_energy&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const PV_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=pv_capacity&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
-    // The dashboard shows the MV lines only; GeoServer filters them server-side.
-    const GRID_MV_LINES_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lines&outputFormat=application%2Fjson&srsName=EPSG%3A4326&CQL_FILTER=voltage_level%3D%27mv%27';
+    const GRID_LINES_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lines&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_TRANSFORMERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_transformers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const GRID_LV_MV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lv_mv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const GRID_MV_HV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_mv_hv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_CAPACITY_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_capacity_limits&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const EV_CHARGERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_ev_chargers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const CONSUMPTION_AREAS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=consumption_electricity_areas&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
@@ -84,13 +85,23 @@
         return { data, source: 'geoserver_wfs', fallbackReason: null };
     }
 
-    async function loadGridMvLinesFeatureCollection(fetchImpl) {
-        const data = await fetchCollection(fetchImpl, GRID_MV_LINES_WFS_URL, 'Grid MV lines GeoServer WFS');
+    async function loadGridLinesFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, GRID_LINES_WFS_URL, 'Grid lines GeoServer WFS');
         return { data, source: 'geoserver_wfs', fallbackReason: null };
     }
 
     async function loadGridTransformersFeatureCollection(fetchImpl) {
         const data = await fetchCollection(fetchImpl, GRID_TRANSFORMERS_WFS_URL, 'Grid transformers GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
+    async function loadGridLvMvReachFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, GRID_LV_MV_REACH_WFS_URL, 'Grid LV/MV transformer reach GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
+    async function loadGridMvHvReachFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, GRID_MV_HV_REACH_WFS_URL, 'Grid MV/HV transformer reach GeoServer WFS');
         return { data, source: 'geoserver_wfs', fallbackReason: null };
     }
 
@@ -141,7 +152,9 @@
         CONSUMPTION_AREAS_WFS_URL,
         EV_CHARGERS_WFS_URL,
         GRID_CAPACITY_WFS_URL,
-        GRID_MV_LINES_WFS_URL,
+        GRID_LINES_WFS_URL,
+        GRID_LV_MV_REACH_WFS_URL,
+        GRID_MV_HV_REACH_WFS_URL,
         GRID_TRANSFORMERS_WFS_URL,
         HEAT_LAYER_IDS,
         HEAT_WFS_URLS,
@@ -150,7 +163,9 @@
         WFS_URL,
         addFallbackQuality,
         loadGridCapacityFeatureCollection,
-        loadGridMvLinesFeatureCollection,
+        loadGridLinesFeatureCollection,
+        loadGridLvMvReachFeatureCollection,
+        loadGridMvHvReachFeatureCollection,
         loadGridTransformersFeatureCollection,
         loadConsumptionAreasFeatureCollection,
         loadEvChargersFeatureCollection,

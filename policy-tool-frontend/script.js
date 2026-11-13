@@ -11,7 +11,10 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let pc6Layer;
 let pvLayer;
-let gridMvLinesLayer;
+let gridLineLayers = {};
+let gridTransformerLayers = {};
+let gridLvMvReachLayer;
+let gridMvHvReachLayer;
 let gridCapacityLayer;
 let gridHasFit = false;
 let windTurbinesLayer;
@@ -24,7 +27,10 @@ let currentMetric = 'gas';
 let pc6LayerSource = 'loading';
 let pvLayerSource = 'loading';
 const gridLayerSources = {
-    grid_mv_lines: 'loading',
+    grid_lines: 'loading',
+    grid_transformers: 'loading',
+    grid_lv_mv_transformer_reach: 'loading',
+    grid_mv_hv_transformer_reach: 'loading',
     grid_capacity_limits: 'loading'
 };
 const gridCanvasRenderer = L.canvas({ padding: 0.5 });
@@ -228,6 +234,17 @@ function gridLineStyle(feature) {
     };
 }
 
+function gridTransformerStyle(feature) {
+    const isHighVoltage = feature.properties.transformer_type === 'mv_hv';
+    return {
+        radius: isHighVoltage ? 8 : 6,
+        color: '#ffffff',
+        weight: 2,
+        fillColor: isHighVoltage ? '#e58c2c' : '#7651a8',
+        fillOpacity: 0.95
+    };
+}
+
 function evChargerStyle(feature) {
     const maximumPower = Number(feature.properties.max_power_kw || 0);
     return {
@@ -277,16 +294,36 @@ function heatLayerStyle(layerId, feature) {
     return HeatVisualization.layerStyle(layerId, feature);
 }
 
-// One colour per EDSN voedingsgebied; a PC6 without one is grey and dashed.
+function gridReachStyle(feature) {
+    const properties = feature.properties || {};
+    if (properties.assignment_status === 'unavailable') return GRID_UNAVAILABLE_STYLE;
+    const color = getReachColor(
+        properties.dominant_transformer_id || properties.component_id
+    );
+    return {
+        color, weight: 2, opacity: 0.8, fillColor: color, fillOpacity: 0.18,
+        dashArray: properties.is_ambiguous ? '5 4' : null
+    };
+}
+
+// A PC6 that Grid could not assign (or EDSN does not cover) is grey and dashed.
+const GRID_UNAVAILABLE_STYLE = {
+    color: '#6b7280', weight: 1.5, opacity: 0.8, fillColor: '#9ca3af',
+    fillOpacity: 0.25, dashArray: '4 4'
+};
+// Both directions published, but different voedingsgebieden: grey and dotted.
+const GRID_CAPACITY_SPLIT_STYLE = {
+    color: '#4b5563', weight: 1.5, opacity: 0.8, fillColor: '#d1d5db',
+    fillOpacity: 0.3, dashArray: '1 4'
+};
+
+// One colour per EDSN voedingsgebied.
 function gridCapacityStyle(feature) {
     const properties = feature.properties || {};
-    if (properties.assignment_status !== 'available') {
-        return {
-            color: '#6b7280', weight: 1.5, opacity: 0.8, fillColor: '#9ca3af',
-            fillOpacity: 0.25, dashArray: '4 4'
-        };
-    }
-    const color = voedingsgebiedColor(voedingsgebiedId(properties));
+    if (properties.assignment_status !== 'available') return GRID_UNAVAILABLE_STYLE;
+    const id = voedingsgebiedId(properties);
+    if (id === null) return GRID_CAPACITY_SPLIT_STYLE;
+    const color = voedingsgebiedColor(id);
     return { color, weight: 1, opacity: 0.7, fillColor: color, fillOpacity: 0.35 };
 }
 
@@ -298,22 +335,27 @@ const VOEDINGSGEBIED_PALETTE = [
 const voedingsgebiedColors = new Map();
 
 function assignVoedingsgebiedColors(collection) {
-    const names = new Set();
+    const ids = new Set();
     collection.features.forEach((feature) => {
         const properties = feature.properties || {};
-        if (properties.assignment_status === 'available') names.add(voedingsgebiedId(properties));
+        const id = voedingsgebiedId(properties);
+        if (properties.assignment_status === 'available' && id !== null) ids.add(id);
     });
-    [...names].sort().forEach((name, index) => {
-        voedingsgebiedColors.set(name, VOEDINGSGEBIED_PALETTE[index % VOEDINGSGEBIED_PALETTE.length]);
+    [...ids].sort().forEach((id, index) => {
+        voedingsgebiedColors.set(id, VOEDINGSGEBIED_PALETTE[index % VOEDINGSGEBIED_PALETTE.length]);
     });
 }
 
-function voedingsgebiedColor(name) {
-    return voedingsgebiedColors.get(name) || getReachColor(name);
+function voedingsgebiedColor(id) {
+    return voedingsgebiedColors.get(id) || getReachColor(id);
 }
 
+// The PC6's voedingsgebied only when EDSN gives the same one for withdrawal and
+// injection. Grid owns the matching; the map does not pick one direction over the other.
 function voedingsgebiedId(properties) {
-    return properties.withdrawal_service_area_id || properties.injection_service_area_id || '';
+    const withdrawal = properties.withdrawal_service_area_id;
+    const injection = properties.injection_service_area_id;
+    return withdrawal && withdrawal === injection ? withdrawal : null;
 }
 
 // Data Loading
@@ -429,13 +471,25 @@ function gridControlChecked(id) {
 }
 
 function allGridLayers() {
-    return [gridCapacityLayer, gridMvLinesLayer].filter(Boolean);
+    return [
+        ...Object.values(gridLineLayers),
+        gridLvMvReachLayer,
+        ...Object.values(gridTransformerLayers),
+        gridMvHvReachLayer,
+        gridCapacityLayer
+    ].filter(Boolean);
 }
 
 function selectedGridLayers() {
     const layers = [];
     if (gridControlChecked('grid-capacity-areas') && gridCapacityLayer) layers.push(gridCapacityLayer);
-    if (gridControlChecked('grid-mv-lines') && gridMvLinesLayer) layers.push(gridMvLinesLayer);
+    if (gridControlChecked('grid-lv-mv-reach') && gridLvMvReachLayer) layers.push(gridLvMvReachLayer);
+    if (gridControlChecked('grid-mv-hv-reach') && gridMvHvReachLayer) layers.push(gridMvHvReachLayer);
+    if (gridControlChecked('grid-lv-lines') && gridLineLayers.lv) layers.push(gridLineLayers.lv);
+    if (gridControlChecked('grid-mv-lines') && gridLineLayers.mv) layers.push(gridLineLayers.mv);
+    if (gridControlChecked('grid-hv-lines') && gridLineLayers.hv) layers.push(gridLineLayers.hv);
+    if (gridControlChecked('grid-lv-mv-transformers') && gridTransformerLayers.lv_mv) layers.push(gridTransformerLayers.lv_mv);
+    if (gridControlChecked('grid-mv-hv-transformers') && gridTransformerLayers.mv_hv) layers.push(gridTransformerLayers.mv_hv);
     return layers;
 }
 
@@ -447,7 +501,12 @@ function applyGridVisibility(fit = false) {
 
     const visibleLayers = selectedGridLayers();
     visibleLayers.forEach((layer) => layer.addTo(map));
-    if (gridMvLinesLayer && map.hasLayer(gridMvLinesLayer)) gridMvLinesLayer.bringToFront();
+    Object.values(gridLineLayers).forEach((layer) => {
+        if (map.hasLayer(layer) && layer.bringToFront) layer.bringToFront();
+    });
+    Object.values(gridTransformerLayers).forEach((layer) => {
+        if (map.hasLayer(layer) && layer.bringToFront) layer.bringToFront();
+    });
     if (fit && visibleLayers.length > 0) {
         const bounds = L.featureGroup(visibleLayers).getBounds();
         if (bounds.isValid()) {
@@ -719,6 +778,118 @@ async function loadMap() {
     }
 
     try {
+        const result = await Pc6MapData.loadGridLinesFeatureCollection(fetch);
+        ['lv', 'mv', 'hv'].forEach((voltageLevel) => {
+            gridLineLayers[voltageLevel] = L.geoJSON(result.data, {
+                renderer: gridCanvasRenderer,
+                filter: (feature) => feature.properties.voltage_level === voltageLevel,
+                style: gridLineStyle,
+                onEachFeature: (feature, layer) => {
+                    layer.on({
+                        mouseover: (event) => event.target.setStyle({ weight: 6 }),
+                        mouseout: (event) => event.target.setStyle(gridLineStyle(feature)),
+                        click: (event) => {
+                            updateGridLineSidePanel(feature.properties);
+                            map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 18 });
+                        }
+                    });
+                }
+            });
+        });
+        updateLayerStatus('grid_lines', result.source);
+    } catch (error) {
+        console.error('Grid lines data load failed:', error);
+        updateLayerStatus('grid_lines', 'failed', error.message);
+        ['grid-lv-lines', 'grid-mv-lines', 'grid-hv-lines'].forEach((id) => {
+            const control = document.getElementById(id);
+            control.disabled = true;
+            control.parentElement.title = 'Grid lines layer is unavailable';
+        });
+    }
+
+    try {
+        const result = await Pc6MapData.loadGridTransformersFeatureCollection(fetch);
+        ['lv_mv', 'mv_hv'].forEach((transformerType) => {
+            gridTransformerLayers[transformerType] = L.geoJSON(result.data, {
+                filter: (feature) => feature.properties.transformer_type === transformerType,
+                pointToLayer: (feature, latlng) => L.circleMarker(
+                    latlng,
+                    gridTransformerStyle(feature)
+                ),
+                onEachFeature: (feature, layer) => {
+                    layer.on({
+                        mouseover: (event) => event.target.setStyle({ weight: 4 }),
+                        mouseout: (event) => event.target.setStyle(gridTransformerStyle(feature)),
+                        click: (event) => {
+                            updateGridTransformerSidePanel(feature.properties);
+                            map.setView(event.target.getLatLng(), Math.max(map.getZoom(), 17));
+                        }
+                    });
+                }
+            });
+        });
+        updateLayerStatus('grid_transformers', result.source);
+    } catch (error) {
+        console.error('Grid transformer data load failed:', error);
+        updateLayerStatus('grid_transformers', 'failed', error.message);
+        ['grid-lv-mv-transformers', 'grid-mv-hv-transformers'].forEach((id) => {
+            const control = document.getElementById(id);
+            control.disabled = true;
+            control.parentElement.title = 'Grid transformer layer is unavailable';
+        });
+    }
+    try {
+        const result = await Pc6MapData.loadGridLvMvReachFeatureCollection(fetch);
+        gridLvMvReachLayer = L.geoJSON(result.data, {
+            renderer: gridCanvasRenderer,
+            style: gridReachStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 4, fillOpacity: 0.22 }),
+                    mouseout: (event) => event.target.setStyle(gridReachStyle(feature)),
+                    click: (event) => {
+                        updateGridReachSidePanel(feature.properties, 'LV/MV');
+                        map.fitBounds(event.target.getBounds(), { padding: [40, 40] });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('grid_lv_mv_transformer_reach', result.source);
+    } catch (error) {
+        console.error('Grid LV/MV transformer reach load failed:', error);
+        updateLayerStatus('grid_lv_mv_transformer_reach', 'failed', error.message);
+        const control = document.getElementById('grid-lv-mv-reach');
+        control.disabled = true;
+        control.parentElement.title = 'LV/MV transformer reach layer is unavailable';
+    }
+
+
+    try {
+        const result = await Pc6MapData.loadGridMvHvReachFeatureCollection(fetch);
+        gridMvHvReachLayer = L.geoJSON(result.data, {
+            renderer: gridCanvasRenderer,
+            style: gridReachStyle,
+            onEachFeature: (feature, layer) => {
+                layer.on({
+                    mouseover: (event) => event.target.setStyle({ weight: 4, fillOpacity: 0.22 }),
+                    mouseout: (event) => event.target.setStyle(gridReachStyle(feature)),
+                    click: (event) => {
+                        updateGridReachSidePanel(feature.properties, 'MV/HV');
+                        map.fitBounds(event.target.getBounds(), { padding: [40, 40] });
+                    }
+                });
+            }
+        });
+        updateLayerStatus('grid_mv_hv_transformer_reach', result.source);
+    } catch (error) {
+        console.error('Grid MV/HV transformer reach load failed:', error);
+        updateLayerStatus('grid_mv_hv_transformer_reach', 'failed', error.message);
+        const control = document.getElementById('grid-mv-hv-reach');
+        control.disabled = true;
+        control.parentElement.title = 'MV/HV transformer reach layer is unavailable';
+    }
+
+    try {
         const result = await Pc6MapData.loadGridCapacityFeatureCollection(fetch);
         assignVoedingsgebiedColors(result.data);
         gridCapacityLayer = L.geoJSON(result.data, {
@@ -742,31 +913,6 @@ async function loadMap() {
         const control = document.getElementById('grid-capacity-areas');
         control.disabled = true;
         control.parentElement.title = 'Voedingsgebied layer is unavailable';
-    }
-
-    try {
-        const result = await Pc6MapData.loadGridMvLinesFeatureCollection(fetch);
-        gridMvLinesLayer = L.geoJSON(result.data, {
-            renderer: gridCanvasRenderer,
-            style: gridLineStyle,
-            onEachFeature: (feature, layer) => {
-                layer.on({
-                    mouseover: (event) => event.target.setStyle({ weight: 6 }),
-                    mouseout: (event) => event.target.setStyle(gridLineStyle(feature)),
-                    click: (event) => {
-                        updateGridLineSidePanel(feature.properties);
-                        map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 18 });
-                    }
-                });
-            }
-        });
-        updateLayerStatus('grid_mv_lines', result.source);
-    } catch (error) {
-        console.error('Grid MV lines load failed:', error);
-        updateLayerStatus('grid_mv_lines', 'failed', error.message);
-        const control = document.getElementById('grid-mv-lines');
-        control.disabled = true;
-        control.parentElement.title = 'MV lines layer is unavailable';
     }
 
     try {
@@ -854,16 +1000,29 @@ function updateLegend() {
         const div = L.DomUtil.create('div', 'info legend');
         if (currentMetric === 'grid_network') {
             div.innerHTML = '<div class="legend-title">ELECTRICITY GRID</div>';
-            const entries = [['grid-mv-lines', '#2378a7', 'MV lines']];
-            if (gridControlChecked('grid-capacity-areas')) {
-                gridVoedingsgebieden().forEach((name) => {
-                    div.innerHTML += `<i style="background:${voedingsgebiedColor(name)};opacity:0.6"></i> ${escapeHtml(name)}<br>`;
-                });
-                div.innerHTML += '<i style="background:#9ca3af;opacity:0.5"></i> Geen voedingsgebied gepubliceerd<br>';
-            }
+            const entries = [
+                ['grid-lv-lines', '#c43d4f', 'LV lines'],
+                ['grid-mv-lines', '#2378a7', 'MV lines'],
+                ['grid-hv-lines', '#24292e', 'HV lines'],
+                ['grid-lv-mv-transformers', '#7651a8', 'LV / MV transformers'],
+                ['grid-mv-hv-transformers', '#e58c2c', 'MV / HV transformers'],
+                ['grid-lv-mv-reach', '#7a4c9f', 'LV / MV reach (PC6 shares)'],
+                ['grid-mv-hv-reach', '#16845b', 'MV / HV reach (PC6 shares)']
+            ];
             entries.filter(([id]) => gridControlChecked(id)).forEach(([, color, label]) => {
                 div.innerHTML += `<i style="background:${color}"></i> ${label}<br>`;
             });
+            if (gridControlChecked('grid-mv-hv-reach') || gridControlChecked('grid-lv-mv-reach')) {
+                div.innerHTML += '<i style="background:#9ca3af;opacity:0.5"></i> Reach: no station determined<br>';
+            }
+            if (gridControlChecked('grid-capacity-areas')) {
+                div.innerHTML += '<div class="legend-title">VOEDINGSGEBIED (CAPACITEITSKAART)</div>';
+                [...voedingsgebiedColors.keys()].forEach((id) => {
+                    div.innerHTML += `<i style="background:${voedingsgebiedColor(id)};opacity:0.6"></i> ${escapeHtml(id)}<br>`;
+                });
+                div.innerHTML += '<i style="background:#d1d5db"></i> Afname en teruglevering verschillen<br>';
+                div.innerHTML += '<i style="background:#9ca3af;opacity:0.5"></i> Geen voedingsgebied gepubliceerd<br>';
+            }
             if (selectedGridLayers().length === 0) {
                 div.innerHTML += 'No grid components selected';
             }
@@ -1052,36 +1211,19 @@ function clearTransformerProfileHighlight() {
     transformerProfileHighlightLayer = null;
 }
 
-// The map no longer draws the transformers as a layer. Their positions are
-// fetched once, when a transformer profile is first shown, to mark it on the map.
-let gridTransformerPositions = null;
-let transformerHighlightRequest = 0;
-
-function loadTransformerPositions() {
-    if (!gridTransformerPositions) {
-        gridTransformerPositions = Pc6MapData.loadGridTransformersFeatureCollection(fetch)
-            .then((result) => new Map(result.data.features
-                .filter((feature) => feature.geometry?.type === 'Point')
-                .map((feature) => [
-                    String(feature.properties?.component_id || ''),
-                    L.latLng(feature.geometry.coordinates[1], feature.geometry.coordinates[0])
-                ])))
-            .catch((error) => {
-                console.warn('Transformer positions are unavailable:', error);
-                gridTransformerPositions = null;
-                return new Map();
-            });
-    }
-    return gridTransformerPositions;
-}
-
-async function highlightTransformerProfileTarget(target) {
+function highlightTransformerProfileTarget(target) {
     clearTransformerProfileHighlight();
-    const request = ++transformerHighlightRequest;
-    const position = (await loadTransformerPositions()).get(target.id);
-    if (!position || request !== transformerHighlightRequest) return;
     const transformerType = target.transformerLevel === 'mv_hv_transformer' ? 'mv_hv' : 'lv_mv';
-    transformerProfileHighlightLayer = L.circleMarker(position, {
+    const group = gridTransformerLayers[transformerType];
+    if (!group) return;
+    let matchedLayer = null;
+    group.eachLayer((layer) => {
+        if (String(layer.feature?.properties?.component_id || '') === target.id) {
+            matchedLayer = layer;
+        }
+    });
+    if (!matchedLayer?.getLatLng) return;
+    transformerProfileHighlightLayer = L.circleMarker(matchedLayer.getLatLng(), {
         radius: transformerType === 'mv_hv' ? 15 : 13,
         color: '#151515',
         weight: 4,
@@ -1249,6 +1391,16 @@ function renderTransformerProfileStage(preferredId = null) {
     renderTransformerProfileTarget(
         targets.find((target) => target.id === matchingId) || targets[0]
     );
+}
+
+function focusLoadedTransformerProfile(transformerId, transformerType) {
+    preferredTransformerProfileId = String(transformerId || '');
+    if (!transformerProfileResult || !preferredTransformerProfileId) return;
+    const requestedStage = transformerType === 'mv_hv' ? 'mv_hv' : 'lv_mv';
+    const targets = transformerProfileResult.stages[requestedStage].targets;
+    if (!targets.some((target) => target.id === preferredTransformerProfileId)) return;
+    activeTransformerProfileStage = requestedStage;
+    renderTransformerProfileStage(preferredTransformerProfileId);
 }
 
 async function loadTransformerProfiles() {
@@ -1608,8 +1760,139 @@ function updateGridLineSidePanel(prop) {
     `;
 }
 
-function gridVoedingsgebieden() {
-    return [...voedingsgebiedColors.keys()];
+function updateGridTransformerSidePanel(prop) {
+    const rating = prop.rated_power_kva == null
+        ? 'Unknown'
+        : `${Number(prop.rated_power_kva).toLocaleString('nl-NL')} kVA`;
+    focusLoadedTransformerProfile(prop.component_id, prop.transformer_type);
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">Grid transformer</div>
+        <div class="feature-identifier">${escapeHtml(prop.component_id)}</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Transformer type</div>
+                    <div class="data-value">${escapeHtml(String(prop.transformer_type).toUpperCase())}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Rated power</div>
+                    <div class="data-value">${escapeHtml(rating)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Primary / secondary</div>
+                    <div class="data-value">${escapeHtml(prop.primary_nominal_voltage_kv ?? '?')} / ${escapeHtml(prop.secondary_nominal_voltage_kv ?? '?')} kV</div>
+                </div>
+            </div>
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>GRID TOPOLOGY SNAPSHOT</strong><br>
+            Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+            <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function parseReachShares(value) {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string' || value.length === 0) return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        console.warn('Invalid ranked transformer shares:', error);
+        return [];
+    }
+}
+
+function formatReachShare(value) {
+    if (value == null || value === '') return 'Not applicable';
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+        ? `${numeric.toLocaleString('nl-NL', { maximumFractionDigits: 1 })}%`
+        : 'Not applicable';
+}
+
+function updateGridReachSidePanel(prop, level) {
+    if (prop.assignment_status === 'unavailable') {
+        selectScenarioTargetByPc6(prop.pc6_id);
+        document.getElementById('panel-content').innerHTML = `
+            <div class="pc6-header">${escapeHtml(prop.pc6_id)}</div>
+            <div class="feature-identifier">${escapeHtml(level)} transformer reach</div>
+            <div class="compact-value">Grid could not determine the ${escapeHtml(level)} station for this PC6.</div>
+            ${qualityMarkup(prop)}
+            <div class="pv-provenance">
+                Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+                <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+            </div>
+        `;
+        return;
+    }
+    const shares = parseReachShares(prop.ranked_shares ?? prop.ranked_shares_json);
+    selectScenarioTargetByPc6(prop.pc6_id);
+    const dominantName = prop.dominant_transformer_name || prop.dominant_transformer_id;
+    const runnerUpName = prop.runner_up_transformer_name || prop.runner_up_transformer_id;
+    const matchedLength = prop.matched_lv_cable_length_m == null
+        ? 'Not available'
+        : `${Number(prop.matched_lv_cable_length_m).toLocaleString('nl-NL', {
+            maximumFractionDigits: 1
+        })} m`;
+    const evidence = prop.fallback_used
+        ? `Nearest LV bus (${Number(prop.fallback_distance_m || 0).toLocaleString('nl-NL', {
+            maximumFractionDigits: 1
+        })} m)`
+        : 'LV cable length inside PC6';
+    const ambiguity = prop.is_ambiguous
+        ? 'Close result'
+        : prop.has_overlap ? 'Multiple shares, clear leader' : 'Single transformer';
+    const sharesMarkup = shares.map((share) => `
+        <div class="reach-share-row">
+            <span>${escapeHtml(share.transformer_name || share.transformer_id)}</span>
+            <strong>${formatReachShare(share.share_percent)}</strong>
+        </div>
+    `).join('');
+
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">${escapeHtml(prop.pc6_id)}</div>
+        <div class="feature-identifier">${escapeHtml(level)} transformer reach</div>
+        <div class="data-grid grid-component-grid">
+            <div class="data-column">
+                <div class="data-group">
+                    <div class="data-label">Dominant transformer</div>
+                    <div class="data-value compact-value">${escapeHtml(dominantName)}</div>
+                    <div class="share-value">${formatReachShare(prop.dominant_transformer_share_percent)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Runner-up</div>
+                    <div class="data-value compact-value">${escapeHtml(runnerUpName || 'None')}</div>
+                    <div class="share-value">${formatReachShare(prop.runner_up_transformer_share_percent)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Assignment evidence</div>
+                    <div class="data-value compact-value">${escapeHtml(evidence)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Matched LV cable</div>
+                    <div class="data-value">${escapeHtml(matchedLength)}</div>
+                </div>
+                <div class="data-group">
+                    <div class="data-label">Share confidence</div>
+                    <div class="data-value compact-value">${escapeHtml(ambiguity)}</div>
+                </div>
+            </div>
+        </div>
+        <div class="reach-shares">
+            <div class="data-label">All absolute PC6 shares</div>
+            ${sharesMarkup || '<div class="compact-value">No share breakdown available</div>'}
+        </div>
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>PC6-BASED MODEL ASSIGNMENT</strong><br>
+            ${escapeHtml(level)} shares are direct fractions of the original PC6 polygon.<br>
+            Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+            <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
 }
 
 function formatMw(value) {
@@ -1623,7 +1906,7 @@ function capacityDirectionMarkup(prop, direction, label) {
         <div class="data-column">
             <div class="data-group">
                 <div class="data-label">${label}: voedingsgebied</div>
-                <div class="data-value compact-value">${escapeHtml(prop[`${direction}_service_area_name`] || 'Geen')}</div>
+                <div class="data-value compact-value">${escapeHtml(prop[`${direction}_service_area_name`] || prop[`${direction}_service_area_id`] || 'Geen')}</div>
             </div>
             <div class="data-group">
                 <div class="data-label">Bestaande / benodigde transportcapaciteit</div>
@@ -1644,12 +1927,14 @@ function capacityDirectionMarkup(prop, direction, label) {
 function updateGridCapacitySidePanel(prop) {
     selectScenarioTargetByPc6(prop.pc6_id);
     const available = prop.assignment_status === 'available';
+    const split = available && voedingsgebiedId(prop) === null;
     const congestionLink = prop.congestion_url && /^https:\/\//.test(prop.congestion_url)
         ? `<a href="${escapeHtml(prop.congestion_url)}" target="_blank" rel="noopener">Congestie-informatie ${escapeHtml(prop.rnb || '')}</a><br>`
         : '';
     document.getElementById('panel-content').innerHTML = `
         <div class="pc6-header">${escapeHtml(prop.pc6_id)}</div>
         <div class="feature-identifier">Voedingsgebied (capaciteitskaart)</div>
+        ${split ? '<div class="compact-value">Afname en teruglevering vallen onder verschillende voedingsgebieden, of één richting ontbreekt.</div>' : ''}
         ${available ? `
         <div class="data-grid grid-component-grid">
             ${capacityDirectionMarkup(prop, 'withdrawal', 'Afname')}

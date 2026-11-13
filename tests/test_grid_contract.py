@@ -177,6 +177,31 @@ def transformer_feature():
         "geometry": {"type": "Point", "coordinates": [4.7755, 52.6305]},
     }
 
+def unavailable_reach_feature():
+    """An MV/HV reach row for a PC6 whose station Grid cannot determine (model 2.7)."""
+    feature = reach_feature("mv_hv")
+    properties = feature["properties"]
+    for field in (
+        "dominant_transformer_id",
+        "dominant_transformer_name",
+        "dominant_transformer_share",
+        "dominant_transformer_share_percent",
+        "dominant_root_bus_id",
+        "share_margin",
+        "share_margin_percentage_points",
+    ):
+        properties[field] = None
+    properties.update(
+        assignment_status="unavailable",
+        entity_count=0,
+        ranked_shares=[],
+        datacompleetheid=1,
+        datacompleetheid_label="beperkt compleet",
+        datacompleetheid_reason_codes=["topology_not_connected_to_known_source"],
+    )
+    return feature
+
+
 def reach_feature(level="lv_mv"):
     pc6_id = "1823AA"
     component_id = (
@@ -211,6 +236,7 @@ def reach_feature(level="lv_mv"):
                 else "pc6_lv_cable_share_by_electrical_root_v2"
             ),
             "share_scope": "absolute_pc6_to_target",
+            "assignment_status": "available",
             "dominant_transformer_id": transformer_id,
             "dominant_transformer_name": transformer_name,
             "dominant_transformer_share": 1.0,
@@ -678,7 +704,7 @@ class GridContractTest(unittest.TestCase):
         )
 
     def test_capacity_layer_is_required_unless_disabled(self):
-        with self.assertRaisesRegex(ValueError, "grid layer set drift"):
+        with self.assertRaisesRegex(ValueError, "does not offer grid_capacity_limits"):
             self.handoff(FakeSession(capacity=False))
         session = FakeSession(capacity=False)
         artifact = self.handoff(session, require_capacity=False)
@@ -698,6 +724,44 @@ class GridContractTest(unittest.TestCase):
         self.assertEqual(available["unique_requests_withdrawal"], 71)
         self.assertEqual(unavailable["assignment_status"], "unavailable")
         self.assertIsNone(unavailable["injection_service_area_id"])
+
+    def load_mv_hv(self, feature):
+        return load_grid_records(
+            {"type": "FeatureCollection", "features": [feature]},
+            layer_id="grid_mv_hv_transformer_reach",
+            expected_model_version=MODEL_VERSION,
+            expected_method_version=METHOD_VERSION,
+            expected_grid_data_version=GRID_DATA_VERSION,
+            expected_output_id=MV_HV_REACH_OUTPUT_ID,
+        )
+
+    def test_reach_rows_record_assignment_status(self):
+        available = self.load_mv_hv(reach_feature("mv_hv"))[0].properties
+        self.assertEqual(available["assignment_status"], "available")
+        unavailable = self.load_mv_hv(unavailable_reach_feature())[0].properties
+        self.assertEqual(unavailable["assignment_status"], "unavailable")
+        self.assertIsNone(unavailable["dominant_transformer_id"])
+        self.assertIsNone(unavailable["share_margin"])
+        self.assertEqual(unavailable["entity_count"], 0)
+        self.assertEqual(unavailable["ranked_shares"], [])
+        self.assertEqual(unavailable["datacompleetheid"], 1)
+
+    def test_unavailable_reach_rows_reject_drift(self):
+        cases = {
+            "unavailable transformer reach has dominant_transformer_id": lambda p: p.update(
+                dominant_transformer_id="grid-transformer-mv-hv-station-alkmaar"
+            ),
+            "unavailable transformer reach has shares": lambda p: p.update(entity_count=1),
+            "invalid transformer reach assignment_status": lambda p: p.update(
+                assignment_status="partial"
+            ),
+        }
+        for message, mutate in cases.items():
+            with self.subTest(message=message):
+                feature = unavailable_reach_feature()
+                mutate(feature["properties"])
+                with self.assertRaisesRegex(ValueError, message):
+                    self.load_mv_hv(feature)
 
     def test_capacity_contract_rejects_drift(self):
         cases = {
@@ -739,8 +803,18 @@ class GridContractTest(unittest.TestCase):
         self.assertIn(IMAGE_IDENTITY, compose)
         self.assertIn(GRID_CROSSWALK_IMAGE, compose)
         self.assertIn(RELEASE_COMMIT, compose)
-        self.assertIn("--fetch-region", compose)
-        self.assertIn("north-holland-towns", compose)
+        grid_init = compose.split("  grid-init:", 1)[1].split("  grid-capacity-refresh:", 1)[0]
+        refresh = compose.split("  grid-capacity-refresh:", 1)[1].split("  grid-api:", 1)[0]
+        # Liander's live service lacks the station attributes since 2026-11-08: build
+        # from the retained snapshot, and never fetch EDSN while starting.
+        self.assertNotIn("--fetch-region", grid_init)
+        self.assertNotIn("--fetch-capaciteitskaart", grid_init)
+        self.assertIn("--source-gpkg /data/sources/liander-north-holland-towns.gpkg", grid_init)
+        self.assertIn("--source-retrieved-at 2026-08-18T09:53:06.188727+00:00", grid_init)
+        self.assertIn("--capaciteitskaart-source-cache /data/sources/capaciteitskaart.json", grid_init)
+        self.assertIn('profiles: ["maintenance"]', refresh)
+        self.assertIn("--fetch-capaciteitskaart", refresh)
+        self.assertIn("/data/sources/liander-north-holland-towns.gpkg", refresh)
         self.assertNotIn("  grid-init:", local)
         self.assertNotIn("alkmaar_grid_fixture", local)
         self.assertNotIn("GRID_EXPECTED_DATA_MODE: fixture", local)

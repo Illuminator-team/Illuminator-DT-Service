@@ -1668,7 +1668,11 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(b"r-pv-capacity" in dashboard, "Dashboard PV layer control is missing")
     require(b"r-ev-chargers" in dashboard, "Dashboard EV layer control is missing")
     require(b"r-grid-network" in dashboard, "Dashboard Grid control is missing")
-    for control_id in (b"grid-capacity-areas", b"grid-mv-lines"):
+    for control_id in (
+        b"grid-lv-lines", b"grid-mv-lines", b"grid-hv-lines",
+        b"grid-lv-mv-transformers", b"grid-mv-hv-transformers",
+        b"grid-lv-mv-reach", b"grid-mv-hv-reach", b"grid-capacity-areas",
+    ):
         require(control_id in dashboard, f"Dashboard Grid visibility control is missing: {control_id!r}")
     require(b"r-wind-turbines" in dashboard, "Dashboard Wind layer control is missing")
     require(b"r-heat-network" in dashboard, "Dashboard Heat model control is missing")
@@ -1708,9 +1712,10 @@ def check_dashboard_and_simulation(client: SmokeClient) -> None:
     require(b"pv_capacity" in script, "Dashboard is not configured for PV WFS")
     require(b"public_ev_chargers" in script, "Dashboard is not configured for EV WFS")
     require(b"grid_lines" in script, "Dashboard is not configured for grid lines WFS")
-    require(b"CQL_FILTER=voltage_level%3D%27mv%27" in script, "Dashboard does not filter the MV lines")
-    require(b"grid_capacity_limits" in script, "Dashboard is not configured for the capaciteitskaart WFS")
     require(b"grid_transformers" in script, "Dashboard is not configured for transformers WFS")
+    require(b"grid_mv_hv_transformer_reach" in script, "Dashboard is not configured for MV/HV reach WFS")
+    require(b"grid_lv_mv_transformer_reach" in script, "Dashboard is not configured for LV/MV reach WFS")
+    require(b"grid_capacity_limits" in script, "Dashboard is not configured for the capaciteitskaart WFS")
     require(b"public_wind_turbines" in script, "Dashboard is not configured for Wind WFS")
     require(
         b"consumption_electricity_areas" in script,
