@@ -978,22 +978,6 @@ services:
       - ./policy-tool-frontend/data/alkmaar_energy_map.geojson:/data/alkmaar_energy_map.geojson:ro
     restart: unless-stopped
 
-  ## ---------------------------------------------------------------------------------
-  ## For debugging: use Redis Insight browser to explore the content of redis streams.
-  ## ---------------------------------------------------------------------------------
-  redis-insight:
-    image: redis/redisinsight@sha256:b5e19ee240abef6edb435871b90ff8a210995422e8e018ab61c0339d318a1f84 # 3.8.0
-    restart: always
-    environment:
-      - RI_REDIS_HOST0=redis
-      - RI_REDIS_PORT0=6379
-      - RI_REDIS_PASSWORD0=${REDIS_PASSWORD}
-      - RI_REDIS_ALIAS0=Tutorial Redis Database
-    ports:
-      - "127.0.0.1:5540:5540"
-    depends_on:
-      - redis
-
 
 volumes:
   redis-data:

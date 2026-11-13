@@ -18,12 +18,6 @@ services:
     ports: !override
       - "15432:5432"
 
-  redis-insight:
-    profiles:
-      - extended-rdp
-    ports: !override
-      - "15540:5540"
-
   grafana:
     profiles:
       - extended-rdp

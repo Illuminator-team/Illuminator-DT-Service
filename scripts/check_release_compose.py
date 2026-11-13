@@ -51,7 +51,6 @@ PINNED_MODEL_SERVICES = {
 LOOPBACK_PORTS = {
     "timescale": {5432},
     "reverse-proxy": {8080},
-    "redis-insight": {5540},
 }
 
 IMAGE_DIGEST = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
