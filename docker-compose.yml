@@ -47,6 +47,9 @@ services:
       restart: always
 
   policy-tool-backend:
+      # Shared with transformer-profile-init; named after the Compose project so two
+      # projects on one Docker host never overwrite each other's image.
+      image: ${COMPOSE_PROJECT_NAME}-policy-tool-backend
       build: ./policy-tool-backend
       volumes:
         - policy-tool-data:/app/data/processed
@@ -568,6 +571,9 @@ services:
     restart: unless-stopped
 
   transformer-profile-init:
+      # Same image as policy-tool-backend, so a rebuild of the backend also updates
+      # the baseline code (a separately named image went stale for weeks).
+      image: ${COMPOSE_PROJECT_NAME}-policy-tool-backend
       build: ./policy-tool-backend
       command:
         - python
