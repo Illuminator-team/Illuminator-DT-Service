@@ -144,17 +144,21 @@ test('loads grid lines, transformers, and both PC6 reach maps as independent Geo
     const transformers = await mapData.loadGridTransformersFeatureCollection(fetchImpl);
     const lvMvReach = await mapData.loadGridLvMvReachFeatureCollection(fetchImpl);
     const reach = await mapData.loadGridMvHvReachFeatureCollection(fetchImpl);
+    const capacity = await mapData.loadGridCapacityFeatureCollection(fetchImpl);
 
     assert.equal(lines.source, 'geoserver_wfs');
     assert.equal(transformers.source, 'geoserver_wfs');
     assert.equal(reach.source, 'geoserver_wfs');
     assert.equal(lvMvReach.source, 'geoserver_wfs');
+    assert.equal(capacity.source, 'geoserver_wfs');
     assert.deepEqual(calls, [
         mapData.GRID_LINES_WFS_URL,
         mapData.GRID_TRANSFORMERS_WFS_URL,
         mapData.GRID_LV_MV_REACH_WFS_URL,
-        mapData.GRID_MV_HV_REACH_WFS_URL
+        mapData.GRID_MV_HV_REACH_WFS_URL,
+        mapData.GRID_CAPACITY_WFS_URL
     ]);
+    assert.match(mapData.GRID_CAPACITY_WFS_URL, /typeNames=grid_capacity_limits&/);
 });
 
 test('does not substitute another layer when a grid WFS request fails', async () => {

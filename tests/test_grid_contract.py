@@ -22,16 +22,16 @@ from postgis_sql import (  # noqa: E402
 )
 
 
-RELEASE_COMMIT = "3fe554a05b6609bb33b2f99bd26ba4701a55d971"
-CONTAINER_DIGEST = "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c"
+RELEASE_COMMIT = "9148f09372f843f0ee876121968be84aebfeae06"
+CONTAINER_DIGEST = "sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729"
 IMAGE_IDENTITY = f"ghcr.io/jortgroen/liander-grid-model-api@{CONTAINER_DIGEST}"
 GRID_CROSSWALK_IMAGE = (
     "ghcr.io/jortgroen/liander-grid-crosswalk@sha256:"
     "f17e0a27f665a8885aa1f527359c22889ce5d2e3ead14dc4eb5d0e582154774e"
 )
-MODEL_VERSION = "2.1.0"
-CONTRACT_VERSION = "2.4.0"
-METHOD_VERSION = "2.1.0"
+MODEL_VERSION = "2.7.0"
+CONTRACT_VERSION = "2.9.0"
+METHOD_VERSION = "2.7.0"
 GRID_DATA_VERSION = "grid-acceptance-version"
 BBOX = [4.74454, 52.629131, 4.835248, 52.644642]
 RUN_ID = "11111111-1111-4111-8111-111111111111"
@@ -39,6 +39,8 @@ LINE_OUTPUT_ID = "22222222-2222-4222-8222-222222222222"
 TRANSFORMER_OUTPUT_ID = "33333333-3333-4333-8333-333333333333"
 LV_MV_REACH_OUTPUT_ID = "44444444-4444-4444-8444-444444444444"
 MV_HV_REACH_OUTPUT_ID = "55555555-5555-4555-8555-555555555555"
+CAPACITY_RUN_ID = "77777777-7777-4777-8777-777777777777"
+CAPACITY_OUTPUT_ID = "88888888-8888-4888-8888-888888888888"
 TIMESTAMP = "2026-08-08T07:00:00+00:00"
 
 
@@ -175,6 +177,31 @@ def transformer_feature():
         "geometry": {"type": "Point", "coordinates": [4.7755, 52.6305]},
     }
 
+def unavailable_reach_feature():
+    """An MV/HV reach row for a PC6 whose station Grid cannot determine (model 2.7)."""
+    feature = reach_feature("mv_hv")
+    properties = feature["properties"]
+    for field in (
+        "dominant_transformer_id",
+        "dominant_transformer_name",
+        "dominant_transformer_share",
+        "dominant_transformer_share_percent",
+        "dominant_root_bus_id",
+        "share_margin",
+        "share_margin_percentage_points",
+    ):
+        properties[field] = None
+    properties.update(
+        assignment_status="unavailable",
+        entity_count=0,
+        ranked_shares=[],
+        datacompleetheid=1,
+        datacompleetheid_label="beperkt compleet",
+        datacompleetheid_reason_codes=["topology_not_connected_to_known_source"],
+    )
+    return feature
+
+
 def reach_feature(level="lv_mv"):
     pc6_id = "1823AA"
     component_id = (
@@ -209,6 +236,7 @@ def reach_feature(level="lv_mv"):
                 else "pc6_lv_cable_share_by_electrical_root_v2"
             ),
             "share_scope": "absolute_pc6_to_target",
+            "assignment_status": "available",
             "dominant_transformer_id": transformer_id,
             "dominant_transformer_name": transformer_name,
             "dominant_transformer_share": 1.0,
@@ -284,6 +312,73 @@ def reach_feature(level="lv_mv"):
     }
 
 
+def capacity_feature(pc6_id="1823AA", *, available=True):
+    component_id = f"grid-capacity-limits-pc6-{pc6_id}"
+    properties = common_properties(
+        component_id, "capacity_limits", CAPACITY_OUTPUT_ID, voltage_level="mv"
+    )
+    area = "OS OUDORP 10-1i" if available else None
+    properties.update(
+        {
+            "run_id": CAPACITY_RUN_ID,
+            "nominal_voltage": 10.0,
+            "source_reference_period": "2026",
+            "datacompleetheid": 3 if available else 0,
+            "datacompleetheid_rule_version": "datacompleetheid-grid-capacity-v1",
+            "datacompleetheid_reason_codes": [
+                "both_directions_resolved_to_published_service_area"
+                if available
+                else "no_registered_source_evidence"
+            ],
+            "pc6_id": pc6_id,
+            "provider_id": "edsn",
+            "source_id": "edsn-capaciteitskaart-open-data",
+            "grid_operator_type": "RNB",
+            "assignment_status": "available" if available else "unavailable",
+            "rnb": "Liander" if available else None,
+            "congestion_url": "https://www.liander.nl/" if available else None,
+            "withdrawal_service_area_id": area,
+            "withdrawal_service_area_name": area,
+            "injection_service_area_id": area,
+            "injection_service_area_name": area,
+            "year_solved_withdrawal": "2033" if available else None,
+            "year_solved_injection": "2033" if available else None,
+            "tennet_year_solved_withdrawal": "2036" if available else None,
+            "tennet_year_solved_injection": "2027" if available else None,
+            "existing_transport_capacity_withdrawal_mw": 36.0 if available else None,
+            "existing_transport_capacity_injection_mw": 36.0 if available else None,
+            "required_transport_capacity_withdrawal_mw": 40.0 if available else None,
+            "required_transport_capacity_injection_mw": 26.0 if available else None,
+            "queue_withdrawal_mw": 29.8 if available else None,
+            "queue_injection_mw": 12.5 if available else None,
+            "unique_requests_withdrawal": 71 if available else None,
+            "unique_requests_injection": 21 if available else None,
+            "tennet_withdrawal_status_max": 3 if available else None,
+            "tennet_injection_status_max": 3 if available else None,
+        }
+    )
+    return {
+        "type": "Feature",
+        "id": component_id,
+        "properties": properties,
+        "geometry": {
+            "type": "MultiPolygon",
+            "coordinates": [[[[4.77, 52.63], [4.78, 52.63], [4.78, 52.64], [4.77, 52.63]]]],
+        },
+    }
+
+
+def load_capacity(features):
+    return load_grid_records(
+        {"type": "FeatureCollection", "features": features},
+        layer_id="grid_capacity_limits",
+        expected_model_version=MODEL_VERSION,
+        expected_method_version=METHOD_VERSION,
+        expected_grid_data_version=GRID_DATA_VERSION,
+        expected_output_id=CAPACITY_OUTPUT_ID,
+    )
+
+
 class FakeResponse:
     def __init__(self, *, document=None, content=None, content_type="application/json"):
         self._document = document
@@ -298,7 +393,7 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self, *, data_link=None):
+    def __init__(self, *, data_link=None, capacity=True):
         collections = {
             "grid_lines": {"type": "FeatureCollection", "features": [line_feature()]},
             "grid_transformers": {
@@ -320,6 +415,12 @@ class FakeSession:
             "grid_lv_mv_transformer_reach": LV_MV_REACH_OUTPUT_ID,
             "grid_mv_hv_transformer_reach": MV_HV_REACH_OUTPUT_ID,
         }
+        if capacity:
+            collections["grid_capacity_limits"] = {
+                "type": "FeatureCollection",
+                "features": [capacity_feature()],
+            }
+            output_ids["grid_capacity_limits"] = CAPACITY_OUTPUT_ID
         self.outputs = {}
         self.data = {}
         summaries = []
@@ -344,6 +445,7 @@ class FakeSession:
                 content=content,
                 content_type="application/geo+json",
             )
+            run_id = CAPACITY_RUN_ID if layer_id == "grid_capacity_limits" else RUN_ID
             summaries.append(
                 {
                     "output_id": output_id,
@@ -352,14 +454,19 @@ class FakeSession:
                     "links": {
                         "self": f"/outputs/{output_id}",
                         "data": f"/outputs/{output_id}/data",
-                        "run": f"/runs/{RUN_ID}",
+                        "run": f"/runs/{run_id}",
                     },
                 }
             )
         self.run = {
             "run_id": RUN_ID,
             "status": "completed",
-            "outputs": summaries,
+            "outputs": [item for item in summaries if item["layer_id"] != "grid_capacity_limits"],
+        }
+        self.capacity_run = {
+            "run_id": CAPACITY_RUN_ID,
+            "status": "completed",
+            "outputs": [item for item in summaries if item["layer_id"] == "grid_capacity_limits"],
         }
         self.routes = {
             ("GET", "/ready"): FakeResponse(
@@ -392,17 +499,12 @@ class FakeSession:
                 document={
                     "layers": [
                         {"id": layer_id, "runtime": {"feature_count": 1}}
-                        for layer_id in (
-                            "grid_lines",
-                            "grid_transformers",
-                            "grid_lv_mv_transformer_reach",
-                            "grid_mv_hv_transformer_reach",
-                        )
+                        for layer_id in collections
                     ]
                 }
             ),
-            ("POST", "/runs"): FakeResponse(document=self.run),
             ("GET", f"/runs/{RUN_ID}"): FakeResponse(document=self.run),
+            ("GET", f"/runs/{CAPACITY_RUN_ID}"): FakeResponse(document=self.capacity_run),
         }
         for layer_id, output in self.outputs.items():
             output_id = output_ids[layer_id]
@@ -413,6 +515,10 @@ class FakeSession:
     def request(self, method, url, **kwargs):
         path = urlparse(url).path
         self.requests.append((method, path, kwargs.get("json")))
+        if (method, path) == ("POST", "/runs"):
+            if kwargs["json"]["layer_ids"] == ["grid_capacity_limits"]:
+                return FakeResponse(document=self.capacity_run)
+            return FakeResponse(document=self.run)
         return self.routes[(method, path)]
 
 
@@ -546,7 +652,7 @@ class GridContractTest(unittest.TestCase):
                 expected_output_id=LINE_OUTPUT_ID,
             )
 
-    def test_http_handoff_verifies_bounded_four_layer_artifact(self):
+    def test_http_handoff_verifies_bounded_four_layer_artifact_and_capacity(self):
         session = FakeSession()
         artifact = fetch_grid_artifact(
             "http://grid-api:8080",
@@ -565,19 +671,115 @@ class GridContractTest(unittest.TestCase):
                 "grid_transformers",
                 "grid_lv_mv_transformer_reach",
                 "grid_mv_hv_transformer_reach",
+                "grid_capacity_limits",
             },
         )
-        post_request = next(item for item in session.requests if item[:2] == ("POST", "/runs"))
-        self.assertEqual(post_request[2]["selection"]["bbox"], BBOX)
+        posts = [item for item in session.requests if item[:2] == ("POST", "/runs")]
+        self.assertEqual(posts[0][2]["selection"]["bbox"], BBOX)
         self.assertEqual(
-            post_request[2]["layer_ids"],
+            [post[2]["layer_ids"] for post in posts],
             [
-                "grid_lines",
-                "grid_transformers",
-                "grid_lv_mv_transformer_reach",
-                "grid_mv_hv_transformer_reach",
+                [
+                    "grid_lines",
+                    "grid_transformers",
+                    "grid_lv_mv_transformer_reach",
+                    "grid_mv_hv_transformer_reach",
+                ],
+                ["grid_capacity_limits"],
             ],
         )
+        self.assertEqual(artifact.output_ids["grid_capacity_limits"], CAPACITY_OUTPUT_ID)
+
+    def handoff(self, session, **kwargs):
+        return fetch_grid_artifact(
+            "http://grid-api:8080",
+            bbox=BBOX,
+            expected_release_commit=RELEASE_COMMIT,
+            expected_container_digest=CONTAINER_DIGEST,
+            expected_model_version=MODEL_VERSION,
+            expected_contract_version=CONTRACT_VERSION,
+            expected_data_mode="fixture",
+            session=session,
+            **kwargs,
+        )
+
+    def test_capacity_layer_is_required_unless_disabled(self):
+        with self.assertRaisesRegex(ValueError, "does not offer grid_capacity_limits"):
+            self.handoff(FakeSession(capacity=False))
+        session = FakeSession(capacity=False)
+        artifact = self.handoff(session, require_capacity=False)
+        self.assertNotIn("grid_capacity_limits", artifact.records_by_layer)
+        self.assertEqual(
+            len([item for item in session.requests if item[:2] == ("POST", "/runs")]), 1
+        )
+        # When the grid offers it, it is published even if not required.
+        artifact = self.handoff(FakeSession(), require_capacity=False)
+        self.assertIn("grid_capacity_limits", artifact.records_by_layer)
+
+    def test_capacity_rows_keep_voedingsgebied_and_unavailable_pc6(self):
+        records = load_capacity([capacity_feature("1823AA"), capacity_feature("1811AM", available=False)])
+        available, unavailable = (record.properties for record in records)
+        self.assertEqual(available["withdrawal_service_area_id"], "OS OUDORP 10-1i")
+        self.assertEqual(available["existing_transport_capacity_withdrawal_mw"], 36.0)
+        self.assertEqual(available["unique_requests_withdrawal"], 71)
+        self.assertEqual(unavailable["assignment_status"], "unavailable")
+        self.assertIsNone(unavailable["injection_service_area_id"])
+
+    def load_mv_hv(self, feature):
+        return load_grid_records(
+            {"type": "FeatureCollection", "features": [feature]},
+            layer_id="grid_mv_hv_transformer_reach",
+            expected_model_version=MODEL_VERSION,
+            expected_method_version=METHOD_VERSION,
+            expected_grid_data_version=GRID_DATA_VERSION,
+            expected_output_id=MV_HV_REACH_OUTPUT_ID,
+        )
+
+    def test_reach_rows_record_assignment_status(self):
+        available = self.load_mv_hv(reach_feature("mv_hv"))[0].properties
+        self.assertEqual(available["assignment_status"], "available")
+        unavailable = self.load_mv_hv(unavailable_reach_feature())[0].properties
+        self.assertEqual(unavailable["assignment_status"], "unavailable")
+        self.assertIsNone(unavailable["dominant_transformer_id"])
+        self.assertIsNone(unavailable["share_margin"])
+        self.assertEqual(unavailable["entity_count"], 0)
+        self.assertEqual(unavailable["ranked_shares"], [])
+        self.assertEqual(unavailable["datacompleetheid"], 1)
+
+    def test_unavailable_reach_rows_reject_drift(self):
+        cases = {
+            "unavailable transformer reach has dominant_transformer_id": lambda p: p.update(
+                dominant_transformer_id="grid-transformer-mv-hv-station-alkmaar"
+            ),
+            "unavailable transformer reach has shares": lambda p: p.update(entity_count=1),
+            "invalid transformer reach assignment_status": lambda p: p.update(
+                assignment_status="partial"
+            ),
+        }
+        for message, mutate in cases.items():
+            with self.subTest(message=message):
+                feature = unavailable_reach_feature()
+                mutate(feature["properties"])
+                with self.assertRaisesRegex(ValueError, message):
+                    self.load_mv_hv(feature)
+
+    def test_capacity_contract_rejects_drift(self):
+        cases = {
+            "no voedingsgebied": lambda p: p.update(withdrawal_service_area_id=None, injection_service_area_id=None),
+            "unavailable capacity row has a voedingsgebied": lambda p: p.update(assignment_status="unavailable"),
+            "capaciteitskaart source drift": lambda p: p.update(provider_id="other"),
+            "PC6 capacity identity drift": lambda p: p.update(pc6_id="1823AB"),
+            "datacompleetheid rule drift": lambda p: p.update(datacompleetheid_rule_version="datacompleetheid-grid-v1"),
+            "must be finite and non-negative": lambda p: p.update(queue_withdrawal_mw=-1),
+            "non-negative integer": lambda p: p.update(unique_requests_injection=1.5),
+            "capacity assignment status drift": lambda p: p.update(assignment_status="partial"),
+        }
+        for message, mutate in cases.items():
+            with self.subTest(message):
+                feature = capacity_feature()
+                mutate(feature["properties"])
+                with self.assertRaisesRegex(ValueError, message):
+                    load_capacity([feature])
 
     def test_http_handoff_rejects_cross_origin_output_link(self):
         session = FakeSession(data_link="https://example.invalid/grid.geojson")
@@ -601,8 +803,18 @@ class GridContractTest(unittest.TestCase):
         self.assertIn(IMAGE_IDENTITY, compose)
         self.assertIn(GRID_CROSSWALK_IMAGE, compose)
         self.assertIn(RELEASE_COMMIT, compose)
-        self.assertIn("--fetch-region", compose)
-        self.assertIn("north-holland-towns", compose)
+        grid_init = compose.split("  grid-init:", 1)[1].split("  grid-capacity-refresh:", 1)[0]
+        refresh = compose.split("  grid-capacity-refresh:", 1)[1].split("  grid-api:", 1)[0]
+        # Liander's live service lacks the station attributes since 2026-11-08: build
+        # from the retained snapshot, and never fetch EDSN while starting.
+        self.assertNotIn("--fetch-region", grid_init)
+        self.assertNotIn("--fetch-capaciteitskaart", grid_init)
+        self.assertIn("--source-gpkg /data/sources/liander-north-holland-towns.gpkg", grid_init)
+        self.assertIn("--source-retrieved-at 2026-08-18T09:53:06.188727+00:00", grid_init)
+        self.assertIn("--capaciteitskaart-source-cache /data/sources/capaciteitskaart.json", grid_init)
+        self.assertIn('profiles: ["maintenance"]', refresh)
+        self.assertIn("--fetch-capaciteitskaart", refresh)
+        self.assertIn("/data/sources/liander-north-holland-towns.gpkg", refresh)
         self.assertNotIn("  grid-init:", local)
         self.assertNotIn("alkmaar_grid_fixture", local)
         self.assertNotIn("GRID_EXPECTED_DATA_MODE: fixture", local)

@@ -2,13 +2,13 @@ x-pv-image: &pv-image
   image: ghcr.io/jortgroen/pv-map-api@sha256:d35b73fc88dcdb959f8084ede6348e148039ab530282ac1e779a58f6129cf428
 
 x-grid-image: &grid-image
-  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
+  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
 
 x-grid-crosswalk-image: &grid-crosswalk-image
   image: ghcr.io/jortgroen/liander-grid-crosswalk@sha256:f17e0a27f665a8885aa1f527359c22889ce5d2e3ead14dc4eb5d0e582154774e
 
 x-congestion-image: &congestion-image
-  image: ghcr.io/jortgroen/congestion-backend@sha256:d44df2b778508747fa2133740130fa97692a1198e5d91f0e14e0474f671eceea
+  image: ghcr.io/jortgroen/congestion-backend@sha256:575dac643e2527a6b6e19346b0ea9e4d1f1d00ddbbe0257d7b21dd71945946de
 
 x-wind-image: &wind-image
   image: ghcr.io/jortgroen/wind-turbine-map-api@sha256:66f97333bea9ab3cce5d6704abee4a408086cf75ed55f05e86382decadc51419
@@ -70,6 +70,8 @@ services:
       depends_on:
         transformer-profile-init:
           condition: service_completed_successfully
+          # Optional: a missing Grid snapshot must not keep the other models down.
+          required: false
       labels:
         - "traefik.enable=true"
         # path to /policy-api is needed to out frontend to make calls to the backend
@@ -160,8 +162,63 @@ services:
       - grid-crosswalk-data:/crosswalk
     restart: "no"
 
+  # Grid and congestion move (and roll back) together: congestion 475ca82 accepts
+  # grid contract 2.9.0 only at 9148f09.
+  #
+  # Since 2026-11-08 Liander's public service lacks the station attributes Grid needs
+  # (liander-grid-model#41), so a live --fetch-region would build a rootless grid.
+  # grid-init therefore builds from the retained 18 Aug snapshot, the source of the
+  # previous cache (sha256 e7c9d609...). The capaciteitskaart comes from the document
+  # stored by grid-capacity-refresh, so starting never depends on EDSN; without that
+  # document the grid is built without the capacity layer. An identical request
+  # reuses the ready cache.
   grid-init:
     <<: *grid-image
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        set -- --source-gpkg /data/sources/liander-north-holland-towns.gpkg \
+          --source-retrieved-at 2026-08-18T09:53:06.188727+00:00 \
+          --pc6-geojson /crosswalk/alkmaar-cbs-postcode6-2024.geojson \
+          --buurt-pc6-crosswalk /crosswalk/alkmaar-buurt-pc6-2025.json
+        if [ -f /data/sources/capaciteitskaart.json ]; then
+          set -- "$$@" --capaciteitskaart-source-cache /data/sources/capaciteitskaart.json
+        else
+          echo "grid-init: no stored capaciteitskaart; run grid-capacity-refresh to add it" >&2
+        fi
+        exec python -m grid_api initialize "$$@"
+    environment:
+      GRID_API_DATA_DIR: /data
+      GRID_API_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+    volumes:
+      - grid-model-data:/data
+      - grid-crosswalk-data:/crosswalk:ro
+    depends_on:
+      grid-crosswalk-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # Fetches the current EDSN capaciteitskaart (about 35 minutes for all PC6), stores it
+  # as /data/sources/capaciteitskaart.json and keeps every version; a new version rebuilds
+  # the cache. Run it on demand, with grid-api stopped, then start grid-api and restart
+  # layer-publisher:
+  #   docker compose stop grid-api
+  #   docker compose --profile maintenance run --rm grid-capacity-refresh
+  #   docker compose up -d grid-api && docker compose restart layer-publisher
+  # An EDSN outage fails only this run; the stored version keeps serving.
+  grid-capacity-refresh:
+    <<: *grid-image
+    profiles: ["maintenance"]
     user: "10001:10001"
     read_only: true
     cap_drop:
@@ -175,22 +232,23 @@ services:
       - -m
       - grid_api
       - initialize
-      - --fetch-region
-      - north-holland-towns
+      - --source-gpkg
+      - /data/sources/liander-north-holland-towns.gpkg
+      - --source-retrieved-at
+      - "2026-08-18T09:53:06.188727+00:00"
       - --pc6-geojson
       - /crosswalk/alkmaar-cbs-postcode6-2024.geojson
       - --buurt-pc6-crosswalk
       - /crosswalk/alkmaar-buurt-pc6-2025.json
-      - --reuse-ready-cache
+      - --fetch-capaciteitskaart
+      - --capaciteitskaart-reference-period
+      - "2026"
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
+      GRID_API_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
     volumes:
       - grid-model-data:/data
       - grid-crosswalk-data:/crosswalk:ro
-    depends_on:
-      grid-crosswalk-init:
-        condition: service_completed_successfully
     restart: "no"
 
   grid-api:
@@ -206,12 +264,14 @@ services:
       - /tmp:size=64m,mode=1777
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
+      GRID_API_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
     volumes:
       - grid-model-data:/data
     depends_on:
       grid-init:
         condition: service_completed_successfully
+        # Optional: a missing Grid snapshot must not keep the other models down.
+        required: false
     healthcheck:
       test:
         - CMD
@@ -530,6 +590,8 @@ services:
           condition: service_healthy
         grid-api:
           condition: service_healthy
+          # Optional: a missing Grid snapshot must not keep the other models down.
+          required: false
         pv-api:
           condition: service_healthy
       restart: "no"
@@ -857,9 +919,12 @@ services:
       PV_EXPECTED_RELEASE_COMMIT: 0d40dbfa6d30b96b01f1d4e633c13b42c654c1d0
       PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:d35b73fc88dcdb959f8084ede6348e148039ab530282ac1e779a58f6129cf428
       GRID_API_URL: http://grid-api:8080
-      GRID_EXPECTED_RELEASE_COMMIT: 3fe554a05b6609bb33b2f99bd26ba4701a55d971
-      GRID_EXPECTED_CONTAINER_DIGEST: sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c
+      GRID_EXPECTED_RELEASE_COMMIT: 9148f09372f843f0ee876121968be84aebfeae06
+      GRID_EXPECTED_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
       GRID_EXPECTED_DATA_MODE: real_source
+      # Publish grid_capacity_limits whenever Grid offers it; without a stored
+      # capaciteitskaart the other grid layers are still published (with a warning).
+      GRID_REQUIRE_CAPACITY: "false"
       GRID_EXPORT_BBOX: 4.60,52.50,4.98,52.88
       WIND_API_URL: http://wind-api:8080
       WIND_EXPECTED_RELEASE_COMMIT: 91d7443094aa0bb4fecdbcac975fa06b6ea617b0
@@ -891,6 +956,8 @@ services:
         condition: service_healthy
       grid-api:
         condition: service_healthy
+        # Optional: a missing Grid snapshot must not keep the other models down.
+        required: false
       wind-api:
         condition: service_healthy
       heat-api:

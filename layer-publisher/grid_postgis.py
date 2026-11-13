@@ -4,6 +4,12 @@ from typing import Any
 
 import psycopg2
 from grid import (
+    GRID_CAPACITY_COUNT_FIELDS,
+    GRID_CAPACITY_FIELDS,
+    GRID_CAPACITY_LAYER_ID,
+    GRID_CAPACITY_MW_FIELDS,
+    GRID_CAPACITY_STATUS_FIELDS,
+    GRID_CAPACITY_TEXT_FIELDS,
     GRID_LAYER_FIELDS,
     GRID_LINE_FIELDS,
     GRID_REACH_FIELDS,
@@ -89,19 +95,20 @@ GRID_REACH_SQL_TYPES = {
     "reach_level": "TEXT NOT NULL",
     "reach_method": "TEXT NOT NULL",
     "share_scope": "TEXT NOT NULL CHECK (share_scope = 'absolute_pc6_to_target')",
-    "dominant_transformer_id": "TEXT NOT NULL",
-    "dominant_transformer_name": "TEXT NOT NULL",
-    "dominant_transformer_share": "DOUBLE PRECISION NOT NULL CHECK (dominant_transformer_share BETWEEN 0 AND 1)",
-    "dominant_transformer_share_percent": "DOUBLE PRECISION NOT NULL CHECK (dominant_transformer_share_percent BETWEEN 0 AND 100)",
+    # NULL only on an unavailable row (no station determined); the publisher checks that.
+    "dominant_transformer_id": "TEXT",
+    "dominant_transformer_name": "TEXT",
+    "dominant_transformer_share": "DOUBLE PRECISION CHECK (dominant_transformer_share BETWEEN 0 AND 1)",
+    "dominant_transformer_share_percent": "DOUBLE PRECISION CHECK (dominant_transformer_share_percent BETWEEN 0 AND 100)",
     "dominant_root_bus_id": "TEXT",
     "runner_up_transformer_id": "TEXT",
     "runner_up_transformer_name": "TEXT",
     "runner_up_transformer_share": "DOUBLE PRECISION CHECK (runner_up_transformer_share BETWEEN 0 AND 1)",
     "runner_up_transformer_share_percent": "DOUBLE PRECISION CHECK (runner_up_transformer_share_percent BETWEEN 0 AND 100)",
     "runner_up_root_bus_id": "TEXT",
-    "share_margin": "DOUBLE PRECISION NOT NULL CHECK (share_margin BETWEEN 0 AND 1)",
-    "share_margin_percentage_points": "DOUBLE PRECISION NOT NULL CHECK (share_margin_percentage_points BETWEEN 0 AND 100)",
-    "entity_count": "INTEGER NOT NULL CHECK (entity_count > 0)",
+    "share_margin": "DOUBLE PRECISION CHECK (share_margin BETWEEN 0 AND 1)",
+    "share_margin_percentage_points": "DOUBLE PRECISION CHECK (share_margin_percentage_points BETWEEN 0 AND 100)",
+    "entity_count": "INTEGER NOT NULL CHECK (entity_count >= 0)",
     "has_overlap": "BOOLEAN NOT NULL",
     "is_ambiguous": "BOOLEAN NOT NULL",
     "ambiguity_reason": "TEXT",
@@ -115,6 +122,22 @@ GRID_REACH_SQL_TYPES = {
     "pc6_source_id": "TEXT NOT NULL",
     "pc6_source_sha256": "CHAR(64) NOT NULL",
     "evidence_status": "TEXT NOT NULL",
+    "assignment_status": "TEXT NOT NULL CHECK (assignment_status IN ('available', 'unavailable'))",
+}
+
+GRID_CAPACITY_SQL_TYPES = {
+    **GRID_COMMON_SQL_TYPES,
+    "pc6_id": "TEXT UNIQUE NOT NULL",
+    "provider_id": "TEXT NOT NULL",
+    "source_id": "TEXT NOT NULL",
+    "grid_operator_type": "TEXT NOT NULL",
+    "assignment_status": "TEXT NOT NULL CHECK (assignment_status IN ('available', 'unavailable'))",
+    **{field: "TEXT" for field in GRID_CAPACITY_TEXT_FIELDS},
+    **{
+        field: f"DOUBLE PRECISION CHECK ({field} >= 0)"
+        for field in (*GRID_CAPACITY_MW_FIELDS, *GRID_CAPACITY_STATUS_FIELDS)
+    },
+    **{field: f"INTEGER CHECK ({field} >= 0)" for field in GRID_CAPACITY_COUNT_FIELDS},
 }
 
 GRID_LAYER_SQL = {
@@ -139,6 +162,12 @@ GRID_LAYER_SQL = {
     "grid_mv_hv_transformer_reach": {
         "fields": GRID_REACH_FIELDS,
         "types": GRID_REACH_SQL_TYPES,
+        "geometry_type": "MultiPolygon",
+        "template": values_template,
+    },
+    GRID_CAPACITY_LAYER_ID: {
+        "fields": GRID_CAPACITY_FIELDS,
+        "types": GRID_CAPACITY_SQL_TYPES,
         "geometry_type": "MultiPolygon",
         "template": values_template,
     },
@@ -318,3 +347,18 @@ def sync_grid_layer(
             f"total={total} unique={unique_ids}"
         )
     return {"changed": changed, "deleted": deleted, "total": total}
+
+
+def clear_grid_layer(db_conn: dict[str, Any], *, table: str) -> int:
+    """Empty a published grid table whose layer Grid no longer offers.
+
+    The table and its GeoServer layer stay, so nothing breaks, but no stale rows
+    from an earlier cache remain visible. Returns the number of rows removed.
+    """
+    with psycopg2.connect(**db_conn) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass(%s)", (f"public.{table}",))
+            if cursor.fetchone()[0] is None:
+                return 0
+            cursor.execute(f"DELETE FROM public.{table}")
+            return cursor.rowcount

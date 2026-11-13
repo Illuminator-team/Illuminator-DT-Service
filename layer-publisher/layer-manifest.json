@@ -183,8 +183,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.1.0",
-      "metadata_contract_version": "2.4.0",
+      "model_version": "2.7.0",
+      "metadata_contract_version": "2.9.0",
       "table": "grid_lines",
       "geoserver_layer": "grid_lines",
       "source": {
@@ -192,9 +192,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "3fe554a05b6609bb33b2f99bd26ba4701a55d971",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c",
-        "container_digest": "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c",
+        "release_commit": "9148f09372f843f0ee876121968be84aebfeae06",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
+        "container_digest": "sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -326,8 +326,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.1.0",
-      "metadata_contract_version": "2.4.0",
+      "model_version": "2.7.0",
+      "metadata_contract_version": "2.9.0",
       "table": "grid_transformers",
       "geoserver_layer": "grid_transformers",
       "source": {
@@ -335,9 +335,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "3fe554a05b6609bb33b2f99bd26ba4701a55d971",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c",
-        "container_digest": "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c",
+        "release_commit": "9148f09372f843f0ee876121968be84aebfeae06",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
+        "container_digest": "sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -489,8 +489,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.1.0",
-      "metadata_contract_version": "2.4.0",
+      "model_version": "2.7.0",
+      "metadata_contract_version": "2.9.0",
       "table": "grid_lv_mv_transformer_reach",
       "geoserver_layer": "grid_lv_mv_transformer_reach",
       "source": {
@@ -498,9 +498,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "3fe554a05b6609bb33b2f99bd26ba4701a55d971",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c",
-        "container_digest": "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c",
+        "release_commit": "9148f09372f843f0ee876121968be84aebfeae06",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
+        "container_digest": "sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -635,6 +635,10 @@
           "type": "string"
         },
         {
+          "name": "assignment_status",
+          "type": "string"
+        },
+        {
           "name": "datacompleetheid",
           "type": "integer"
         },
@@ -674,7 +678,8 @@
       "limitations": [
         "Only PC6 polygons supplied to the grid initializer are represented.",
         "Shares use intersecting LV cable length; PC6 areas without an intersection use an explicitly marked nearest-LV-bus fallback.",
-        "Assignments are model-estimated and are not legal or authoritative service territories."
+        "Assignments are model-estimated and are not legal or authoritative service territories.",
+        "A PC6 whose station Grid cannot determine is published with assignment_status=unavailable and no station, as a coverage gap."
       ],
       "services": {
         "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lv_mv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
@@ -698,8 +703,8 @@
       "model": "grid",
       "group": "grid",
       "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
-      "model_version": "2.1.0",
-      "metadata_contract_version": "2.4.0",
+      "model_version": "2.7.0",
+      "metadata_contract_version": "2.9.0",
       "table": "grid_mv_hv_transformer_reach",
       "geoserver_layer": "grid_mv_hv_transformer_reach",
       "source": {
@@ -707,9 +712,9 @@
         "base_url": "http://grid-api:8080",
         "metadata_url": "/models/grid/metadata",
         "repository": "https://github.com/JortGroen/liander-grid-model",
-        "release_commit": "3fe554a05b6609bb33b2f99bd26ba4701a55d971",
-        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c",
-        "container_digest": "sha256:88d42d9ac15dbf6f20bbee0766ce0483abf360566f1e180b1018378b4053218c",
+        "release_commit": "9148f09372f843f0ee876121968be84aebfeae06",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
+        "container_digest": "sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
         "crs": "EPSG:4326",
         "production_selection": {
           "type": "bbox",
@@ -844,6 +849,10 @@
           "type": "string"
         },
         {
+          "name": "assignment_status",
+          "type": "string"
+        },
+        {
           "name": "datacompleetheid",
           "type": "integer"
         },
@@ -883,7 +892,8 @@
       "limitations": [
         "Only PC6 polygons supplied to the grid initializer are represented.",
         "Shares use intersecting LV cable length; PC6 areas without an intersection use an explicitly marked nearest-LV-bus fallback.",
-        "Assignments are model-estimated and are not legal or authoritative service territories."
+        "Assignments are model-estimated and are not legal or authoritative service territories.",
+        "A PC6 whose station Grid cannot determine is published with assignment_status=unavailable and no station, as a coverage gap."
       ],
       "services": {
         "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_mv_hv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
@@ -893,6 +903,280 @@
       "style": {
         "style_status": "dashboard_stable_dominant_transformer_colors",
         "default_visible": false
+      },
+      "actions": [
+        "inspect_feature",
+        "open_model_metadata"
+      ]
+    },
+    {
+      "id": "https://reformers01.ewi.tudelft.nl/id/layer/grid-model/capacity-limits",
+      "local_id": "layer:grid-model:capacity-limits",
+      "title": "Voedingsgebied and Transport Capacity by PC6",
+      "description": "EDSN capaciteitskaart per original PC6 polygon, passed through by the grid model: the RNB voedingsgebied (withdrawal and injection), existing and required transport capacity, queue and expected resolution year.",
+      "model": "grid",
+      "group": "grid",
+      "model_id": "https://reformers01.ewi.tudelft.nl/id/model/liander-grid-topology",
+      "model_version": "2.7.0",
+      "metadata_contract_version": "2.9.0",
+      "table": "grid_capacity_limits",
+      "geoserver_layer": "grid_capacity_limits",
+      "source": {
+        "type": "model_api",
+        "base_url": "http://grid-api:8080",
+        "metadata_url": "/models/grid/metadata",
+        "repository": "https://github.com/JortGroen/liander-grid-model",
+        "release_commit": "9148f09372f843f0ee876121968be84aebfeae06",
+        "container_image": "ghcr.io/jortgroen/liander-grid-model-api@sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
+        "container_digest": "sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729",
+        "crs": "EPSG:4326",
+        "production_selection": {
+          "type": "bbox",
+          "bbox": [
+            4.6,
+            52.5,
+            4.98,
+            52.88
+          ]
+        }
+      },
+      "feature_id_property": "component_id",
+      "feature_uri_property": "persistent_uri",
+      "geometry_type": "MultiPolygon",
+      "selectable_feature_type": "grid_pc6_capacity_limits",
+      "spatial_resolution": "cbs_pc6_original_polygon",
+      "temporal_resolution": "static_snapshot",
+      "attributes": [
+        {
+          "name": "pc6_id",
+          "type": "string"
+        },
+        {
+          "name": "feature_id",
+          "type": "string"
+        },
+        {
+          "name": "component_id",
+          "type": "string"
+        },
+        {
+          "name": "persistent_uri",
+          "type": "uri"
+        },
+        {
+          "name": "component_type",
+          "type": "string"
+        },
+        {
+          "name": "voltage_level",
+          "type": "string"
+        },
+        {
+          "name": "nominal_voltage",
+          "type": "number"
+        },
+        {
+          "name": "nominal_voltage_unit",
+          "type": "string"
+        },
+        {
+          "name": "model_id",
+          "type": "string"
+        },
+        {
+          "name": "model_version",
+          "type": "string"
+        },
+        {
+          "name": "method_version",
+          "type": "string"
+        },
+        {
+          "name": "grid_data_version",
+          "type": "string"
+        },
+        {
+          "name": "source_reference_period",
+          "type": "string"
+        },
+        {
+          "name": "source_modified_at",
+          "type": "datetime"
+        },
+        {
+          "name": "source_retrieved_at",
+          "type": "datetime"
+        },
+        {
+          "name": "source_last_updated",
+          "type": "datetime"
+        },
+        {
+          "name": "cache_generated_at",
+          "type": "datetime"
+        },
+        {
+          "name": "datacompleetheid",
+          "type": "integer"
+        },
+        {
+          "name": "datacompleetheid_label",
+          "type": "string"
+        },
+        {
+          "name": "datacompleetheid_rule_version",
+          "type": "string"
+        },
+        {
+          "name": "datacompleetheid_assessed_at",
+          "type": "datetime"
+        },
+        {
+          "name": "datacompleetheid_reason_codes",
+          "type": "array"
+        },
+        {
+          "name": "datacompleetheid_summary",
+          "type": "string"
+        },
+        {
+          "name": "run_id",
+          "type": "string"
+        },
+        {
+          "name": "output_id",
+          "type": "string"
+        },
+        {
+          "name": "model_run_at",
+          "type": "datetime"
+        },
+        {
+          "name": "output_generated_at",
+          "type": "datetime"
+        },
+        {
+          "name": "provider_id",
+          "type": "string"
+        },
+        {
+          "name": "source_id",
+          "type": "string"
+        },
+        {
+          "name": "grid_operator_type",
+          "type": "string"
+        },
+        {
+          "name": "assignment_status",
+          "type": "string"
+        },
+        {
+          "name": "rnb",
+          "type": "string"
+        },
+        {
+          "name": "congestion_url",
+          "type": "uri"
+        },
+        {
+          "name": "withdrawal_service_area_id",
+          "type": "string"
+        },
+        {
+          "name": "withdrawal_service_area_name",
+          "type": "string"
+        },
+        {
+          "name": "injection_service_area_id",
+          "type": "string"
+        },
+        {
+          "name": "injection_service_area_name",
+          "type": "string"
+        },
+        {
+          "name": "year_solved_withdrawal",
+          "type": "string"
+        },
+        {
+          "name": "year_solved_injection",
+          "type": "string"
+        },
+        {
+          "name": "tennet_year_solved_withdrawal",
+          "type": "string"
+        },
+        {
+          "name": "tennet_year_solved_injection",
+          "type": "string"
+        },
+        {
+          "name": "existing_transport_capacity_withdrawal_mw",
+          "type": "number"
+        },
+        {
+          "name": "existing_transport_capacity_injection_mw",
+          "type": "number"
+        },
+        {
+          "name": "required_transport_capacity_withdrawal_mw",
+          "type": "number"
+        },
+        {
+          "name": "required_transport_capacity_injection_mw",
+          "type": "number"
+        },
+        {
+          "name": "queue_withdrawal_mw",
+          "type": "number"
+        },
+        {
+          "name": "queue_injection_mw",
+          "type": "number"
+        },
+        {
+          "name": "unique_requests_withdrawal",
+          "type": "integer"
+        },
+        {
+          "name": "unique_requests_injection",
+          "type": "integer"
+        },
+        {
+          "name": "tennet_withdrawal_status_max",
+          "type": "number"
+        },
+        {
+          "name": "tennet_injection_status_max",
+          "type": "number"
+        }
+      ],
+      "data_quality": {
+        "kind": "qualitative_confidence",
+        "is_accuracy_percentage": false,
+        "method_version": "datacompleetheid-grid-capacity-v1",
+        "owner": "edsn-capaciteitskaart",
+        "scale": {
+          "0": "neither direction (withdrawal, injection) resolved to a published RNB voedingsgebied",
+          "2": "only one direction resolved to a published RNB voedingsgebied",
+          "3": "both directions resolved to a published RNB voedingsgebied with capaciteitskaart data"
+        },
+        "note": "Grid scores this layer per PC6 by how many directions resolve to a published voedingsgebied (scores 3, 2 or 0); it does not assess grid topology."
+      },
+      "limitations": [
+        "Values are EDSN's published capaciteitskaart for the reference period; the grid model passes them through and does not compute them.",
+        "A PC6 for which EDSN publishes no voedingsgebied is kept with assignment_status 'unavailable'.",
+        "The grid model checks EDSN for a new publication and keeps every version; the layer follows the active version."
+      ],
+      "services": {
+        "wfs": "/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_capacity_limits&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+        "wms": "/geoserver/rdp/wms",
+        "qualified_layer": "rdp:grid_capacity_limits"
+      },
+      "style": {
+        "style_status": "dashboard_voedingsgebied_colors",
+        "default_visible": true
       },
       "actions": [
         "inspect_feature",

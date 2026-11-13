@@ -15,6 +15,7 @@ let gridLineLayers = {};
 let gridTransformerLayers = {};
 let gridLvMvReachLayer;
 let gridMvHvReachLayer;
+let gridCapacityLayer;
 let gridHasFit = false;
 let windTurbinesLayer;
 let evChargersLayer;
@@ -31,6 +32,9 @@ const gridLayerSources = {
     grid_lv_mv_transformer_reach: 'loading',
     grid_mv_hv_transformer_reach: 'loading'
 };
+// The capaciteitskaart is optional and loaded on first use; it does not count
+// towards the grid status.
+let gridCapacityLoad = null;
 const gridCanvasRenderer = L.canvas({ padding: 0.5 });
 let windTurbinesLayerSource = 'loading';
 let evChargersLayerSource = 'loading';
@@ -294,6 +298,7 @@ function heatLayerStyle(layerId, feature) {
 
 function gridReachStyle(feature) {
     const properties = feature.properties || {};
+    if (properties.assignment_status === 'unavailable') return GRID_UNAVAILABLE_STYLE;
     const color = getReachColor(
         properties.dominant_transformer_id || properties.component_id
     );
@@ -301,6 +306,90 @@ function gridReachStyle(feature) {
         color, weight: 2, opacity: 0.8, fillColor: color, fillOpacity: 0.18,
         dashArray: properties.is_ambiguous ? '5 4' : null
     };
+}
+
+// A PC6 that Grid could not assign (or EDSN does not cover) is grey and dashed.
+const GRID_UNAVAILABLE_STYLE = {
+    color: '#6b7280', weight: 1.5, opacity: 0.8, fillColor: '#9ca3af',
+    fillOpacity: 0.25, dashArray: '4 4'
+};
+// Both directions published, but different voedingsgebieden: grey and dotted.
+const GRID_CAPACITY_SPLIT_STYLE = {
+    color: '#4b5563', weight: 1.5, opacity: 0.8, fillColor: '#d1d5db',
+    fillOpacity: 0.3, dashArray: '1 4'
+};
+
+// One colour per EDSN voedingsgebied.
+function gridCapacityStyle(feature) {
+    const properties = feature.properties || {};
+    if (properties.assignment_status !== 'available') return GRID_UNAVAILABLE_STYLE;
+    const id = voedingsgebiedId(properties);
+    if (id === null) return GRID_CAPACITY_SPLIT_STYLE;
+    const color = voedingsgebiedColor(id);
+    return { color, weight: 1, opacity: 0.7, fillColor: color, fillOpacity: 0.35 };
+}
+
+// Distinct colours, assigned in sorted order once the layer has loaded.
+const VOEDINGSGEBIED_PALETTE = [
+    '#16845b', '#9b5d18', '#7a4c9f', '#227ca3', '#a33f50',
+    '#587c2d', '#c2185b', '#00838f', '#5d4037', '#3949ab'
+];
+const voedingsgebiedColors = new Map();
+
+function assignVoedingsgebiedColors(collection) {
+    const ids = new Set();
+    collection.features.forEach((feature) => {
+        const properties = feature.properties || {};
+        const id = voedingsgebiedId(properties);
+        if (properties.assignment_status === 'available' && id !== null) ids.add(id);
+    });
+    [...ids].sort().forEach((id, index) => {
+        voedingsgebiedColors.set(id, VOEDINGSGEBIED_PALETTE[index % VOEDINGSGEBIED_PALETTE.length]);
+    });
+}
+
+function voedingsgebiedColor(id) {
+    return voedingsgebiedColors.get(id) || getReachColor(id);
+}
+
+// The PC6's voedingsgebied only when EDSN gives the same one for withdrawal and
+// injection. Grid owns the matching; the map does not pick one direction over the other.
+function voedingsgebiedId(properties) {
+    const withdrawal = properties.withdrawal_service_area_id;
+    const injection = properties.injection_service_area_id;
+    return withdrawal && withdrawal === injection ? withdrawal : null;
+}
+
+function ensureGridCapacityLayer() {
+    if (!gridCapacityLoad) {
+        gridCapacityLoad = (async () => {
+            try {
+                const result = await Pc6MapData.loadGridCapacityFeatureCollection(fetch);
+                assignVoedingsgebiedColors(result.data);
+                gridCapacityLayer = L.geoJSON(result.data, {
+                    renderer: gridCanvasRenderer,
+                    style: gridCapacityStyle,
+                    onEachFeature: (feature, layer) => {
+                        layer.on({
+                            mouseover: (event) => event.target.setStyle({ weight: 3, fillOpacity: 0.55 }),
+                            mouseout: (event) => event.target.setStyle(gridCapacityStyle(feature)),
+                            click: (event) => {
+                                updateGridCapacitySidePanel(feature.properties);
+                                map.fitBounds(event.target.getBounds(), { padding: [40, 40], maxZoom: 16 });
+                            }
+                        });
+                    }
+                });
+            } catch (error) {
+                console.error('Grid capaciteitskaart load failed:', error);
+                const control = document.getElementById('grid-capacity-areas');
+                control.checked = false;
+                control.disabled = true;
+                control.parentElement.title = 'Voedingsgebied layer is unavailable';
+            }
+        })();
+    }
+    return gridCapacityLoad;
 }
 
 // Data Loading
@@ -420,12 +509,14 @@ function allGridLayers() {
         ...Object.values(gridLineLayers),
         gridLvMvReachLayer,
         ...Object.values(gridTransformerLayers),
-        gridMvHvReachLayer
+        gridMvHvReachLayer,
+        gridCapacityLayer
     ].filter(Boolean);
 }
 
 function selectedGridLayers() {
     const layers = [];
+    if (gridControlChecked('grid-capacity-areas') && gridCapacityLayer) layers.push(gridCapacityLayer);
     if (gridControlChecked('grid-lv-mv-reach') && gridLvMvReachLayer) layers.push(gridLvMvReachLayer);
     if (gridControlChecked('grid-mv-hv-reach') && gridMvHvReachLayer) layers.push(gridMvHvReachLayer);
     if (gridControlChecked('grid-lv-lines') && gridLineLayers.lv) layers.push(gridLineLayers.lv);
@@ -832,6 +923,7 @@ async function loadMap() {
         control.parentElement.title = 'MV/HV transformer reach layer is unavailable';
     }
 
+
     try {
         const result = await Pc6MapData.loadWindTurbinesFeatureCollection(fetch);
         windTurbinesLayer = L.geoJSON(result.data, {
@@ -929,6 +1021,17 @@ function updateLegend() {
             entries.filter(([id]) => gridControlChecked(id)).forEach(([, color, label]) => {
                 div.innerHTML += `<i style="background:${color}"></i> ${label}<br>`;
             });
+            if (gridControlChecked('grid-mv-hv-reach') || gridControlChecked('grid-lv-mv-reach')) {
+                div.innerHTML += '<i style="background:#9ca3af;opacity:0.5"></i> Reach: no station determined<br>';
+            }
+            if (gridControlChecked('grid-capacity-areas')) {
+                div.innerHTML += '<div class="legend-title">VOEDINGSGEBIED (CAPACITEITSKAART)</div>';
+                [...voedingsgebiedColors.keys()].forEach((id) => {
+                    div.innerHTML += `<i style="background:${voedingsgebiedColor(id)};opacity:0.6"></i> ${escapeHtml(id)}<br>`;
+                });
+                div.innerHTML += '<i style="background:#d1d5db"></i> Afname en teruglevering verschillen<br>';
+                div.innerHTML += '<i style="background:#9ca3af;opacity:0.5"></i> Geen voedingsgebied gepubliceerd<br>';
+            }
             if (selectedGridLayers().length === 0) {
                 div.innerHTML += 'No grid components selected';
             }
@@ -1720,6 +1823,20 @@ function formatReachShare(value) {
 }
 
 function updateGridReachSidePanel(prop, level) {
+    if (prop.assignment_status === 'unavailable') {
+        selectScenarioTargetByPc6(prop.pc6_id);
+        document.getElementById('panel-content').innerHTML = `
+            <div class="pc6-header">${escapeHtml(prop.pc6_id)}</div>
+            <div class="feature-identifier">${escapeHtml(level)} transformer reach</div>
+            <div class="compact-value">Grid could not determine the ${escapeHtml(level)} station for this PC6.</div>
+            ${qualityMarkup(prop)}
+            <div class="pv-provenance">
+                Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+                <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+            </div>
+        `;
+        return;
+    }
     const shares = parseReachShares(prop.ranked_shares ?? prop.ranked_shares_json);
     selectScenarioTargetByPc6(prop.pc6_id);
     const dominantName = prop.dominant_transformer_name || prop.dominant_transformer_id;
@@ -1781,6 +1898,64 @@ function updateGridReachSidePanel(prop, level) {
         <div class="pv-provenance">
             <strong>PC6-BASED MODEL ASSIGNMENT</strong><br>
             ${escapeHtml(level)} shares are direct fractions of the original PC6 polygon.<br>
+            Grid data: ${escapeHtml(prop.grid_data_version)}<br>
+            <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
+        </div>
+    `;
+}
+
+function formatMw(value) {
+    return value == null
+        ? 'Niet gepubliceerd'
+        : `${Number(value).toLocaleString('nl-NL', { maximumFractionDigits: 1 })} MW`;
+}
+
+function capacityDirectionMarkup(prop, direction, label) {
+    return `
+        <div class="data-column">
+            <div class="data-group">
+                <div class="data-label">${label}: voedingsgebied</div>
+                <div class="data-value compact-value">${escapeHtml(prop[`${direction}_service_area_name`] || prop[`${direction}_service_area_id`] || 'Geen')}</div>
+            </div>
+            <div class="data-group">
+                <div class="data-label">Bestaande / benodigde transportcapaciteit</div>
+                <div class="data-value">${escapeHtml(formatMw(prop[`existing_transport_capacity_${direction}_mw`]))} / ${escapeHtml(formatMw(prop[`required_transport_capacity_${direction}_mw`]))}</div>
+            </div>
+            <div class="data-group">
+                <div class="data-label">Wachtrij</div>
+                <div class="data-value">${escapeHtml(formatMw(prop[`queue_${direction}_mw`]))} (${escapeHtml(prop[`unique_requests_${direction}`] ?? '?')} aanvragen)</div>
+            </div>
+            <div class="data-group">
+                <div class="data-label">Verwacht opgelost (RNB / TenneT)</div>
+                <div class="data-value">${escapeHtml(prop[`year_solved_${direction}`] || '?')} / ${escapeHtml(prop[`tennet_year_solved_${direction}`] || '?')}</div>
+            </div>
+        </div>
+    `;
+}
+
+function updateGridCapacitySidePanel(prop) {
+    selectScenarioTargetByPc6(prop.pc6_id);
+    const available = prop.assignment_status === 'available';
+    const split = available && voedingsgebiedId(prop) === null;
+    const congestionLink = prop.congestion_url && /^https:\/\//.test(prop.congestion_url)
+        ? `<a href="${escapeHtml(prop.congestion_url)}" target="_blank" rel="noopener">Congestie-informatie ${escapeHtml(prop.rnb || '')}</a><br>`
+        : '';
+    document.getElementById('panel-content').innerHTML = `
+        <div class="pc6-header">${escapeHtml(prop.pc6_id)}</div>
+        <div class="feature-identifier">Voedingsgebied (capaciteitskaart)</div>
+        ${split ? '<div class="compact-value">Afname en teruglevering vallen onder verschillende voedingsgebieden, of één richting ontbreekt.</div>' : ''}
+        ${available ? `
+        <div class="data-grid grid-component-grid">
+            ${capacityDirectionMarkup(prop, 'withdrawal', 'Afname')}
+            ${capacityDirectionMarkup(prop, 'injection', 'Teruglevering')}
+        </div>` : `
+        <div class="compact-value">EDSN publiceert voor deze postcode geen voedingsgebied.</div>`}
+        ${qualityMarkup(prop)}
+        <div class="pv-provenance">
+            <strong>EDSN CAPACITEITSKAART</strong><br>
+            Netbeheerder: ${escapeHtml(prop.rnb || 'onbekend')}<br>
+            Referentieperiode: ${escapeHtml(prop.source_reference_period || '?')}<br>
+            ${congestionLink}
             Grid data: ${escapeHtml(prop.grid_data_version)}<br>
             <a href="/models/grid/metadata" target="_blank" rel="noopener">Model metadata</a>
         </div>
@@ -1895,7 +2070,10 @@ document.querySelectorAll('input[name="layer"]').forEach(radio => {
 });
 
 document.querySelectorAll('#grid-visibility input[type="checkbox"]').forEach((checkbox) => {
-    checkbox.addEventListener('change', () => {
+    checkbox.addEventListener('change', async () => {
+        if (checkbox.id === 'grid-capacity-areas' && checkbox.checked) {
+            await ensureGridCapacityLayer();
+        }
         applyGridVisibility();
         updateLegend();
     });

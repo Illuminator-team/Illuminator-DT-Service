@@ -393,6 +393,11 @@ input[type="range"].side-slider {
     background: rgba(22, 132, 91, 0.2);
 }
 
+.area-swatch-capacity {
+    border: 1px solid #227ca3;
+    background: linear-gradient(90deg, rgba(22, 132, 91, 0.45), rgba(155, 93, 24, 0.45), rgba(34, 124, 163, 0.45));
+}
+
 .heat-neighbourhood-swatch {
     border: 1px solid #7f2704;
     background: linear-gradient(90deg, #fff7bc, #fd8d3c, #800026);

@@ -11,6 +11,7 @@
     const GRID_TRANSFORMERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_transformers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_LV_MV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_lv_mv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const GRID_MV_HV_REACH_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_mv_hv_transformer_reach&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
+    const GRID_CAPACITY_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=grid_capacity_limits&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const EV_CHARGERS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_ev_chargers&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const CONSUMPTION_AREAS_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=consumption_electricity_areas&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
     const WIND_TURBINES_WFS_URL = '/geoserver/rdp/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=public_wind_turbines&outputFormat=application%2Fjson&srsName=EPSG%3A4326';
@@ -104,6 +105,11 @@
         return { data, source: 'geoserver_wfs', fallbackReason: null };
     }
 
+    async function loadGridCapacityFeatureCollection(fetchImpl) {
+        const data = await fetchCollection(fetchImpl, GRID_CAPACITY_WFS_URL, 'Grid capaciteitskaart GeoServer WFS');
+        return { data, source: 'geoserver_wfs', fallbackReason: null };
+    }
+
     async function loadEvChargersFeatureCollection(fetchImpl) {
         const data = await fetchCollection(
             fetchImpl,
@@ -145,6 +151,7 @@
         FALLBACK_URL,
         CONSUMPTION_AREAS_WFS_URL,
         EV_CHARGERS_WFS_URL,
+        GRID_CAPACITY_WFS_URL,
         GRID_LINES_WFS_URL,
         GRID_LV_MV_REACH_WFS_URL,
         GRID_MV_HV_REACH_WFS_URL,
@@ -155,6 +162,7 @@
         WIND_TURBINES_WFS_URL,
         WFS_URL,
         addFallbackQuality,
+        loadGridCapacityFeatureCollection,
         loadGridLinesFeatureCollection,
         loadGridLvMvReachFeatureCollection,
         loadGridMvHvReachFeatureCollection,

@@ -16,7 +16,7 @@ from consumption import (
 from ev import EvArtifact, fetch_ev_artifact, get_ev_readiness_signature
 from ev_postgis import sync_ev_layer
 from grid import GridArtifact, fetch_grid_artifact, get_grid_readiness_signature
-from grid_postgis import sync_grid_layer
+from grid_postgis import clear_grid_layer, sync_grid_layer
 from model_postgis import sync_model_layer
 from pc6 import Pc6Record, get_layer_config, load_manifest, load_pc6_records
 from postgis_sql import values_template
@@ -81,11 +81,13 @@ GRID_LV_MV_REACH_CONFIG = get_layer_config(
 GRID_MV_HV_REACH_CONFIG = get_layer_config(
     MANIFEST, "layer:grid-model:mv-hv-transformer-reach"
 )
+GRID_CAPACITY_CONFIG = get_layer_config(MANIFEST, "layer:grid-model:capacity-limits")
 GRID_CONFIGS = {
     "grid_lines": GRID_LINES_CONFIG,
     "grid_transformers": GRID_TRANSFORMERS_CONFIG,
     "grid_lv_mv_transformer_reach": GRID_LV_MV_REACH_CONFIG,
     "grid_mv_hv_transformer_reach": GRID_MV_HV_REACH_CONFIG,
+    "grid_capacity_limits": GRID_CAPACITY_CONFIG,
 }
 WIND_CONFIG = get_layer_config(MANIFEST, "layer:wind-turbine-map:public-turbines")
 HEAT_CONFIGS = {
@@ -115,6 +117,7 @@ GRID_EXPECTED_CONTAINER_DIGEST = os.getenv(
     GRID_LINES_CONFIG["source"]["container_digest"],
 )
 GRID_EXPECTED_DATA_MODE = os.getenv("GRID_EXPECTED_DATA_MODE", "real_source")
+GRID_REQUIRE_CAPACITY = os.getenv("GRID_REQUIRE_CAPACITY", "true").strip().lower() not in {"0", "false", "no"}
 GRID_EXPORT_BBOX = bbox_env(
     "GRID_EXPORT_BBOX",
     GRID_LINES_CONFIG["source"]["production_selection"]["bbox"],
@@ -724,8 +727,18 @@ def publish_grid() -> GridArtifact:
         expected_model_version=GRID_LINES_CONFIG["model_version"],
         expected_contract_version=GRID_LINES_CONFIG["metadata_contract_version"],
         expected_data_mode=GRID_EXPECTED_DATA_MODE,
+        require_capacity=GRID_REQUIRE_CAPACITY,
     )
     for layer_id, config in GRID_CONFIGS.items():
+        if layer_id not in artifact.records_by_layer:
+            # Do not keep serving rows from an earlier cache as if they were current.
+            removed = clear_grid_layer(DB_CONN, table=GRID_TABLES[layer_id])
+            LOGGER.warning(
+                "%s is not offered by this grid cache; not published (%s stale rows removed)",
+                layer_id,
+                removed,
+            )
+            continue
         stats = sync_grid_layer(
             DB_CONN,
             table=GRID_TABLES[layer_id],
@@ -962,8 +975,18 @@ def run() -> None:
         publish_pc6()
     if "pv" in publish_models:
         publish_pv()
+    grid_published = False
     if "grid" in publish_models:
-        publish_grid()
+        # A Grid failure must not stop the models published after it. The monitor
+        # below retries on its next tick (the signature is only kept on success).
+        try:
+            publish_grid()
+            grid_published = True
+        except (requests.RequestException, RuntimeError, ValueError, psycopg2.Error):
+            LOGGER.error(
+                "Grid layers were not published; continuing with the other models",
+                exc_info=True,
+            )
     if "wind" in publish_models:
         publish_wind()
     if "heat" in publish_models:
@@ -990,7 +1013,10 @@ def run() -> None:
 
     last_pc6_signature = source_signature(PC6_SOURCE_PATH)
     last_pv_signature = get_pv_readiness_signature(PV_API_URL)
-    last_grid_signature = get_grid_readiness_signature(GRID_API_URL)
+    # None after a failed startup publication, so the monitor retries next tick.
+    last_grid_signature = (
+        get_grid_readiness_signature(GRID_API_URL) if grid_published else None
+    )
     last_wind_signature = get_wind_readiness_signature(
         WIND_API_URL, expected_data_mode=WIND_EXPECTED_DATA_MODE
     )
@@ -1034,7 +1060,7 @@ def run() -> None:
             if current_grid_signature != last_grid_signature:
                 publish_grid()
                 last_grid_signature = current_grid_signature
-        except (RuntimeError, ValueError):
+        except (requests.RequestException, RuntimeError, ValueError, psycopg2.Error):
             LOGGER.warning(
                 "Could not check or refresh the grid layers",
                 exc_info=True,
