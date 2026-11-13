@@ -69,7 +69,7 @@ services:
       HEAT_EXPECTED_DATA_MODE: fixture
 
   orchestration-grid-init:
-    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0
     user: "10001:10001"
     network_mode: none
     read_only: true
@@ -91,7 +91,7 @@ services:
       - --allow-fixture
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+      GRID_API_CONTAINER_DIGEST: sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0
     volumes:
       - orchestration-grid-model-data:/data
       - grid-crosswalk-data:/crosswalk:ro
@@ -102,7 +102,7 @@ services:
     restart: "no"
 
   orchestration-grid-api:
-    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+    image: ghcr.io/jortgroen/liander-grid-model-api@sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0
     init: true
     user: "10001:10001"
     read_only: true
@@ -114,7 +114,7 @@ services:
       - /tmp:size=64m,mode=1777
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+      GRID_API_CONTAINER_DIGEST: sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0
     volumes:
       - orchestration-grid-model-data:/data
     depends_on:

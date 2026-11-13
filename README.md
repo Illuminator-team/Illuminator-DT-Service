@@ -188,7 +188,7 @@ python tests/check_full_grid.py --base-url http://127.0.0.1
 ```
 
 The check requires real-source mode, all three voltage levels, the eight named
-MV/HV roots of the 9148f09 build, northern grid geometry, and consistent LV/MV
+MV/HV roots of the 18 Aug snapshot build (grid 9148f09 and later), northern grid geometry, and consistent LV/MV
 and MV/HV PC6 shares for assigned PC6 (unavailable MV/HV rows are coverage gaps).
 
 The independent `rdp:public_wind_turbines` point layer exposes published nameplate

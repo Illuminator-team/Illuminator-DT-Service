@@ -33,6 +33,14 @@ PV_PROFILE_START = "2024-01-01T00:00:00Z"
 PV_PROFILE_END = "2025-01-01T00:00:00Z"
 LIMITATIONS = [
     {
+        "code": "pv_partial_mv_hv_coverage_not_renormalized",
+        "description": (
+            "For a PV buurt whose upstream hierarchy Grid can only partly resolve, the "
+            "MV/HV stage uses Grid's partial rows: absolute shares of the connected part, "
+            "not renormalized. The unresolved part is left out of the MV/HV totals."
+        ),
+    },
+    {
         "code": "pv_weather_calendar_projected_to_2023",
         "description": (
             "PV uses its native 2024 reference-weather sequence with 29 February removed; "
@@ -520,6 +528,9 @@ def _pv_assignments(grid: JsonClient, pv_inputs: dict[str, Any]) -> dict[str, di
         json={
             "operation": "assign_feature_hierarchy",
             "hierarchy_policy": "nearest_electrical_root_v1",
+            # A tiny unresolved LV/MV share must not drop the whole buurt: Grid also
+            # returns the connected part as `partial` MV/HV rows (liander-grid-model#44).
+            "partial_upstream_coverage": "report_assigned_part",
             "selection": {"type": "bbox", "bbox": bbox},
             "source": {
                 "source_model_id": pv_inputs["model_id"],
@@ -553,12 +564,13 @@ def _pv_assignments(grid: JsonClient, pv_inputs: dict[str, Any]) -> dict[str, di
         properties = feature["properties"]
         row_type = properties.get("row_type")
         source_id = properties.get("source_feature_id")
-        if source_id not in geometries or properties.get("assignment_status") != "assigned":
+        status = properties.get("assignment_status")
+        if source_id not in geometries:
             continue
-        if row_type == "source_to_lv_mv_assignment":
+        if row_type == "source_to_lv_mv_assignment" and status == "assigned":
             stage_id = "lv_mv"
             transformer_id = properties["lv_mv_transformer_id"]
-        elif row_type == "source_to_mv_hv_derived":
+        elif row_type == "source_to_mv_hv_derived" and status in {"assigned", "partial"}:
             stage_id = "mv_hv"
             transformer_id = properties["mv_hv_endpoint_id"]
         else:
