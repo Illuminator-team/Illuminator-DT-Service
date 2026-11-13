@@ -31,6 +31,10 @@ GRID_LAYERS = (
 PV_SCENARIO = "koersvaste_middenweg"
 PV_PROFILE_START = "2024-01-01T00:00:00Z"
 PV_PROFILE_END = "2025-01-01T00:00:00Z"
+# 2: PV buurten use Grid's partial MV/HV rows (liander-grid-model#44, #67).
+BASELINE_METHOD_VERSION = 2
+PV_PARTIAL_UPSTREAM_COVERAGE = "report_assigned_part"
+
 LIMITATIONS = [
     {
         "code": "pv_partial_mv_hv_coverage_not_renormalized",
@@ -152,6 +156,12 @@ def source_identity(
             "capacity_output_id": pv_capacity_output.get("output_id"),
             "capacity_artifact_sha256": pv_capacity_output.get("artifact_sha256")
             or pv_capacity_output.get("sha256"),
+        },
+        # How this code builds the baseline. Raise BASELINE_METHOD_VERSION when that
+        # changes, so --reuse-ready-cache rebuilds instead of keeping an older result.
+        "method": {
+            "baseline_method_version": BASELINE_METHOD_VERSION,
+            "pv_partial_upstream_coverage": PV_PARTIAL_UPSTREAM_COVERAGE,
         },
     }
 
@@ -530,7 +540,7 @@ def _pv_assignments(grid: JsonClient, pv_inputs: dict[str, Any]) -> dict[str, di
             "hierarchy_policy": "nearest_electrical_root_v1",
             # A tiny unresolved LV/MV share must not drop the whole buurt: Grid also
             # returns the connected part as `partial` MV/HV rows (liander-grid-model#44).
-            "partial_upstream_coverage": "report_assigned_part",
+            "partial_upstream_coverage": PV_PARTIAL_UPSTREAM_COVERAGE,
             "selection": {"type": "bbox", "bbox": bbox},
             "source": {
                 "source_model_id": pv_inputs["model_id"],

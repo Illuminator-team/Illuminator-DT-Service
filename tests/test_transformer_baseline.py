@@ -173,6 +173,11 @@ def test_source_identity_tracks_the_latest_pv_capacity_artifact(tmp_path):
 
     assert identity["pv"]["capacity_output_id"] == "capacity-v2"
     assert identity["pv"]["capacity_artifact_sha256"] == "artifact-v2"
+    # A change in how the baseline is built must invalidate a ready cache.
+    assert identity["method"] == {
+        "baseline_method_version": 2,
+        "pv_partial_upstream_coverage": "report_assigned_part",
+    }
 
 
 def test_missing_latest_pv_output_uses_the_standard_capacity_run():

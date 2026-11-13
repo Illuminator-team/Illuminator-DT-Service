@@ -568,6 +568,9 @@ services:
     restart: unless-stopped
 
   transformer-profile-init:
+      # Same image as policy-tool-backend, so a rebuild of the backend also updates
+      # the baseline code (a separately named image went stale for weeks).
+      image: illuminator-dev-policy-tool-backend
       build: ./policy-tool-backend
       command:
         - python
