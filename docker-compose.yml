@@ -808,6 +808,20 @@ services:
         -Duser.timezone=GMT -Dfile.encoding=UTF8
         -DGEOSERVER_DISABLE_STATIC_WEB_FILES=true
         -DGEOSERVER_FEATUREINFO_HTML_SCRIPT=SELF
+    # A fresh checkout has geo/security without its untracked secrets (keystore, master
+    # password). The official image only bootstraps security when the directory is absent,
+    # so such an incomplete copy is moved aside (not deleted). A deployed data dir has the
+    # secrets and is left alone.
+    entrypoint:
+      - bash
+      - -c
+      - |
+        d=/opt/geoserver_data/security
+        if [ -d "$$d" ] && [ ! -f "$$d/masterpw/default/passwd" ] && [ ! -f "$$d/geoserver.jceks" ]; then
+          mv "$$d" "/opt/geoserver_data/security.incomplete-$$(date +%s)"
+          echo "geo: moved an incomplete security directory aside; GeoServer creates a new one"
+        fi
+        exec bash /opt/startup.sh
     volumes:
       - ./geo:/opt/geoserver_data  # persistent config (data lives in PostGIS)
     restart: always
