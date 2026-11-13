@@ -42,7 +42,7 @@ PV_PROFILE_ID = "pv_production_BU03610302_koersvaste_middenweg_2035"
 PV_PROFILE_VERSION = "1.1.0+0123456789abcdef"
 CONGESTION_IMAGE = (
     "ghcr.io/jortgroen/congestion-backend@sha256:"
-    "575dac643e2527a6b6e19346b0ea9e4d1f1d00ddbbe0257d7b21dd71945946de"
+    "a09ac9cdf616244fde53e74e023b73df110329a972acea96dcda1c0eabc18140"
 )
 GRID_CROSSWALK_IMAGE = (
     "ghcr.io/jortgroen/liander-grid-crosswalk@sha256:"
