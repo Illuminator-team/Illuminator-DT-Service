@@ -22,8 +22,8 @@ from postgis_sql import (  # noqa: E402
 )
 
 
-RELEASE_COMMIT = "9148f09372f843f0ee876121968be84aebfeae06"
-CONTAINER_DIGEST = "sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729"
+RELEASE_COMMIT = "a08f5eade2a94ee0b82e6682632c704fb4740ac4"
+CONTAINER_DIGEST = "sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0"
 IMAGE_IDENTITY = f"ghcr.io/jortgroen/liander-grid-model-api@{CONTAINER_DIGEST}"
 GRID_CROSSWALK_IMAGE = (
     "ghcr.io/jortgroen/liander-grid-crosswalk@sha256:"

@@ -2,7 +2,7 @@ x-pv-image: &pv-image
   image: ghcr.io/jortgroen/pv-map-api@sha256:d35b73fc88dcdb959f8084ede6348e148039ab530282ac1e779a58f6129cf428
 
 x-grid-image: &grid-image
-  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+  image: ghcr.io/jortgroen/liander-grid-model-api@sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0
 
 x-grid-crosswalk-image: &grid-crosswalk-image
   image: ghcr.io/jortgroen/liander-grid-crosswalk@sha256:f17e0a27f665a8885aa1f527359c22889ce5d2e3ead14dc4eb5d0e582154774e
@@ -162,8 +162,8 @@ services:
       - grid-crosswalk-data:/crosswalk
     restart: "no"
 
-  # Grid and congestion move (and roll back) together: congestion 475ca82 accepts
-  # grid contract 2.9.0 only at 9148f09.
+  # Grid and congestion move (and roll back) together: congestion accepts grid
+  # contract 2.9.0 only at the grid commits it names (congestion-backend#22 for a08f5ea).
   #
   # Since 2026-11-08 Liander's public service lacks the station attributes Grid needs
   # (liander-grid-model#41), so a live --fetch-region would build a rootless grid.
@@ -199,7 +199,7 @@ services:
         exec python -m grid_api initialize "$$@"
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+      GRID_API_CONTAINER_DIGEST: sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0
     volumes:
       - grid-model-data:/data
       - grid-crosswalk-data:/crosswalk:ro
@@ -245,7 +245,7 @@ services:
       - "2026"
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+      GRID_API_CONTAINER_DIGEST: sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0
     volumes:
       - grid-model-data:/data
       - grid-crosswalk-data:/crosswalk:ro
@@ -264,7 +264,7 @@ services:
       - /tmp:size=64m,mode=1777
     environment:
       GRID_API_DATA_DIR: /data
-      GRID_API_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+      GRID_API_CONTAINER_DIGEST: sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0
     volumes:
       - grid-model-data:/data
     depends_on:
@@ -919,8 +919,8 @@ services:
       PV_EXPECTED_RELEASE_COMMIT: 0d40dbfa6d30b96b01f1d4e633c13b42c654c1d0
       PV_EXPECTED_CONTAINER_IMAGE: ghcr.io/jortgroen/pv-map-api@sha256:d35b73fc88dcdb959f8084ede6348e148039ab530282ac1e779a58f6129cf428
       GRID_API_URL: http://grid-api:8080
-      GRID_EXPECTED_RELEASE_COMMIT: 9148f09372f843f0ee876121968be84aebfeae06
-      GRID_EXPECTED_CONTAINER_DIGEST: sha256:1561927f8ba2705996a34afd0ede498b97078ec604a0dd962db5fb5865849729
+      GRID_EXPECTED_RELEASE_COMMIT: a08f5eade2a94ee0b82e6682632c704fb4740ac4
+      GRID_EXPECTED_CONTAINER_DIGEST: sha256:7cab44fc8de4a764339490cb261af12dc2098c810dc6dc2a504786cc9dca98e0
       GRID_EXPECTED_DATA_MODE: real_source
       # Publish grid_capacity_limits whenever Grid offers it; without a stored
       # capaciteitskaart the other grid layers are still published (with a warning).

@@ -5,7 +5,7 @@ import urllib.parse
 import urllib.request
 
 
-# Grid 9148f09 (model 2.7) also lists grid_capacity_limits, grid_pc6_voedingsgebied
+# Grid 2.7 (9148f09 and later) also lists grid_capacity_limits, grid_pc6_voedingsgebied
 # and grid_mv_attachment_points; these four must be present and filled.
 GRID_LAYERS = {
     "grid_lv_mv_transformer_reach",
@@ -13,7 +13,7 @@ GRID_LAYERS = {
     "grid_transformers",
     "grid_mv_hv_transformer_reach",
 }
-# The eight MV/HV roots of the 9148f09 build from the 18 Aug 2026 snapshot.
+# The eight MV/HV roots of the 2.7 build from the 18 Aug 2026 snapshot.
 EXPECTED_STATIONS = {
     "OS ALKMAAR",
     "OS DE WEEL",
