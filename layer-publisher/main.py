@@ -335,6 +335,12 @@ def datastore_xml() -> str:
         "passwd": GEOSERVER_DB_PASSWORD,
         "dbtype": "postgis",
         "Expose primary keys": "true",
+        # Check a pooled connection before each use and evict idle ones, so map requests after a
+        # database restart get a fresh connection instead of failing on one that died with it.
+        "validate connections": "true",
+        "Test while idle": "true",
+        "Evictor run periodicity": "300",
+        "Max connection idle time": "300",
         "schema": "public",
         "namespace": f"https://reformers01.ewi.tudelft.nl/id/workspace/{WORKSPACE}",
     }
