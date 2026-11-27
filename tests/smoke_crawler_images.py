@@ -34,7 +34,7 @@ PASSWORD = "smoke-" + uuid.uuid4().hex[:12]
 RUN = uuid.uuid4().hex[:8]
 REDIS_ERROR = re.compile(r"^\(?(error\)?|ERR|WRONGTYPE|NOAUTH|WRONGPASS|NOPERM|LOADING|BUSY)\b", re.I)
 BAD_LOG = ("ModuleNotFoundError", "ImportError", "NOAUTH", "WRONGPASS", "ConnectionRefused", "Temporary failure in name resolution")
-EXPECTED_VERSIONS = "{'certifi':'2026.10.23','urllib3':'2.8.0','filelock':'4.2.9','msgpack':'1.2.4'}"
+EXPECTED_VERSIONS = "{'certifi':'2026.10.23','urllib3':'2.8.0','filelock':'4.2.9','msgpack':'1.2.4','soupsieve':'4.0'}"
 
 FAKE_API = (
     "import json,http.server\n"
@@ -100,7 +100,7 @@ def run(name, spec, net, redis_name, workdir):
     if r.returncode != 0:
         raise SystemExit(f"{name}: package manager still importable in the system interpreter")
     v = docker("run", "--rm", "--network", "none", "--entrypoint", "/app/.venv/bin/python", tag, "-c",
-               "import importlib.metadata as m; v={p:m.version(p) for p in ('certifi','urllib3','filelock','msgpack')};"
+               "import importlib.metadata as m; v={p:m.version(p) for p in ('certifi','urllib3','filelock','msgpack','soupsieve')};"
                f"print(v); assert v=={EXPECTED_VERSIONS}", check=False)
     if v.returncode != 0:
         raise SystemExit(f"{name}: unexpected dependency versions: {v.stdout[-300:]}")
