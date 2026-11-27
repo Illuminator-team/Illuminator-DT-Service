@@ -111,6 +111,18 @@ class PublisherWiringTest(unittest.TestCase):
         self.assertNotIn('DB_CONN["user"]', body)
         self.assertNotIn('DB_CONN["password"]', body)
 
+    def test_datastore_checks_pooled_connections(self):
+        # Without these parameters GeoServer reuses pooled connections that died with a database
+        # restart, and the first map requests afterwards fail.
+        body = self.main.split("def datastore_xml", 1)[1].split("def ", 1)[0]
+        for parameter in (
+            '"validate connections": "true"',
+            '"Test while idle": "true"',
+            '"Evictor run periodicity": "300"',
+            '"Max connection idle time": "300"',
+        ):
+            self.assertIn(parameter, body)
+
     def test_reader_must_differ_from_the_publisher_user(self):
         self.assertIn('if GEOSERVER_DB_USER == DB_CONN["user"]', self.main)
 
