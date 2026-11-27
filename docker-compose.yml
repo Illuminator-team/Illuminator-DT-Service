@@ -657,10 +657,13 @@ services:
   ## Use TimescaleDB for permanent storage of time series data.
   ## ----------------------------------------------------------
   timescale:
-    # PostgreSQL 17 with TimescaleDB 2.31 and PostGIS 3.6 (digest-pinned; the pg14-latest tag has not
-    # been rebuilt since April 2023). Data lives in the timescale-pg17-data volume; the old
-    # timescale-data volume is kept untouched for rollback.
-    image: &timescale-image timescale/timescaledb-ha@sha256:3f0b3f6bdf4912878444a36e6113a18346309583c4d1a61d81a0c511342a1afd
+    # PostgreSQL 17 with TimescaleDB 2.31 and PostGIS 3.6. Data lives in the timescale-pg17-data
+    # volume; the old timescale-data volume is kept untouched for rollback.
+    # TEMPORARY: built from images/timescaledb, the digest-pinned official image with current Ubuntu
+    # package updates and without unused tools (see that Dockerfile for when to switch back).
+    # The name keeps "timescaledb-ha" for scripts/preflight-timescale.sh.
+    image: &timescale-image ${COMPOSE_PROJECT_NAME}-timescaledb-ha
+    build: ./images/timescaledb
     environment:
       POSTGRES_USER: ${POSTGRES_ADMIN_USER}
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
@@ -859,7 +862,10 @@ services:
   geo:
     # Official GeoServer image (same 3.0.2 release as the former kartoza image, current OS packages).
     # PostGIS stores and SLD styles are part of the core, so no extensions are installed.
-    image: docker.osgeo.org/geoserver@sha256:5a372d4988116e8f62c71ae5ff6eb8d433967697670fb1dec15379bf476721fe # 3.0.2
+    # TEMPORARY: built from images/geoserver, the official 3.0.2 image plus current Ubuntu package
+    # updates; back to docker.osgeo.org/geoserver@<digest> once GeoServer 3.0.3 is released.
+    image: ${COMPOSE_PROJECT_NAME}-geoserver
+    build: ./images/geoserver
     environment:
       - GEOSERVER_ADMIN_USER=${GEOSERVER_ADMIN_USER:?set GEOSERVER_ADMIN_USER in .env}
       - GEOSERVER_ADMIN_PASSWORD=${GEOSERVER_ADMIN_PASSWORD:?set GEOSERVER_ADMIN_PASSWORD in .env}
