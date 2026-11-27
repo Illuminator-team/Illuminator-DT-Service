@@ -5,7 +5,7 @@ COPY ./src ./frequency_data_service
 # Security updates on top of the base image: OS packages, the crawler's vulnerable
 # Python dependencies (installed into its virtualenv by the base image), and the
 # system pip, which is not needed at runtime and whose bundled SBOM lists old copies.
-# The four overrides are the exact versions tested on the dev server; urllib3 stays
+# The five overrides are the exact versions tested on the dev server; urllib3 stays
 # below 3 and msgpack below 2 (requests and CacheControl in the base require that), and
 # `pip check` must pass on the resulting venv before pip is removed.
 RUN apt-get update \
@@ -13,6 +13,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && pip --python /app/.venv/bin/python install --no-cache-dir \
         "certifi==2026.10.23" "urllib3==2.8.0" "filelock==4.2.9" "msgpack==1.2.4" \
+        "soupsieve==4.0" \
     && pip --python /app/.venv/bin/python check \
     && /usr/local/bin/python3 -m pip uninstall -y pip setuptools wheel \
     && rm -rf /root/.cache \
